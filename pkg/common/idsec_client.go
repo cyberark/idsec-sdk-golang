@@ -1,0 +1,910 @@
+// Package common provides shared utilities and types for the IDSEC SDK.
+//
+// This package implements a comprehensive HTTP client with features like:
+// - Authentication support (token-based, basic auth)
+// - Cookie management with persistent storage
+// - Automatic token refresh capabilities
+// - Request/response logging
+// - TLS configuration options
+//
+// The IdsecClient is the primary interface for making HTTP requests to Idsec services,
+// providing a consistent and feature-rich HTTP client implementation.
+package common
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"runtime"
+	"strings"
+	"time"
+
+	cookiejar "github.com/juju/persistent-cookiejar"
+	"github.com/cyberark/idsec-sdk-golang/pkg/config"
+	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry"
+	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/collectors"
+)
+
+// Number of retry attempts for token refresh operations.
+const (
+	refreshRetryCount = 3
+)
+
+// cookieJSON represents the JSON serializable format of an HTTP cookie.
+//
+// This structure is used for marshaling and unmarshaling HTTP cookies
+// to and from JSON format, enabling persistent cookie storage and
+// session management across client instances.
+type cookieJSON struct {
+	Name        string        `json:"name"`
+	Value       string        `json:"value"`
+	Quoted      bool          `json:"quoted"`
+	Path        string        `json:"path,omitempty"`
+	Domain      string        `json:"domain,omitempty"`
+	Expires     time.Time     `json:"expires,omitempty"`
+	RawExpires  string        `json:"raw_expires,omitempty"`
+	MaxAge      int           `json:"max_age,omitempty"`
+	Secure      bool          `json:"secure,omitempty"`
+	HTTPOnly    bool          `json:"http_only,omitempty"`
+	SameSite    http.SameSite `json:"same_site,omitempty"`
+	Partitioned bool          `json:"partitioned,omitempty"`
+	Raw         string        `json:"raw,omitempty"`
+	Unparsed    []string      `json:"unparsed,omitempty"`
+}
+
+// IdsecClient provides a comprehensive HTTP client for interacting with Idsec services.
+//
+// IdsecClient wraps the standard Go HTTP client with additional features specifically
+// designed for Idsec service interactions. It handles authentication, cookie management,
+// request logging, and automatic token refresh capabilities.
+//
+// Key features:
+// - Token-based and basic authentication support
+// - Persistent cookie storage with JSON serialization
+// - Automatic retry with token refresh on 401 responses
+// - Configurable headers for all requests
+// - Request/response logging with timing information
+// - TLS configuration support
+//
+// The client maintains state including authentication tokens, custom headers,
+// and cookie storage, making it suitable for session-based interactions
+// with Idsec services.
+type IdsecClient struct {
+	BaseURL                   string
+	token                     string
+	tokenType                 string
+	authHeaderName            string
+	client                    *http.Client
+	headers                   map[string]string
+	cookieJar                 *cookiejar.Jar
+	refreshConnectionCallback func(*IdsecClient) error
+	telemetry                 telemetry.IdsecTelemetry
+	owningService             string
+	logger                    *IdsecLogger
+}
+
+// MarshalCookies serializes a cookie jar into a JSON byte array.
+//
+// This function converts all cookies from a cookiejar.Jar into a JSON-serializable
+// format, enabling persistent storage of cookie state. The resulting byte array
+// can be stored to disk or transmitted over networks for session persistence.
+//
+// Note: This implementation uses the AllCookies() method from persistent-cookiejar
+// which provides direct access to all stored cookies.
+//
+// Parameters:
+//   - cookieJar: The cookie jar containing cookies to be marshaled
+//
+// Returns the JSON byte array representation of all cookies, or an error
+// if JSON marshaling fails.
+//
+// Example:
+//
+//	cookieData, err := MarshalCookies(client.GetCookieJar())
+//	if err != nil {
+//	    // handle error
+//	}
+//	// Save cookieData to file or database
+func MarshalCookies(cookieJar *cookiejar.Jar) ([]byte, error) {
+	jsonCookies := make([]cookieJSON, len(cookieJar.AllCookies()))
+	for i, c := range cookieJar.AllCookies() {
+		jsonCookies[i] = cookieJSON{
+			Name:        c.Name,
+			Value:       c.Value,
+			Quoted:      c.Quoted,
+			Path:        c.Path,
+			Domain:      c.Domain,
+			Expires:     c.Expires,
+			RawExpires:  c.RawExpires,
+			MaxAge:      c.MaxAge,
+			Secure:      c.Secure,
+			HTTPOnly:    c.HttpOnly,
+			SameSite:    c.SameSite,
+			Partitioned: c.Partitioned,
+			Raw:         c.Raw,
+			Unparsed:    c.Unparsed,
+		}
+	}
+	cookiesBytes, err := json.Marshal(jsonCookies)
+	if err != nil {
+		return nil, err
+	}
+	return cookiesBytes, nil
+}
+
+// UnmarshalCookies deserializes a JSON byte array into a cookie jar.
+//
+// This function takes a JSON byte array (typically created by MarshalCookies)
+// and populates the provided cookie jar with the deserialized cookies.
+// The cookies are organized by URL and properly set in the jar for use
+// in subsequent HTTP requests.
+//
+// Parameters:
+//   - cookies: JSON byte array containing serialized cookie data
+//   - cookieJar: The cookie jar to populate with deserialized cookies
+//
+// Returns an error if JSON unmarshaling fails or if URL parsing encounters
+// invalid cookie data.
+//
+// Example:
+//
+//	err := UnmarshalCookies(savedCookieData, client.GetCookieJar())
+//	if err != nil {
+//	    // handle error
+//	}
+//	// Cookie jar now contains restored cookies
+func UnmarshalCookies(cookies []byte, cookieJar *cookiejar.Jar) error {
+	var jsonCookies []cookieJSON
+	if err := json.Unmarshal(cookies, &jsonCookies); err != nil {
+		return err
+	}
+	allCookies := make([]*http.Cookie, len(jsonCookies))
+	for i, c := range jsonCookies {
+		allCookies[i] = &http.Cookie{
+			Name:        c.Name,
+			Value:       c.Value,
+			Quoted:      c.Quoted,
+			Path:        c.Path,
+			Domain:      c.Domain,
+			Expires:     c.Expires,
+			RawExpires:  c.RawExpires,
+			MaxAge:      c.MaxAge,
+			Secure:      c.Secure,
+			HttpOnly:    c.HTTPOnly,
+			SameSite:    c.SameSite,
+			Partitioned: c.Partitioned,
+			Raw:         c.Raw,
+			Unparsed:    c.Unparsed,
+		}
+	}
+	cookieGroups := make(map[string][]*http.Cookie)
+	for _, cookie := range allCookies {
+		urlKey := fmt.Sprintf("https://%s%s", cookie.Domain, cookie.Path)
+		cookieGroups[urlKey] = append(cookieGroups[urlKey], cookie)
+	}
+	for urlKey, cookiesGroup := range cookieGroups {
+		parsedURL, err := url.Parse(urlKey)
+		if err != nil {
+			return fmt.Errorf("failed to parse URL %s: %w", urlKey, err)
+		}
+		cookieJar.SetCookies(parsedURL, cookiesGroup)
+	}
+	return nil
+}
+
+// NewSimpleIdsecClient creates a basic IdsecClient instance with minimal configuration.
+//
+// This is a convenience constructor for creating an IdsecClient with only a base URL.
+// It uses default values for all other parameters (no authentication, new cookie jar,
+// no refresh callback). This is suitable for simple use cases or as a starting point
+// for further configuration.
+//
+// Parameters:
+//   - baseURL: The base URL for the Idsec service (HTTPS prefix will be added if missing)
+//
+// Returns a configured IdsecClient instance ready for basic HTTP operations.
+//
+// Example:
+//
+//	client := NewSimpleIdsecClient("api.example.com")
+//	response, err := client.Get(ctx, "/users", nil)
+func NewSimpleIdsecClient(baseURL string) *IdsecClient {
+	return NewIdsecClient(baseURL, "", "", "Authorization", nil, nil, "", false)
+}
+
+// NewIdsecClient creates a new IdsecClient instance with comprehensive configuration options.
+//
+// This is the primary constructor for IdsecClient, allowing full customization of
+// authentication, cookie management, and refresh behavior. The client will automatically
+// add HTTPS prefix to the base URL if not present and initialize a new cookie jar
+// if none is provided.
+//
+// Parameters:
+//   - baseURL: The base URL for the Idsec service
+//   - token: Authentication token (empty string for no authentication)
+//   - tokenType: Type of token ("Bearer", "Basic", etc.)
+//   - authHeaderName: Name of the authorization header (e.g., "Authorization")
+//   - cookieJar: Cookie jar for session management (nil for new jar)
+//   - refreshCallback: Function to call for token refresh on 401 responses (nil to disable)
+//   - owningService: Name of the service using this client (for logging/telemetry)
+//   - enableTelemetry: Flag to enable telemetry collection
+//
+// Returns a fully configured IdsecClient instance.
+//
+// Example:
+//
+//	jar, _ := cookiejar.New(nil)
+//	client := NewIdsecClient(
+//	    "https://api.example.com",
+//	    "abc123",
+//	    "Bearer",
+//	    "Authorization",
+//	    jar,
+//	    func(c *IdsecClient) error {
+//	        // Token refresh logic
+//	        return nil
+//	    },
+//	)
+func NewIdsecClient(
+	baseURL string,
+	token string,
+	tokenType string,
+	authHeaderName string,
+	cookieJar *cookiejar.Jar,
+	refreshCallback func(*IdsecClient) error,
+	owningService string,
+	enableTelemetry bool,
+) *IdsecClient {
+	var err error
+	if baseURL != "" && !strings.HasPrefix(baseURL, "https://") {
+		baseURL = "https://" + baseURL
+	}
+	if cookieJar == nil {
+		// Make sure to remove corrupted cookie jar lock file
+		_ = os.Remove(fmt.Sprintf("%s.lock", cookiejar.DefaultCookieFile()))
+		cookieJar, err = cookiejar.New(nil)
+		if err != nil {
+			// Remove jar file and try again
+			_ = os.Remove(cookiejar.DefaultCookieFile())
+			cookieJar, _ = cookiejar.New(nil)
+		}
+	}
+	var telemetryInstance telemetry.IdsecTelemetry
+	if enableTelemetry && config.IsTelemetryCollectionEnabled() {
+		telemetryInstance = telemetry.NewDefaultIdsecSyncTelemetry()
+	} else {
+		telemetryInstance = telemetry.NewLimitedIdsecSyncTelemetry()
+	}
+	httpClient := &http.Client{}
+	if cookieJar != nil {
+		httpClient.Jar = cookieJar
+	}
+	client := &IdsecClient{
+		BaseURL:                   baseURL,
+		authHeaderName:            authHeaderName,
+		cookieJar:                 cookieJar,
+		client:                    httpClient,
+		headers:                   make(map[string]string),
+		refreshConnectionCallback: refreshCallback,
+		owningService:             owningService,
+		telemetry:                 telemetryInstance,
+		logger:                    GetLogger("IdsecClient", Unknown),
+	}
+	client.UpdateToken(token, tokenType)
+	client.headers["User-Agent"] = config.UserAgent()
+	return client
+}
+
+// SetHeader sets a single HTTP header for the IdsecClient.
+//
+// This method adds or updates a single header in the client's header map.
+// The header will be included in all subsequent HTTP requests made by this client.
+// If a header with the same key already exists, it will be overwritten.
+//
+// Parameters:
+//   - key: The header name (e.g., "Content-Type", "Accept")
+//   - value: The header value (e.g., "application/json", "text/plain")
+//
+// Example:
+//
+//	client.SetHeader("Content-Type", "application/json")
+//	client.SetHeader("Accept", "application/json")
+func (ac *IdsecClient) SetHeader(key string, value string) {
+	ac.headers[key] = value
+}
+
+// SetHeaders replaces all existing headers with the provided header map.
+//
+// This method completely replaces the client's header map with the new headers.
+// Any previously set headers will be lost. Use UpdateHeaders() if you want to
+// preserve existing headers while adding new ones.
+//
+// Parameters:
+//   - headers: Map of header names to values that will replace all existing headers
+//
+// Example:
+//
+//	headers := map[string]string{
+//	    "Content-Type": "application/json",
+//	    "Accept": "application/json",
+//	}
+//	client.SetHeaders(headers)
+func (ac *IdsecClient) SetHeaders(headers map[string]string) {
+	ac.headers = headers
+}
+
+// UpdateHeaders merges the provided headers into the existing header map.
+//
+// This method adds new headers or updates existing ones while preserving
+// headers that are not specified in the input map. If a header key already
+// exists, its value will be overwritten.
+//
+// Parameters:
+//   - headers: Map of header names to values to add or update
+//
+// Example:
+//
+//	newHeaders := map[string]string{
+//	    "X-Custom-Header": "custom-value",
+//	    "Authorization": "Bearer new-token",
+//	}
+//	client.UpdateHeaders(newHeaders)
+func (ac *IdsecClient) UpdateHeaders(headers map[string]string) {
+	for key, value := range headers {
+		ac.headers[key] = value
+	}
+}
+
+// GetHeaders returns a copy of the current header map.
+//
+// This method returns the client's current headers. Note that modifying
+// the returned map will not affect the client's headers - use SetHeader()
+// or UpdateHeaders() to modify headers.
+//
+// Returns a map containing all current headers.
+//
+// Example:
+//
+//	currentHeaders := client.GetHeaders()
+//	fmt.Printf("Content-Type: %s\n", currentHeaders["Content-Type"])
+func (ac *IdsecClient) GetHeaders() map[string]string {
+	return ac.headers
+}
+
+// RemoveHeader removes a single HTTP header from the IdsecClient.
+//
+// This method deletes the specified header from the client's header map.
+// The header will no longer be included in subsequent HTTP requests made by this client.
+//
+// Parameters:
+//   - key: The header name to remove (e.g., "Authorization", "Content-Type")
+//
+// Example:
+//
+//	client.RemoveHeader("Authorization")
+//	client.RemoveHeader("X-Custom-Header")
+func (ac *IdsecClient) RemoveHeader(key string) {
+	delete(ac.headers, key)
+}
+
+// DisableRedirections disables automatic HTTP redirection handling.
+//
+// This method configures the underlying HTTP client to not follow redirects.
+// When disabled, the client will return the first response received, even if it
+// is a redirect (3xx status code). This is useful for scenarios where redirect
+// responses need to be handled manually.
+//
+// Example:
+//
+//	client.DisableRedirections()
+//	// Now, GET requests will not follow redirects automatically.
+func (ac *IdsecClient) DisableRedirections() {
+	ac.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+}
+
+// EnableRedirections enables automatic HTTP redirection handling.
+//
+// This method restores the default behavior of the underlying HTTP client,
+// allowing it to automatically follow HTTP redirects (3xx status codes).
+// Use this when you want the client to transparently follow redirects.
+//
+// Example:
+//
+//	client.EnableRedirections()
+//	// Now, GET requests will follow redirects automatically.
+func (ac *IdsecClient) EnableRedirections() {
+	ac.client.CheckRedirect = nil
+}
+
+// SetCookie sets a single cookie in the client's cookie jar.
+//
+// This method adds a new cookie to the client's cookie jar, which will be
+// included in subsequent requests to the appropriate domain. The cookie
+// is associated with the client's base URL.
+//
+// Parameters:
+//   - key: The cookie name
+//   - value: The cookie value
+//
+// Example:
+//
+//	client.SetCookie("session_id", "abc123")
+//	client.SetCookie("user_pref", "dark_mode")
+func (ac *IdsecClient) SetCookie(key string, value string) {
+	parsedURL, err := url.Parse(ac.BaseURL)
+	if err != nil {
+		ac.logger.Error("Fail to parse url %s: %v", ac.BaseURL, err)
+		parsedURL = &url.URL{
+			Scheme: "https",
+			Host:   ac.BaseURL,
+		}
+	}
+	ac.cookieJar.SetCookies(
+		parsedURL,
+		[]*http.Cookie{
+			{
+				Name:  key,
+				Value: value,
+			},
+		},
+	)
+}
+
+// SetCookies replaces all existing cookies with the provided cookie map.
+//
+// This method removes all existing cookies from the cookie jar and replaces
+// them with the new cookies. Use UpdateCookies() if you want to preserve
+// existing cookies while adding new ones.
+//
+// Parameters:
+//   - cookies: Map of cookie names to values that will replace all existing cookies
+//
+// Example:
+//
+//	cookies := map[string]string{
+//	    "session_id": "abc123",
+//	    "csrf_token": "xyz789",
+//	}
+//	client.SetCookies(cookies)
+func (ac *IdsecClient) SetCookies(cookies map[string]string) {
+	ac.cookieJar.RemoveAll()
+	for key, value := range cookies {
+		ac.SetCookie(key, value)
+	}
+}
+
+// UpdateCookies adds or updates cookies in the existing cookie jar.
+//
+// This method adds new cookies or updates existing ones while preserving
+// cookies that are not specified in the input map.
+//
+// Parameters:
+//   - cookies: Map of cookie names to values to add or update
+//
+// Example:
+//
+//	newCookies := map[string]string{
+//	    "new_session": "def456",
+//	    "updated_pref": "light_mode",
+//	}
+//	client.UpdateCookies(newCookies)
+func (ac *IdsecClient) UpdateCookies(cookies map[string]string) {
+	for key, value := range cookies {
+		ac.SetCookie(key, value)
+	}
+}
+
+// GetCookies returns a map of all current cookies.
+//
+// This method extracts all cookies from the cookie jar and returns them
+// as a simple map of names to values. This is useful for inspecting
+// current cookie state or for serialization purposes.
+//
+// Note: This implementation uses the AllCookies() method from persistent-cookiejar
+// which provides direct access to all stored cookies.
+//
+// Returns a map containing all current cookie names and values.
+//
+// Example:
+//
+//	cookies := client.GetCookies()
+//	sessionID := cookies["session_id"]
+func (ac *IdsecClient) GetCookies() map[string]string {
+	cookies := make(map[string]string)
+	for _, cookie := range ac.cookieJar.AllCookies() {
+		cookies[cookie.Name] = cookie.Value
+	}
+	return cookies
+}
+
+// GetCookieJar returns the underlying cookie jar instance.
+//
+// This method provides direct access to the cookiejar.Jar for advanced
+// cookie management operations that are not covered by the convenience
+// methods. Use this when you need full control over cookie behavior.
+//
+// Returns the cookie jar instance used by this client.
+//
+// Example:
+//
+//	jar := client.GetCookieJar()
+//	// Perform advanced cookie operations
+//	cookieData, err := MarshalCookies(jar)
+func (ac *IdsecClient) GetCookieJar() *cookiejar.Jar {
+	return ac.cookieJar
+}
+
+// fillMetadataTelemetry populates telemetry metadata for the current operation.
+func (ac *IdsecClient) fillMetadataTelemetry(route string, refreshRetryCountLocal int) {
+	collector := ac.telemetry.CollectorByName(collectors.IdsecMetadataMetricsCollectorName)
+	if collector != nil {
+		metadataCollector, ok := collector.(*collectors.IdsecMetadataMetricsCollector)
+		if ok {
+			metadataCollector.SetRoute(route)
+			metadataCollector.SetService(ac.owningService)
+			// Get the caller function name three levels up the stack, since the public method is two levels up
+			// This also includes the refresh retry count to differentiate between retries
+			pc, _, _, ok := runtime.Caller(3 + refreshRetryCount - refreshRetryCountLocal)
+			if !ok {
+				return
+			}
+			fullName := runtime.FuncForPC(pc).Name()
+
+			// Parse class name
+			start := strings.LastIndex(fullName, "(")
+			end := strings.LastIndex(fullName, ")")
+			if start != -1 && end != -1 {
+				className := strings.TrimPrefix(fullName[start+1:end], "*")
+				metadataCollector.SetClass(className)
+			}
+
+			// Parse operation nane
+			parts := strings.Split(fullName, ".")
+			if len(parts) < 1 {
+				return
+			}
+			operationName := parts[len(parts)-1]
+			metadataCollector.SetOperation(operationName)
+		}
+	}
+}
+
+// doRequest is the internal method that handles the actual HTTP request execution.
+//
+// This method constructs and executes HTTP requests with comprehensive functionality
+// including URL construction, JSON serialization, header application, query parameter
+// handling, TLS configuration, request logging, and automatic token refresh on
+// authentication failures.
+//
+// The method performs several key operations:
+// - URL construction with proper path escaping
+// - JSON marshaling of request body
+// - Header and query parameter application
+// - TLS configuration based on certificate verification settings
+// - Request timing and logging
+// - Automatic retry with token refresh on 401 responses
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - method: HTTP method (GET, POST, PUT, DELETE, etc.)
+//   - route: API route/path to append to the base URL
+//   - body: Request body to be JSON-serialized (can be nil for methods like GET)
+//   - params: Query parameters to include in the request URL (can be nil)
+//   - refreshRetryCount: Number of retry attempts remaining for token refresh
+//
+// Returns the HTTP response or an error if the request fails or retry attempts
+// are exhausted.
+//
+// The method automatically handles:
+// - HTTPS URL construction with proper path segment escaping
+// - JSON serialization of request bodies
+// - Application of all configured headers
+// - Query parameter encoding
+// - TLS certificate verification based on global settings
+// - Request/response timing logging
+// - Token refresh retry logic on 401 Unauthorized responses
+func (ac *IdsecClient) doRequest(ctx context.Context, method string, route string, body interface{}, params interface{}, refreshRetryCountLocal int) (*http.Response, error) {
+	var err error
+	fullURL := ac.BaseURL
+	if route != "" {
+		segments := strings.Split(route, "/")
+		for i, segment := range segments {
+			segments[i] = url.PathEscape(segment)
+		}
+		route = strings.Join(segments, "/")
+		if fullURL[len(fullURL)-1] != '/' && route[0] != '/' {
+			fullURL += "/"
+		}
+		fullURL += route
+	}
+	var bodyReader io.Reader
+	if body != nil {
+		if contentType, ok := ac.headers["Content-Type"]; ok && contentType == "application/x-www-form-urlencoded" {
+			if formValues, ok := body.(map[string]string); ok {
+				data := url.Values{}
+				for key, value := range formValues {
+					data.Set(key, value)
+				}
+				bodyReader = bytes.NewBufferString(data.Encode())
+			} else {
+				return nil, fmt.Errorf("body must be of type map[string]string for x-www-form-urlencoded content type")
+			}
+		} else {
+			bodyB, err := json.Marshal(body)
+			if err != nil {
+				return nil, err
+			}
+			bodyReader = bytes.NewBuffer(bodyB)
+		}
+	}
+	telemetryHeader := ""
+	if ac.telemetry != nil {
+		ac.fillMetadataTelemetry(route, refreshRetryCountLocal)
+		encodedTelemetry, err := ac.telemetry.CollectAndEncodeMetrics()
+		if err != nil {
+			ac.logger.Debug("Failed to collect metrics: %v", err)
+		} else {
+			telemetryHeader = string(encodedTelemetry)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range ac.headers {
+		req.Header.Set(key, value)
+	}
+	if telemetryHeader != "" {
+		req.Header.Set("X-Cybr-Telemetry", telemetryHeader)
+	}
+	if params != nil {
+		urlParams := url.Values{}
+		switch p := params.(type) {
+		case map[string]string:
+			for key, value := range p {
+				urlParams.Add(key, value)
+			}
+		case map[string][]string:
+			for key, values := range p {
+				for _, value := range values {
+					urlParams.Add(key, value)
+				}
+			}
+		default:
+			return nil, fmt.Errorf("unsupported params type: %T", params)
+		}
+		req.URL.RawQuery = urlParams.Encode()
+	}
+	ac.client.Transport = &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: !config.IsVerifyingCertificates(), // #nosec G402
+			MinVersion:         tls.VersionTLS12,
+		},
+	}
+	ac.logger.Info("Running request '%s %s'", method, fullURL)
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		ac.logger.Info("Request '%s %s' took %dms", method, fullURL, duration.Milliseconds())
+	}()
+	resp, err := ac.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && ac.refreshConnectionCallback != nil && refreshRetryCountLocal > 0 {
+		err = ac.refreshConnectionCallback(ac)
+		if err != nil {
+			return nil, err
+		}
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal-1)
+	}
+	return resp, nil
+}
+
+// Get performs an HTTP GET request to the specified route.
+//
+// This method constructs and executes a GET request using the client's base URL,
+// headers, and authentication. Query parameters can be provided via the params map.
+// The method handles automatic token refresh on 401 responses if a refresh callback
+// is configured.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - params: Query parameters to include in the request (nil for no parameters)
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	params := map[string]string{"limit": "10", "offset": "0"}
+//	response, err := client.Get(ctx, "/users", params)
+//	if err != nil {
+//	    // handle error
+//	}
+//	defer response.Body.Close()
+func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodGet, route, nil, params, refreshRetryCount)
+}
+
+// Post performs an HTTP POST request to the specified route.
+//
+// This method constructs and executes a POST request with the provided body
+// serialized as JSON. The request includes all configured headers and
+// authentication. Automatic token refresh is handled on 401 responses.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - body: Request body data to be JSON-serialized
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	userData := map[string]string{"name": "John", "email": "john@example.com"}
+//	response, err := client.Post(ctx, "/users", userData)
+//	if err != nil {
+//	    // handle error
+//	}
+//	defer response.Body.Close()
+func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount)
+}
+
+// Put performs an HTTP PUT request to the specified route.
+//
+// This method constructs and executes a PUT request with the provided body
+// serialized as JSON. PUT requests are typically used for updating or
+// replacing existing resources.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - body: Request body data to be JSON-serialized
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	updatedUser := map[string]string{"name": "John Doe", "email": "john.doe@example.com"}
+//	response, err := client.Put(ctx, "/users/123", updatedUser)
+func (ac *IdsecClient) Put(ctx context.Context, route string, body interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodPut, route, body, nil, refreshRetryCount)
+}
+
+// Delete performs an HTTP DELETE request to the specified route.
+//
+// This method constructs and executes a DELETE request. An optional body
+// can be provided for DELETE requests that require additional data.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - body: Optional request body data to be JSON-serialized (can be nil)
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	response, err := client.Delete(ctx, "/users/123", nil)
+//	// Or with body:
+//	deleteOptions := map[string]bool{"force": true}
+//	response, err := client.Delete(ctx, "/users/123", deleteOptions)
+func (ac *IdsecClient) Delete(ctx context.Context, route string, body interface{}, params interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodDelete, route, body, params, refreshRetryCount)
+}
+
+// Patch performs an HTTP PATCH request to the specified route.
+//
+// This method constructs and executes a PATCH request with the provided body
+// serialized as JSON. PATCH requests are typically used for partial updates
+// of existing resources.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - body: Request body data to be JSON-serialized
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	partialUpdate := map[string]string{"email": "newemail@example.com"}
+//	response, err := client.Patch(ctx, "/users/123", partialUpdate)
+func (ac *IdsecClient) Patch(ctx context.Context, route string, body interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodPatch, route, body, nil, refreshRetryCount)
+}
+
+// Options performs an HTTP OPTIONS request to the specified route.
+//
+// This method constructs and executes an OPTIONS request, typically used
+// to retrieve information about the communication options available for
+// the target resource or server.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	response, err := client.Options(ctx, "/users")
+//	// Check response headers for allowed methods, CORS info, etc.
+func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodOptions, route, nil, nil, refreshRetryCount)
+}
+
+// UpdateToken updates the authentication token and token type for the client.
+//
+// This method updates the client's authentication credentials and automatically
+// configures the appropriate authorization header. It supports both standard
+// token-based authentication and basic authentication. For basic auth, the token
+// should be a base64-encoded "username:password" string.
+//
+// Parameters:
+//   - token: The authentication token or base64-encoded credentials
+//   - tokenType: The type of token ("Bearer", "Basic", "API-Key", etc.)
+//
+// The method will automatically set the Authorization header based on the token type:
+// - For "Basic" type: Decodes the token and sets "Authorization: Basic <credentials>"
+// - For other types: Sets the configured auth header with format "<tokenType> <token>"
+//
+// Example:
+//
+//	// Bearer token
+//	client.UpdateToken("abc123xyz", "Bearer")
+//
+//	// Basic auth (token should be base64 encoded "user:pass")
+//	client.UpdateToken("dXNlcjpwYXNz", "Basic")
+//
+//	// API key
+//	client.UpdateToken("api-key-value", "API-Key")
+func (ac *IdsecClient) UpdateToken(token string, tokenType string) {
+	ac.token = token
+	ac.tokenType = tokenType
+	if token != "" {
+		ac.headers[ac.authHeaderName] = fmt.Sprintf("%s %s", tokenType, token)
+	}
+}
+
+// GetToken returns the current authentication token.
+//
+// This method returns the raw token string that was set via UpdateToken().
+// For basic authentication, this will be the base64-encoded credentials.
+//
+// Returns the current authentication token string.
+//
+// Example:
+//
+//	currentToken := client.GetToken()
+//	if currentToken == "" {
+//	    // No authentication token is set
+//	}
+func (ac *IdsecClient) GetToken() string {
+	return ac.token
+}
+
+// GetTokenType returns the current token type.
+//
+// This method returns the token type that was set via UpdateToken(),
+// such as "Bearer", "Basic", "API-Key", etc.
+//
+// Returns the current token type string.
+//
+// Example:
+//
+//	tokenType := client.GetTokenType()
+//	fmt.Printf("Using %s authentication\n", tokenType)
+func (ac *IdsecClient) GetTokenType() string {
+	return ac.tokenType
+}

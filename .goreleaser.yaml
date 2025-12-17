@@ -1,0 +1,104 @@
+project_name: idsec
+version: 2
+builds:
+  - id: unix
+    skip: '{{ eq .Env.SKIP_CLI "true" }}'
+    goos:
+      - freebsd
+      - linux
+    goarch:
+      - amd64
+      - '386'
+      - arm
+      - arm64
+    env: [CGO_ENABLED=0]
+    main: ./cmd/idsec/idsec.go
+    ldflags: >
+      -s -w
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitCommit={{.Commit}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitBranch={{.Branch}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildDate={{.Date}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.version={{.Env.BUILD_VERSION}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildNumber={{.Env.BUILD_NUMBER}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.repoPath=cyberark/idsec-sdk-golang'
+    binary: idsec-{{ .Os }}
+  - id: mac
+    skip: '{{ eq .Env.SKIP_CLI "true" }}'
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env: [CGO_ENABLED=0]
+    main: ./cmd/idsec/idsec.go
+    ldflags: >
+      -s -w
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitCommit={{.Commit}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitBranch={{.Branch}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildDate={{.Date}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.version={{.Env.BUILD_VERSION}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildNumber={{.Env.BUILD_NUMBER}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.repoPath=cyberark/idsec-sdk-golang'
+    binary: idsec-{{ .Os }}
+  - id: win
+    skip: '{{ eq .Env.SKIP_CLI "true" }}'
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - '386'
+      - arm64
+    env: [CGO_ENABLED=0]
+    main: ./cmd/idsec/idsec.go
+    ldflags: >
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitCommit={{.Commit}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.gitBranch={{.Branch}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildDate={{.Date}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.version={{.Env.BUILD_VERSION}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.buildNumber={{.Env.BUILD_NUMBER}}'
+      -X 'github.com/cyberark/idsec-sdk-golang/pkg/config.repoPath=cyberark/idsec-sdk-golang'
+    binary: idsec-windows
+
+binary_signs:
+  - id: filesigner
+    cmd: ./filesigner/filesigner-linux
+    args:
+      - "sign"
+      - "/same-dir"
+      - "${artifact}"
+    artifacts: binary
+    ids:
+      - unix
+      - mac
+      - win
+
+archives:
+  - id: archive-with-sigs
+    formats: [tar.gz]
+    files:
+      - LICENSE.txt
+      - README.md
+      - src: 'dist/*_{{.Target}}/*.sig'
+        strip_parent: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "typo"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+
+release:
+  github:
+    owner: cyberark
+    name: idsec-sdk-golang
+  replace_existing_artifacts: true
+  ids:
+    - archive-with-sigs
+

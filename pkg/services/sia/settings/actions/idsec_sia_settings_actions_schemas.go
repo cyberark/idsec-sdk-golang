@@ -1,0 +1,41 @@
+package actions
+
+import settingsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/settings/models"
+
+// ActionToSchemaMap is a map that defines the mapping between settings action names and their corresponding schema types.
+var ActionToSchemaMap = map[string]interface{}{
+	"list-settings":              nil,
+	"set-settings":               &settingsmodels.IdsecSIASettings{},
+	"adb-mfa-caching":            nil,
+	"set-adb-mfa-caching":        &settingsmodels.IdsecSIASettingsAdbMfaCaching{},
+	"certificate-validation":     nil,
+	"set-certificate-validation": &settingsmodels.IdsecSIASettingsCertificateValidation{},
+	"k8s-mfa-caching":            nil,
+	"set-k8s-mfa-caching":        &settingsmodels.IdsecSIASettingsK8sMfaCaching{},
+	"rdp-file-transfer":          nil,
+	"set-rdp-file-transfer":      &settingsmodels.IdsecSIASettingsRdpFileTransfer{},
+	"rdp-keyboard-layout":        nil,
+	"set-rdp-keyboard-layout":    &settingsmodels.IdsecSIASettingsRdpKeyboardLayout{},
+	"rdp-mfa-caching":            nil,
+	"set-rdp-mfa-caching":        &settingsmodels.IdsecSIASettingsRdpMfaCaching{},
+	"rdp-token-mfa-caching":      nil,
+	"set-rdp-token-mfa-caching":  &settingsmodels.IdsecSIASettingsRdpTokenMfaCaching{},
+	"rdp-recording":              nil,
+	"set-rdp-recording":          &settingsmodels.IdsecSIASettingsRdpRecording{},
+	"ssh-mfa-caching":            nil,
+	"set-ssh-mfa-caching":        &settingsmodels.IdsecSIASettingsSshMfaCaching{},
+	"ssh-command-audit":          nil,
+	"set-ssh-command-audit":      &settingsmodels.IdsecSIASettingsSshCommandAudit{},
+	"standing-access":            nil,
+	"set-standing-access":        &settingsmodels.IdsecSIASettingsStandingAccess{},
+	"logon-sequence":             nil,
+	"set-logon-sequence":         &settingsmodels.IdsecSIASettingsLogonSequence{},
+	"self-hosted-pam":            nil,
+	"set-self-hosted-pam":        &settingsmodels.IdsecSIASettingsSelfHostedPam{},
+	"rdp-kerberos-auth-mode":     nil,
+	"set-rdp-kerberos-auth-mode": &settingsmodels.IdsecSIASettingsRdpKerberosAuthMode{},
+	"rdp-transcription":          nil,
+	"set-rdp-transcription":      &settingsmodels.IdsecSIASettingsRdpTranscription{},
+	"ssh-recording":              nil,
+	"set-ssh-recording":          &settingsmodels.IdsecSIASettingsSshRecording{},
+}
