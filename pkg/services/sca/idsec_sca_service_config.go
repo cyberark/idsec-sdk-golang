@@ -8,7 +8,7 @@ import (
 
 // ServiceConfig defines the service configuration for the standalone SCA service.
 //
-// ServiceName: "sca" (distinct from the UAP SCA service "uap-sca").
+// ServiceName: "sca"
 // RequiredAuthenticatorNames: Only "isp" is required to perform discovery operations.
 // ActionsConfigurations: Exposes only a Terraform Data Source action for SCA discovery.
 // No CLI or resource CRUD actions are registered for the standalone service.

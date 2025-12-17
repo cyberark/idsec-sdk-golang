@@ -9,8 +9,8 @@ import (
 var TerraformActionSCAResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-			ActionName:        "uap-sca",
-			ActionDescription: "UAP SCA Policy resource.",
+			ActionName:        "policy-cloud-access",
+			ActionDescription: "SCA Cloud Access Policy resource.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -40,8 +40,8 @@ var TerraformActionSCAResource = &actions.IdsecServiceTerraformResourceActionDef
 var TerraformActionSCADataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-			ActionName:        "uap-sca",
-			ActionDescription: "UAP SCA Policy Data Source.",
+			ActionName:        "policy-cloud-access",
+			ActionDescription: "SCA Cloud Access Policy Data Source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

@@ -8,7 +8,7 @@ import (
 
 // ServiceConfig defines the service configuration for IdsecUAPSCAService.
 var ServiceConfig = services.IdsecServiceConfig{
-	ServiceName:                "uap-sca",
+	ServiceName:                "policy-cloud-access",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
