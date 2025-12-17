@@ -584,6 +584,9 @@ func (s *IdsecSIAWorkspacesDBService) DeleteDatabaseTarget(deleteDatabase *works
 
 // UpdateDatabaseTarget updates a database using the database-onboarding new API
 func (s *IdsecSIAWorkspacesDBService) UpdateDatabaseTarget(updateDatabase *workspacesdbmodels.IdsecSIADBUpdateDatabaseTarget) (*workspacesdbmodels.IdsecSIADBDatabaseTarget, error) {
+	if updateDatabase.Name == "" && updateDatabase.ID == "" {
+		return nil, fmt.Errorf("either ID or Name must be provided to update a database target")
+	}
 	if updateDatabase.Name != "" && updateDatabase.ID == "" {
 		databases, err := s.ListDatabaseTargetsBy(&workspacesdbmodels.IdsecSIADBDatabaseTargetsFilter{Name: updateDatabase.Name})
 		if err != nil {
@@ -816,7 +819,7 @@ func (s *IdsecSIAWorkspacesDBService) DatabaseTargetsStats() (*workspacesdbmodel
 func (s *IdsecSIAWorkspacesDBService) listDatabaseTargetsWithFilters(providerFamily string, limit int, offset *int) (*workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList, error) {
 	params := make(map[string]string)
 	if providerFamily != "" {
-		params["provideFamily"] = providerFamily
+		params["providerFamily"] = providerFamily
 	}
 	if limit > 0 {
 		params["limit"] = fmt.Sprintf("%d", limit)

@@ -121,7 +121,7 @@ func main() {
 					Instances: []uapdbmodels.IdsecUAPSIADBInstanceTarget{
 						{
 							InstanceName:         database.Name,
-							InstanceType:         database.ProviderFamily,
+							InstanceType:         database.Family,
 							InstanceID:           database.ID,
 							AuthenticationMethod: uapdbmodels.AuthMethodDBAuth,
 							DBAuthProfile: &uapdbmodels.IdsecUAPSIADBDBAuthProfile{
