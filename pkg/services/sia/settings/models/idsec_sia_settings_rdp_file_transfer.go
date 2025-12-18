@@ -7,5 +7,5 @@ package models
 // is enabled or disabled for RDP connections, providing control over data movement
 // between local and remote systems during RDP sessions.
 type IdsecSIASettingsRdpFileTransfer struct {
-	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Whether RDP file transfer is enabled"`
+	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Indicates whether RDP file transfer is enabled."`
 }

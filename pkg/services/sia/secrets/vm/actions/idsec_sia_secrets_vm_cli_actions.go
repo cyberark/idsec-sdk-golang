@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "vm",
-		ActionDescription: "SIA Secrets VM Actions.",
+		ActionDescription: "SIA Secrets Virtual Machine (VM) actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

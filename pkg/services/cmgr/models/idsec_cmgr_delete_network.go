@@ -2,5 +2,5 @@ package models
 
 // IdsecCmgrDeleteNetwork is a struct representing the filter for deleting a network in the Idsec CMGR service.
 type IdsecCmgrDeleteNetwork struct {
-	NetworkID string `json:"network_id" mapstructure:"network_id" flag:"network-id" desc:"ID of the network to delete"`
+	NetworkID string `json:"network_id" mapstructure:"network_id" flag:"network-id" desc:"The ID of the network to delete."`
 }

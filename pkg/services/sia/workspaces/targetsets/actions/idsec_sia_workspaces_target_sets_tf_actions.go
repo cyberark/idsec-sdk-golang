@@ -10,7 +10,7 @@ var TerraformActionWorkspacesTargetSetsResource = &actions.IdsecServiceTerraform
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-workspaces-target-set",
-			ActionDescription: "SIA Workspaces Target Set resource, manages target set information about one or more targets and how they are represented, along with association to relevant secret.",
+			ActionDescription: "The SIA workspaces target set resource, manages target set information about one or more targets and how they are represented, along with the association to the relevant Secret.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -36,7 +36,7 @@ var TerraformActionWorkspacesTargetSetsDataSource = &actions.IdsecServiceTerrafo
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-workspaces-target-set",
-			ActionDescription: "SIA Workspaces Target Set data source, reads target set information and metadata, based on the id of the target set.",
+			ActionDescription: "The SIA workspaces target set data source, reads target set information and metadata, based on the ID of the target set.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

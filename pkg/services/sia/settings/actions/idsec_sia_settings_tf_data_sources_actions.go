@@ -10,7 +10,7 @@ var TerraformActionSettingsDataSource = &actions.IdsecServiceTerraformDataSource
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-settings",
-			ActionDescription: "SIA ListSettings Data Source.",
+			ActionDescription: "The SIA ListSettings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -24,7 +24,7 @@ var TerraformActionAdbMfaCachingDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-adb-mfa-caching",
-			ActionDescription: "SIA ADB MFA Caching Settings Data Source.",
+			ActionDescription: "The SIA ADB MFA caching settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -38,7 +38,7 @@ var TerraformActionCertificateValidationDataSource = &actions.IdsecServiceTerraf
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-certificate-validation",
-			ActionDescription: "SIA Certificate Validation Settings Data Source.",
+			ActionDescription: "The SIA certificate validation settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -52,7 +52,7 @@ var TerraformActionK8sMfaCachingDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-k8s-mfa-caching",
-			ActionDescription: "SIA K8s MFA Caching Settings Data Source.",
+			ActionDescription: "The SIA Kubernetes (K8s) MFA caching settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -66,7 +66,7 @@ var TerraformActionRdpFileTransferDataSource = &actions.IdsecServiceTerraformDat
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-file-transfer",
-			ActionDescription: "SIA RDP File Transfer Settings Data Source.",
+			ActionDescription: "The SIA RDP file transfer settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -80,7 +80,7 @@ var TerraformActionRdpKeyboardLayoutDataSource = &actions.IdsecServiceTerraformD
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-keyboard-layout",
-			ActionDescription: "SIA RDP Keyboard Layout Settings Data Source.",
+			ActionDescription: "The SIA RDP keyboard layout settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -94,7 +94,7 @@ var TerraformActionRdpMfaCachingDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-mfa-caching",
-			ActionDescription: "SIA RDP MFA Caching Settings Data Source.",
+			ActionDescription: "The SIA RDP MFA caching settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -108,7 +108,7 @@ var TerraformActionRdpTokenMfaCachingDataSource = &actions.IdsecServiceTerraform
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-token-mfa-caching",
-			ActionDescription: "SIA RDP Token MFA Caching Settings Data Source.",
+			ActionDescription: "The SIA RDP token MFA caching settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -122,7 +122,7 @@ var TerraformActionRdpRecordingDataSource = &actions.IdsecServiceTerraformDataSo
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-recording",
-			ActionDescription: "SIA RDP Recording Settings Data Source.",
+			ActionDescription: "The SIA RDP recording settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -136,7 +136,7 @@ var TerraformActionSshMfaCachingDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-ssh-mfa-caching",
-			ActionDescription: "SIA SSH MFA Caching Settings Data Source.",
+			ActionDescription: "The SIA SSH MFA caching settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -150,7 +150,7 @@ var TerraformActionSshCommandAuditDataSource = &actions.IdsecServiceTerraformDat
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-ssh-command-audit",
-			ActionDescription: "SIA SSH Command Audit Settings Data Source.",
+			ActionDescription: "The SIA SSH command audit settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -164,7 +164,7 @@ var TerraformActionStandingAccessDataSource = &actions.IdsecServiceTerraformData
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-standing-access",
-			ActionDescription: "SIA Standing Access Settings Data Source.",
+			ActionDescription: "The SIA standing access settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -178,7 +178,7 @@ var TerraformActionLogonSequenceDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-logon-sequence",
-			ActionDescription: "SIA Logon Sequence Settings Data Source.",
+			ActionDescription: "The SIA logon sequence settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -192,7 +192,7 @@ var TerraformActionSelfHostedPAMDataSource = &actions.IdsecServiceTerraformDataS
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-self-hosted-pam",
-			ActionDescription: "SIA Self-Hosted PAM Settings Data Source.",
+			ActionDescription: "The SIA PAM Self-Hosted settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -206,7 +206,7 @@ var TerraformActionRdpKerberosAuthModeDataSource = &actions.IdsecServiceTerrafor
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-kerberos-auth-mode",
-			ActionDescription: "SIA RDP Kerberos Auth Mode Settings Data Source.",
+			ActionDescription: "The SIA RDP Kerberos auth mode settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -220,7 +220,7 @@ var TerraformActionRdpTranscriptionDataSource = &actions.IdsecServiceTerraformDa
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-rdp-transcription",
-			ActionDescription: "SIA RDP Transcription Settings Data Source.",
+			ActionDescription: "The SIA RDP transcription settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -234,7 +234,7 @@ var TerraformActionSshRecordingDataSource = &actions.IdsecServiceTerraformDataSo
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-settings-ssh-recording",
-			ActionDescription: "SIA SSH Recording Settings Data Source.",
+			ActionDescription: "The SIA SSH recording settings data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

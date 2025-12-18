@@ -5,5 +5,5 @@ package models
 // This model contains configuration options for certificate validation behavior
 // in the Idsec SIA service, including whether validation is enabled or disabled.
 type IdsecSIASettingsCertificateValidation struct {
-	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Whether certificate validation is enabled"`
+	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Indicates whether certificate validation is enabled."`
 }

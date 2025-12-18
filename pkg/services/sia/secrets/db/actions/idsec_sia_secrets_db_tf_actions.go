@@ -11,15 +11,15 @@ var TerraformActionDBStrongAccountResource = &actions.IdsecServiceTerraformResou
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-strong-accounts",
-			ActionDescription: "SIA Strong Accounts resource, manages strong account information and metadata.",
+			ActionDescription: "The SIA strong accounts resource, manages strong account information and metadata.",
 			ActionVersion:     1,
-			Schemas:           StrongAccountActionToSchemaMap,
+			Schemas:           ActionToSchemaMap,
 		},
 		SensitiveAttributes: []string{
 			"password",
 			"secret_access_key",
 		},
-		StateSchema: &secretsdbmodels.IdsecSIADBDatabaseStrongAccount{},
+		StateSchema: &secretsdbmodels.IdsecSIADBSecretMetadata{},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,
@@ -42,7 +42,7 @@ var TerraformActionDBStrongAccountDataSource = &actions.IdsecServiceTerraformDat
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-strong-accounts",
-			ActionDescription: "SIA Strong Accounts data source, reads strong account information and metadata, based on the id of the account.",
+			ActionDescription: "The SIA strong accounts data source, reads strong account information and metadata, based on the ID of the account.",
 			ActionVersion:     1,
 			Schemas:           StrongAccountActionToSchemaMap,
 		},

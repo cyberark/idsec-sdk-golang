@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "shortened-connection-string",
-		ActionDescription: "SIA Shortened Connection String Actions.",
+		ActionDescription: "The SIA shortened connection string actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

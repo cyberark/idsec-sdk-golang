@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "sso",
-		ActionDescription: "SIA SSO Actions.",
+		ActionDescription: "The SIA Single Sign-On (SSO) actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

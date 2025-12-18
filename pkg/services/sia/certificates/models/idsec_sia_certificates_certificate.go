@@ -17,29 +17,29 @@ type IdsecSIACertificatesCertificateMetadata struct {
 
 // IdsecSIACertificatesCertificate represents a SIA certificate with its details.
 type IdsecSIACertificatesCertificate struct {
-	TenantID        string                                  `json:"tenant_id" mapstructure:"tenant_id" flag:"tenant-id" desc:"ID of the tenant"`
-	CertificateID   string                                  `json:"certificate_id" mapstructure:"certificate_id" flag:"certificate-id" desc:"ID of the certificate"`
-	DomainName      string                                  `json:"domain_name,omitempty" mapstructure:"domain_name" flag:"domain-name" desc:"Domain to which the certificate is assigned"`
-	CertBody        string                                  `json:"cert_body" mapstructure:"cert_body" flag:"cert-body" desc:"Certificate body content"`
-	CertName        string                                  `json:"cert_name,omitempty" mapstructure:"cert_name" flag:"cert-name" desc:"Name of the certificate"`
-	CertDescription string                                  `json:"cert_description,omitempty" mapstructure:"cert_description" flag:"cert-description" desc:"Description of the certificate"`
-	ExpirationDate  string                                  `json:"expiration_date" mapstructure:"expiration_date" flag:"expiration-date" desc:"Time when certificate will expire"`
-	CreatedBy       string                                  `json:"created_by,omitempty" mapstructure:"created_by" flag:"created-by" desc:"Author of the certificate entry"`
-	LastUpdatedBy   string                                  `json:"last_updated_by,omitempty" mapstructure:"last_updated_by" flag:"last-updated-by" desc:"Author of last certificate entry update"`
-	Checksum        string                                  `json:"checksum" mapstructure:"checksum" flag:"checksum" desc:"Checksum calculated from the certificate content"`
-	Version         uint                                    `json:"version" mapstructure:"version" flag:"version" desc:"Version of the certificate"`
-	Metadata        IdsecSIACertificatesCertificateMetadata `json:"metadata" mapstructure:"metadata" flag:"metadata" desc:"Metadata of the certificate"`
-	UpdatedTime     string                                  `json:"updated_time" mapstructure:"updated_time" flag:"updated-time" desc:"Datetime of the last certificate update"`
-	Labels          map[string]interface{}                  `json:"labels,omitempty" mapstructure:"labels" flag:"labels" desc:"Additional labels assigned to the certificate"`
+	TenantID        string                                `json:"tenant_id" mapstructure:"tenant_id" flag:"tenant-id" desc:"The ID of the tenant."`
+	CertificateID   string                                `json:"certificate_id" mapstructure:"certificate_id" flag:"certificate-id" desc:"The ID of the certificate."`
+	DomainName      string                                `json:"domain_name,omitempty" mapstructure:"domain_name" flag:"domain-name" desc:"The domain to which the certificate is assigned."`
+	CertBody        string                                `json:"cert_body" mapstructure:"cert_body" flag:"cert-body" desc:"The body content of the certificate."`
+	CertName        string                                `json:"cert_name,omitempty" mapstructure:"cert_name" flag:"cert-name" desc:"The name of the certificate."`
+	CertDescription string                                `json:"cert_description,omitempty" mapstructure:"cert_description" flag:"cert-description" desc:"The description of the certificate."`
+	ExpirationDate  string                                `json:"expiration_date" mapstructure:"expiration_date" flag:"expiration-date" desc:"The time when certificate will expire."`
+	CreatedBy       string                                `json:"created_by,omitempty" mapstructure:"created_by" flag:"created-by" desc:"The author of the certificate entry."`
+	LastUpdatedBy   string                                `json:"last_updated_by,omitempty" mapstructure:"last_updated_by" flag:"last-updated-by" desc:"The author of last certificate entry update."`
+	Checksum        string                                `json:"checksum" mapstructure:"checksum" flag:"checksum" desc:"The checksum calculated from the certificate content."`
+	Version         uint                                  `json:"version" mapstructure:"version" flag:"version" desc:"The version of the certificate."`
+	Metadata        IdsecSIACertificatesCertificateMetadata `json:"metadata" mapstructure:"metadata" flag:"metadata" desc:"The metadata of the certificate."`
+	UpdatedTime     string                                `json:"updated_time" mapstructure:"updated_time" flag:"updated-time" desc:"The datetime of the last certificate update."`
+	Labels          map[string]interface{}                `json:"labels,omitempty" mapstructure:"labels" flag:"labels" desc:"The additional labels assigned to the certificate."`
 }
 
 // IdsecSIACertificatesShortCertificate represents a shortened version of a SIA certificate.
 type IdsecSIACertificatesShortCertificate struct {
-	CertificateID   string                                  `json:"certificate_id" mapstructure:"certificate_id" flag:"certificate-id" desc:"ID of the Certificate"`
-	Body            string                                  `json:"body" mapstructure:"body" flag:"body" desc:"Certificate body content"`
-	Domain          string                                  `json:"domain,omitempty" mapstructure:"domain" flag:"domain" desc:"Domain to which the certificate is assigned"`
-	CertName        string                                  `json:"cert_name,omitempty" mapstructure:"cert_name" flag:"cert-name" desc:"Name of the certificate"`
-	CertDescription string                                  `json:"cert_description,omitempty" mapstructure:"cert_description" flag:"cert-description" desc:"Description of the certificate"`
-	Metadata        IdsecSIACertificatesCertificateMetadata `json:"metadata" mapstructure:"metadata" flag:"metadata" desc:"Metadata of the certificate"`
-	Labels          map[string]interface{}                  `json:"labels,omitempty" mapstructure:"labels" flag:"labels" desc:"Additional labels assigned to the certificate"`
+	CertificateID   string                                `json:"certificate_id" mapstructure:"certificate_id" flag:"certificate-id" desc:"The ID of the certificate."`
+	Body            string                                `json:"body" mapstructure:"body" flag:"body" desc:"The body content of the certificate."`
+	Domain          string                                `json:"domain,omitempty" mapstructure:"domain" flag:"domain" desc:"The domain to which the certificate is assigned."`
+	CertName        string                                `json:"cert_name,omitempty" mapstructure:"cert_name" flag:"cert-name" desc:"The name of the certificate."`
+	CertDescription string                                `json:"cert_description,omitempty" mapstructure:"cert_description" flag:"cert-description" desc:"The description of the certificate."`
+	Metadata        IdsecSIACertificatesCertificateMetadata `json:"metadata" mapstructure:"metadata" flag:"metadata" desc:"The metadata of the certificate."`
+	Labels          map[string]interface{}                `json:"labels,omitempty" mapstructure:"labels" flag:"labels" desc:"The additional labels assigned to the certificate."`
 }

@@ -14,5 +14,5 @@ const (
 // It defines how Kerberos authentication is handled for RDP sessions, providing
 // control over security and access management for remote desktop connections.
 type IdsecSIASettingsRdpKerberosAuthMode struct {
-	AuthMode *string `json:"auth_mode,omitempty" mapstructure:"auth_mode,omitempty" flag:"auth-mode" desc:"The Kerberos authentication mode for RDP connections (DO_NOT_USE,NEGOTIATE,ENFORCE)" choices:"DO_NOT_USE,NEGOTIATE,ENFORCE"`
+	AuthMode *string `json:"auth_mode,omitempty" mapstructure:"auth_mode,omitempty" flag:"auth-mode" desc:"The Kerberos authentication mode for RDP connections (DO_NOT_USE,NEGOTIATE,ENFORCE)." choices:"DO_NOT_USE,NEGOTIATE,ENFORCE"`
 }

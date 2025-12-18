@@ -7,5 +7,5 @@ package models
 // is enabled or disabled for SSH connections, providing control over audit
 // and compliance requirements for recording SSH sessions.
 type IdsecSIASettingsSshRecording struct {
-	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Whether SIA SSH recording is enabled"`
+	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Indicates whether SIA SSH recording is enabled."`
 }

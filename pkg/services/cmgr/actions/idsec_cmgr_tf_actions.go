@@ -10,7 +10,7 @@ var TerraformActionNetworkResource = &actions.IdsecServiceTerraformResourceActio
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-network",
-			ActionDescription: "Connector manager network resource, manages network associated to pools.",
+			ActionDescription: "The Connector Management service network resource that is used to manage networks associated with pools.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -36,7 +36,7 @@ var TerraformActionPoolResource = &actions.IdsecServiceTerraformResourceActionDe
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-pool",
-			ActionDescription: "Connector manager pool resource, manages pool of SIA / system connectors.",
+			ActionDescription: "The Connector Management service pool resource that manages the pool of Secure Infrastructure Access (SIA) and system connectors.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -65,7 +65,7 @@ var TerraformActionPoolIdentifierResource = &actions.IdsecServiceTerraformResour
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-pool-identifier",
-			ActionDescription: "Connector manager pool identifier resource, is associated to a pool for identifying the pool in a simplified manner, and not only via the network name",
+			ActionDescription: "The Connector Management service pool identifier resource that is associated with a pool and is used to identify the pool in a simplified manner. It is not identified using only the network name",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -96,7 +96,7 @@ var TerraformActionNetworkDataSource = &actions.IdsecServiceTerraformDataSourceA
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-network",
-			ActionDescription: "Cmgr Network data source, reads network information and metadata, based on the id of the network.",
+			ActionDescription: "The Connector Management service network data source. It reads the network information and metadata and is based on the ID of the network.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -113,7 +113,7 @@ var TerraformActionPoolDataSource = &actions.IdsecServiceTerraformDataSourceActi
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-pool",
-			ActionDescription: "Cmgr Pool data source, reads pool information and metadata, based on the id of the pool.",
+			ActionDescription: "The Connector Management service pool data source. It reads the pool information and metadata and is based on the ID of the pool.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -130,7 +130,7 @@ var TerraformActionPoolIdentifierDataSource = &actions.IdsecServiceTerraformData
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "cmgr-pool-identifier",
-			ActionDescription: "Cmgr Pool data source, reads pool information and metadata, based on the id of the pool.",
+			ActionDescription: "The Connector Management service pool data source. It reads the pool information and metadata and is based on the ID of the pool.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

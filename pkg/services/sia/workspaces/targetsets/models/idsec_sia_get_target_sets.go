@@ -20,5 +20,5 @@ package models
 //	response, err := service.GetTargetSets(request)
 type IdsecSIAGetTargetSets struct {
 	// IDList is the array of target set ids to retrieve.
-	IDList []string `json:"id_list" mapstructure:"id_list" flag:"id_list" desc:"IDs of target sets to retrieve" validate:"required"`
+	IDList []string `json:"id_list" mapstructure:"id_list" flag:"id_list" desc:"The IDs of target sets to retrieve." validate:"required"`
 }

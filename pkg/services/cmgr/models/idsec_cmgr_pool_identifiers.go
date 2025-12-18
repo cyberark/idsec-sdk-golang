@@ -17,15 +17,15 @@ const (
 
 // IdsecCmgrPoolIdentifier is a struct representing an identifier for a pool in the Idsec CMGR service.
 type IdsecCmgrPoolIdentifier struct {
-	IdentifierID string `json:"identifier_id" mapstructure:"identifier_id" flag:"identifier-id" desc:"ID of the identifier"`
-	PoolID       string `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"ID of the pool this identifier is associated to"`
-	Type         string `json:"type" mapstructure:"type" flag:"type" desc:"Type of the identifier (GENERAL_FQDN,GENERAL_HOSTNAME,AWS_ACCOUNT_ID,AWS_VPC,AWS_SUBNET,AZURE_SUBSCRIPTION,AZURE_VNET,AZURE_SUBNET,GCP_PROJECT,GCP_NETWORK,GCP_SUBNET)" choices:"GENERAL_FQDN,GENERAL_HOSTNAME,AWS_ACCOUNT_ID,AWS_VPC,AWS_SUBNET,AZURE_SUBSCRIPTION,AZURE_VNET,AZURE_SUBNET,GCP_PROJECT,GCP_NETWORK,GCP_SUBNET"`
-	Value        string `json:"value" mapstructure:"value" flag:"value" desc:"Value of the identifier"`
-	CreatedAt    string `json:"created_at" mapstructure:"created_at" flag:"created-at" desc:"The creation time of the identifier"`
-	UpdatedAt    string `json:"updated_at" mapstructure:"updated_at" flag:"updated-at" desc:"The last update time of the identifier"`
+	IdentifierID string `json:"identifier_id" mapstructure:"identifier_id" flag:"identifier-id" desc:"The ID of the identifier."`
+	PoolID       string `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"The ID of the pool this identifier is associated with."`
+	Type         string `json:"type" mapstructure:"type" flag:"type" desc:"The type of the identifier (GENERAL_FQDN,GENERAL_HOSTNAME,AWS_ACCOUNT_ID,AWS_VPC,AWS_SUBNET,AZURE_SUBSCRIPTION,AZURE_VNET,AZURE_SUBNET,GCP_PROJECT,GCP_NETWORK,GCP_SUBNET)" choices:"GENERAL_FQDN,GENERAL_HOSTNAME,AWS_ACCOUNT_ID,AWS_VPC,AWS_SUBNET,AZURE_SUBSCRIPTION,AZURE_VNET,AZURE_SUBNET,GCP_PROJECT,GCP_NETWORK,GCP_SUBNET."`
+	Value        string `json:"value" mapstructure:"value" flag:"value" desc:"The value of the identifier."`
+	CreatedAt    string `json:"created_at" mapstructure:"created_at" flag:"created-at" desc:"The creation time of the identifier."`
+	UpdatedAt    string `json:"updated_at" mapstructure:"updated_at" flag:"updated-at" desc:"The last update time of the identifier."`
 }
 
 // IdsecCmgrPoolIdentifiers is a struct representing a list of identifiers for pools in the Idsec CMGR service.
 type IdsecCmgrPoolIdentifiers struct {
-	Identifiers []*IdsecCmgrPoolIdentifier `json:"identifiers" mapstructure:"identifiers" flag:"identifiers" desc:"Identifiers List"`
+	Identifiers []*IdsecCmgrPoolIdentifier `json:"identifiers" mapstructure:"identifiers" flag:"identifiers" desc:"The list of identifiers."`
 }

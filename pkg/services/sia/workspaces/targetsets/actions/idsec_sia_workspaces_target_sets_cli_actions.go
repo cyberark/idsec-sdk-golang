@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "target-sets",
-		ActionDescription: "SIA Workspaces Target Sets Actions.",
+		ActionDescription: "The SIA workspaces target sets actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

@@ -7,5 +7,5 @@ package models
 // is enabled or disabled for RDP connections, providing control over audit and compliance
 // requirements for transcribing remote desktop sessions.
 type IdsecSIASettingsRdpTranscription struct {
-	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Whether SIA RDP transcription is enabled"`
+	Enabled *bool `json:"enabled,omitempty" mapstructure:"enabled,omitempty" flag:"enabled" desc:"Indicates whether SIA RDP transcription is enabled."`
 }

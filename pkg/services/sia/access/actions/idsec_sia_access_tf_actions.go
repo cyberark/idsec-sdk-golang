@@ -10,7 +10,7 @@ var TerraformActionAccessConnectorResource = &actions.IdsecServiceTerraformResou
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-access-connector",
-			ActionDescription: "SIA access connector resource, manages SIA access connector installation and removal on SIA and target machines.",
+			ActionDescription: "SIA connector resource, manages SIA connector installation and removal on SIA and target machines.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

@@ -7,5 +7,5 @@ package models
 // during RDP sessions, allowing customization of input behavior based on regional
 // or user preferences for different keyboard mappings.
 type IdsecSIASettingsRdpKeyboardLayout struct {
-	Layout *string `json:"layout,omitempty" mapstructure:"layout,omitempty" flag:"layout" desc:"Keyboard layout for RDP sessions"`
+	Layout *string `json:"layout,omitempty" mapstructure:"layout,omitempty" flag:"layout" desc:"The keyboard layout for RDP sessions."`
 }

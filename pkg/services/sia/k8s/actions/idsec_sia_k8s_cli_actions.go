@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "k8s",
-		ActionDescription: "SIA K8S Actions.",
+		ActionDescription: "The SIA Kubernetes (K8s) actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

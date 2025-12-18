@@ -10,7 +10,7 @@ var TerraformActionSSHPublicKeyResource = &actions.IdsecServiceTerraformResource
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-ssh-public-key",
-			ActionDescription: "SIA SSH Public Key resource, manages SIA SSH CA public key installation and removal from a target machine.",
+			ActionDescription: "The SIA SSH public key resource, manages SIA SSH CA public key installation and removal from a target machine.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

@@ -10,7 +10,7 @@ var TerraformActionWorkspacesDBResource = &actions.IdsecServiceTerraformResource
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-workspaces-db",
-			ActionDescription: "SIA Workspaces DB resource, manages DB workspaces information and metadata, along with association to relevant secret.",
+			ActionDescription: "The SIA workspaces database resource, manages database workspaces information and metadata, along with the association to the relevant Secret.",
 			ActionVersion:     1,
 			Schemas:           TargetActionToTargetSchemaMap,
 		},
@@ -36,7 +36,7 @@ var TerraformActionWorkspacesDBDataSource = &actions.IdsecServiceTerraformDataSo
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-workspaces-db",
-			ActionDescription: "SIA Workspaces DB data source, reads DB information and metadata, based on the id of the database.",
+			ActionDescription: "The SIA workspaces database data source, reads database information and metadata, based on the ID of the database.",
 			ActionVersion:     1,
 			Schemas:           TargetActionToTargetSchemaMap,
 		},

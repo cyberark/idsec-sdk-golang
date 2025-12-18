@@ -10,6 +10,6 @@ const (
 
 // IdsecSIASSOGetSSHKey is a struct that represents the request for getting SSH key from the Idsec SIA SSO service.
 type IdsecSIASSOGetSSHKey struct {
-	Folder string `json:"folder" mapstructure:"folder" flag:"folder" desc:"Output folder to write the ssh key to" default:"~/.ssh"`
-	Format string `json:"format" mapstructure:"format" flag:"format" desc:"Format of the ssh key (openssh,ppk)" default:"openssh" choices:"openssh,ppk"`
+	Folder string `json:"folder" mapstructure:"folder" flag:"folder" desc:"The output folder where the SSH key is written." default:"~/.ssh"`
+	Format string `json:"format" mapstructure:"format" flag:"format" desc:"The format of the SSH key (openssh, ppk)." default:"openssh" choices:"openssh,ppk"`
 }

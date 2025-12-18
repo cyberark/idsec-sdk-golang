@@ -223,8 +223,8 @@ const (
 
 // IdsecSIADBDatabaseProvider represents the structure for a database provider in the SIA workspace.
 type IdsecSIADBDatabaseProvider struct {
-	ID        int    `json:"id" mapstructure:"id" flag:"id" desc:"ID of the provider"`
-	Engine    string `json:"engine" mapstructure:"engine" flag:"engine" desc:"Engine type of the database provider"`
-	Workspace string `json:"workspace" mapstructure:"workspace" flag:"workspace" desc:"Workspace of the database provider" choices:"cloud,self-hosted"`
-	Family    string `json:"family" mapstructure:"family" flag:"family" desc:"Family of the database provider" choices:"Postgres,Oracle,MSSQL,MySQL,MariaDB,DB2,Mongo,Unknown"`
+	ID        int    `json:"id" mapstructure:"id" flag:"id" desc:"The ID of the database provider."`
+	Engine    string `json:"engine" mapstructure:"engine" flag:"engine" desc:"The engine type of the database provider."`
+	Workspace string `json:"workspace" mapstructure:"workspace" flag:"workspace" desc:"The workspace of the database provider." choices:"cloud,self-hosted"`
+	Family    string `json:"family" mapstructure:"family" flag:"family" desc:"The family of the database provider." choices:"Postgres,Oracle,MSSQL,MySQL,MariaDB,DB2,Mongo,Cassandra,Unknown"`
 }

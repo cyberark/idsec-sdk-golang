@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "cmgr",
-		ActionDescription: "Connector Management mediates ISPSS services and is used by IT administrators to manage CyberArk components, communication tunnels and manage networks and pools.",
+		ActionDescription: "The Connector Management service mediates Identity Security Platform Shared Services (ISPSS) and is used by IT administrators to manage CyberArk components, communication tunnels, networks, and connector pools.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

@@ -10,7 +10,7 @@ var TerraformActionSecretsVMResource = &actions.IdsecServiceTerraformResourceAct
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-secrets-vm",
-			ActionDescription: "SIA Secrets VM resource, manages VM secrets information and metadata, based on the type of secret.",
+			ActionDescription: "The SIA Secrets VM resource, manages VM Secrets information and metadata, based on the type of Secret.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -43,7 +43,7 @@ var TerraformActionSecretsVMDataSource = &actions.IdsecServiceTerraformDataSourc
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sia-secrets-vm",
-			ActionDescription: "SIA Secrets VM data source, reads VM secrets information and metadata, based on the id of the secret.",
+			ActionDescription: "The SIA Secrets VM data source, reads VM Secrets information and metadata, based on the ID of the Secret.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

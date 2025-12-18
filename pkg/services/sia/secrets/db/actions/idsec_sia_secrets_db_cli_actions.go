@@ -9,7 +9,7 @@ import (
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "db",
-		ActionDescription: "SIA Secrets DB Actions.",
+		ActionDescription: "SIA Secrets database actions.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},
