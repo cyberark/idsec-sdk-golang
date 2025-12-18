@@ -8,8 +8,8 @@ import (
 // IdsecUAPSIAVMAccessPolicy represents a VM access policy for SIA.
 type IdsecUAPSIAVMAccessPolicy struct {
 	sia.IdsecUAPSIACommonAccessPolicy `mapstructure:",squash"`
-	Targets                           IdsecUAPSIAVMPlatformTargets `json:"targets,omitempty" mapstructure:"targets,omitempty" flag:"targets" desc:"The targets of the VM access policy. This is a list of platform targets that the policy applies to."`
-	Behavior                          IdsecUAPSSIAVMBehavior       `json:"behavior,omitempty" mapstructure:"behavior,omitempty" flag:"behavior" desc:"The behavior of the VM access policy, including SSH and RDP profiles."`
+	Targets                         IdsecUAPSIAVMPlatformTargets `json:"targets,omitempty" mapstructure:"targets,omitempty" flag:"targets" desc:"The targets of the VM access policy. This is a list of platform targets to which the policy applies."`
+	Behavior                        IdsecUAPSSIAVMBehavior       `json:"behavior,omitempty" mapstructure:"behavior,omitempty" flag:"behavior" desc:"The behavior of the VM access policy, including SSH and RDP profiles."`
 }
 
 // Serialize converts the VM access policy to a map.

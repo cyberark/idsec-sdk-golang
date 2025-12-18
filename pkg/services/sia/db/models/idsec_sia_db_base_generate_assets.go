@@ -16,5 +16,5 @@ const (
 type IdsecSIADBBaseGenerateAssets struct {
 	ConnectionMethod string `json:"connection_method" mapstructure:"connection_method" flag:"connection-method" desc:"Indicates whether to generate assets for standing or dynamic access." default:"standing" choices:"standing,dynamic"`
 	ResponseFormat   string `json:"response_format" mapstructure:"response_format" flag:"response-format" desc:"Specifies the format in which to return the assets." default:"raw" choices:"raw,json"`
-	Folder           string `json:"folder" mapstructure:"folder" flag:"folder" desc:"The location to store the assets."`
+	Folder           string `json:"folder" mapstructure:"folder" flag:"folder" desc:"The storage location for the assest."`
 }

@@ -10,7 +10,7 @@ var TerraformActionDBResource = &actions.IdsecServiceTerraformResourceActionDefi
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "uap-db",
-			ActionDescription: "UAP SIA DB Policy resource.",
+			ActionDescription: "The SIA database policy resource.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -41,7 +41,7 @@ var TerraformActionDBDataSource = &actions.IdsecServiceTerraformDataSourceAction
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "uap-db",
-			ActionDescription: "UAP SIA DB Policy Data Source.",
+			ActionDescription: "The SIA database policy data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

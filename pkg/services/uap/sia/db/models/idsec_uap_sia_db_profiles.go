@@ -23,7 +23,7 @@ type IdsecUAPSIAAuthProfile interface {
 
 // IdsecUAPSIADBLDAPAuthProfile represents an LDAP authentication profile.
 type IdsecUAPSIADBLDAPAuthProfile struct {
-	AssignGroups []string `json:"assign_groups" validate:"min=1,max=50" mapstructure:"assign_groups" flag:"assign-groups" desc:"List of groups to assign to the user"`
+	AssignGroups []string `json:"assign_groups" validate:"min=1,max=50" mapstructure:"assign_groups" flag:"assign-groups" desc:"The list of groups to assign to the user."`
 }
 
 // Serialize converts the LDAP authentication profile to a map.
@@ -52,7 +52,7 @@ func (s *IdsecUAPSIADBLDAPAuthProfile) Deserialize(data map[string]interface{}) 
 
 // IdsecUAPSIADBDBAuthProfile represents a local DB authentication profile.
 type IdsecUAPSIADBDBAuthProfile struct {
-	Roles []string `json:"roles" validate:"min=1,max=50" mapstructure:"roles" flag:"roles" desc:"List of roles assigned to the user"`
+	Roles []string `json:"roles" validate:"min=1,max=50" mapstructure:"roles" flag:"roles" desc:"The list of roles assigned to the user."`
 }
 
 // Serialize converts the local DB authentication profile to a map.
@@ -81,10 +81,10 @@ func (s *IdsecUAPSIADBDBAuthProfile) Deserialize(data map[string]interface{}) er
 
 // IdsecUAPSIADBOracleAuthProfile represents an Oracle DB authentication profile.
 type IdsecUAPSIADBOracleAuthProfile struct {
-	Roles       []string `json:"roles" validate:"min=1,max=50" mapstructure:"roles" flag:"roles" desc:"List of roles assigned to the user"`
-	DbaRole     bool     `json:"dba_role" mapstructure:"dba_role" flag:"dba-role" desc:"Indicates if the user has DBA role"`
-	SysdbaRole  bool     `json:"sysdba_role" mapstructure:"sysdba_role" flag:"sysdba-role" desc:"Indicates if the user has SYSDBA role"`
-	SysoperRole bool     `json:"sysoper_role" mapstructure:"sysoper_role" flag:"sysoper-role" desc:"Indicates if the user has SYSOPER role"`
+	Roles       []string `json:"roles" validate:"min=1,max=50" mapstructure:"roles" flag:"roles" desc:"The list of roles assigned to the user."`
+	DbaRole     bool     `json:"dba_role" mapstructure:"dba_role" flag:"dba-role" desc:"Indicates if the user has a DBA role."`
+	SysdbaRole  bool     `json:"sysdba_role" mapstructure:"sysdba_role" flag:"sysdba-role" desc:"Indicates if the user has a SYSDBA role."`
+	SysoperRole bool     `json:"sysoper_role" mapstructure:"sysoper_role" flag:"sysoper-role" desc:"Indicates if the user has a SYSOPER role."`
 }
 
 // Serialize converts the Oracle DB authentication profile to a map.
@@ -129,9 +129,9 @@ func (s *IdsecUAPSIADBOracleAuthProfile) Deserialize(data map[string]interface{}
 
 // IdsecUAPSIADBMongoAuthProfile represents a MongoDB authentication profile.
 type IdsecUAPSIADBMongoAuthProfile struct {
-	GlobalBuiltinRoles   []string            `json:"global_builtin_roles" validate:"max=50" mapstructure:"global_builtin_roles" flag:"global-builtin-roles" desc:"List of global built-in roles"`
-	DatabaseBuiltinRoles map[string][]string `json:"database_builtin_roles" validate:"max=1000" mapstructure:"database_builtin_roles" flag:"database-builtin-roles" desc:"Map of database names to their built-in roles"`
-	DatabaseCustomRoles  map[string][]string `json:"database_custom_roles" validate:"max=1000" mapstructure:"database_custom_roles" flag:"database-custom-roles" desc:"Map of database names to their custom roles"`
+	GlobalBuiltinRoles   []string            `json:"global_builtin_roles" validate:"max=50" mapstructure:"global_builtin_roles" flag:"global-builtin-roles" desc:"The list of global built-in roles."`
+	DatabaseBuiltinRoles map[string][]string `json:"database_builtin_roles" validate:"max=1000" mapstructure:"database_builtin_roles" flag:"database-builtin-roles" desc:"The map of database names to their built-in roles."`
+	DatabaseCustomRoles  map[string][]string `json:"database_custom_roles" validate:"max=1000" mapstructure:"database_custom_roles" flag:"database-custom-roles" desc:"The map of database names to their custom roles."`
 }
 
 // Serialize converts the MongoDB authentication profile to a map.
@@ -241,10 +241,10 @@ func (s *IdsecUAPSIADBMongoAuthProfile) ValidateDatabasesRolesLogic() error {
 
 // IdsecUAPSIADBSqlServerAuthProfile represents a SQL Server authentication profile.
 type IdsecUAPSIADBSqlServerAuthProfile struct {
-	GlobalBuiltinRoles   []string            `json:"global_builtin_roles" validate:"max=50" mapstructure:"global_builtin_roles" flag:"global-builtin-roles" desc:"List of global built-in roles"`
-	GlobalCustomRoles    []string            `json:"global_custom_roles" validate:"max=50" mapstructure:"global_custom_roles" flag:"global-custom-roles" desc:"List of global custom roles"`
-	DatabaseBuiltinRoles map[string][]string `json:"database_builtin_roles" validate:"max=1000" mapstructure:"database_builtin_roles" flag:"database-builtin-roles" desc:"Map of database names to their built-in roles"`
-	DatabaseCustomRoles  map[string][]string `json:"database_custom_roles" validate:"max=1000" mapstructure:"database_custom_roles" flag:"database-custom-roles" desc:"Map of database names to their custom roles"`
+	GlobalBuiltinRoles   []string            `json:"global_builtin_roles" validate:"max=50" mapstructure:"global_builtin_roles" flag:"global-builtin-roles" desc:"The list of global built-in roles."`
+	GlobalCustomRoles    []string            `json:"global_custom_roles" validate:"max=50" mapstructure:"global_custom_roles" flag:"global-custom-roles" desc:"The list of global custom roles."`
+	DatabaseBuiltinRoles map[string][]string `json:"database_builtin_roles" validate:"max=1000" mapstructure:"database_builtin_roles" flag:"database-builtin-roles" desc:"The map of database names to their built-in roles."`
+	DatabaseCustomRoles  map[string][]string `json:"database_custom_roles" validate:"max=1000" mapstructure:"database_custom_roles" flag:"database-custom-roles" desc:"The map of database names to their custom roles."`
 }
 
 // Serialize converts the SQL Server authentication profile to a map.
@@ -335,7 +335,7 @@ func (s *IdsecUAPSIADBSqlServerAuthProfile) Deserialize(data map[string]interfac
 
 // IdsecUAPSIADBRDSIAMUserAuthProfile represents an RDS IAM User authentication profile.
 type IdsecUAPSIADBRDSIAMUserAuthProfile struct {
-	DBUser string `json:"db_user" validate:"min=1,max=256" mapstructure:"db_user" flag:"db-user" desc:"The database user for RDS IAM User authentication"`
+	DBUser string `json:"db_user" validate:"min=1,max=256" mapstructure:"db_user" flag:"db-user" desc:"The database user for RDS IAM User authentication."`
 }
 
 // Serialize converts the RDS IAM User authentication profile to a map.

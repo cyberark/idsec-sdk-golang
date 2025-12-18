@@ -398,7 +398,7 @@ type IdsecUAPSIAVMPlatformTargets struct {
 	AWSResource    *IdsecUAPSIAVMAWSResource    `json:"aws_resource,omitempty" mapstructure:"aws_resource" flag:"aws-resource" desc:"The AWS resources for the VM access policy. This includes regions, tags, VPC IDs, and account IDs."`
 	AzureResource  *IdsecUAPSIAVMAzureResource  `json:"azure_resource,omitempty" mapstructure:"azure_resource" flag:"azure-resource" desc:"The Azure resources for the VM access policy. This includes regions, tags, resource groups, VNet IDs, and subscriptions."`
 	GCPResource    *IdsecUAPSIAVMGCPResource    `json:"gcp_resource,omitempty" mapstructure:"gcp_resource" flag:"gcp-resource" desc:"The GCP resources for the VM access policy. This includes regions, labels, VPC IDs, and project IDs."`
-	FQDNIPResource *IdsecUAPSIAVMFQDNIPResource `json:"fqdnip_resource,omitempty" mapstructure:"fqdnip_resource" flag:"fqdnip-resource" desc:"The fqdn/ip resources for the VM access policy. This includes FQDN rules and IP rules."`
+	FQDNIPResource *IdsecUAPSIAVMFQDNIPResource `json:"fqdnip_resource,omitempty" mapstructure:"fqdnip_resource" flag:"fqdnip-resource" desc:"The FQDN/IP resources for the VM access policy. This includes FQDN rules and IP rules."`
 }
 
 // Serialize converts the platform targets to a map.

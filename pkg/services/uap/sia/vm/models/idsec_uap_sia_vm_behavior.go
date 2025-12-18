@@ -6,7 +6,7 @@ import (
 
 // IdsecUAPSSIAVMSSHProfile defines the SSH profile for this virtual machine access policy.
 type IdsecUAPSSIAVMSSHProfile struct {
-	Username string `json:"username" mapstructure:"username" flag:"username" desc:"Username which the user will connect with on the certificate"`
+	Username string `json:"username" mapstructure:"username" flag:"username" desc:"The username on the certificate used to connect."`
 }
 
 // Serialize converts the SSH profile to a map.
@@ -28,8 +28,8 @@ func (s *IdsecUAPSSIAVMSSHProfile) Deserialize(data map[string]interface{}) erro
 
 // IdsecUAPSSIAVMEphemeralUser defines the ephemeral user method related data for this virtual machine access policy.
 type IdsecUAPSSIAVMEphemeralUser struct {
-	AssignGroups                 []string `json:"assign_groups" mapstructure:"assign_groups" flag:"assign-groups" desc:"Predefined assigned local groups of the user"`
-	EnableEphemeralUserReconnect bool     `json:"enable_ephemeral_user_reconnect" mapstructure:"enable_ephemeral_user_reconnect" flag:"enable-ephemeral-user-reconnect" desc:"Whether the ephemeral user can reconnect"`
+	AssignGroups                 []string `json:"assign_groups" mapstructure:"assign_groups" flag:"assign-groups" desc:"The predefined assigned local groups of the user."`
+	EnableEphemeralUserReconnect bool     `json:"enable_ephemeral_user_reconnect" mapstructure:"enable_ephemeral_user_reconnect" flag:"enable-ephemeral-user-reconnect" desc:"Indicates whether the ephemeral user can reconnect."`
 }
 
 // Serialize converts the ephemeral user to a map.
@@ -65,7 +65,7 @@ func (s *IdsecUAPSSIAVMEphemeralUser) Deserialize(data map[string]interface{}) e
 // IdsecUAPSSIAVMDomainEphemeralUser defines the domain ephemeral user method related data for this virtual machine access policy.
 type IdsecUAPSSIAVMDomainEphemeralUser struct {
 	IdsecUAPSSIAVMEphemeralUser `mapstructure:",squash"`
-	AssignDomainGroups          []string `json:"assign_domain_groups" mapstructure:"assign_domain_groups" flag:"assign-domain-groups" desc:"Predefined assigned domain groups of the user"`
+	AssignDomainGroups          []string `json:"assign_domain_groups" mapstructure:"assign_domain_groups" flag:"assign-domain-groups" desc:"The predefined assigned domain groups of the user."`
 }
 
 // Serialize converts the domain ephemeral user to a map.
@@ -97,8 +97,8 @@ func (s *IdsecUAPSSIAVMDomainEphemeralUser) Deserialize(data map[string]interfac
 
 // IdsecUAPSSIAVMRDPProfile defines the RDP profile for this virtual machine access policy.
 type IdsecUAPSSIAVMRDPProfile struct {
-	LocalEphemeralUser  *IdsecUAPSSIAVMEphemeralUser       `json:"local_ephemeral_user,omitempty" mapstructure:"local_ephemeral_user" flag:"local-ephemeral-user" desc:"Local ephemeral user method related data"`
-	DomainEphemeralUser *IdsecUAPSSIAVMDomainEphemeralUser `json:"domain_ephemeral_user,omitempty" mapstructure:"domain_ephemeral_user" flag:"domain-ephemeral-user" desc:"Domain ephemeral user method related data"`
+	LocalEphemeralUser  *IdsecUAPSSIAVMEphemeralUser       `json:"local_ephemeral_user,omitempty" mapstructure:"local_ephemeral_user" flag:"local-ephemeral-user" desc:"The ephemeral local user method-related data."`
+	DomainEphemeralUser *IdsecUAPSSIAVMDomainEphemeralUser `json:"domain_ephemeral_user,omitempty" mapstructure:"domain_ephemeral_user" flag:"domain-ephemeral-user" desc:"The ephemeral domain user method-related data."`
 }
 
 // Serialize converts the RDP profile to a map.
@@ -133,8 +133,8 @@ func (p *IdsecUAPSSIAVMRDPProfile) Deserialize(data map[string]interface{}) erro
 
 // IdsecUAPSSIAVMBehavior defines the behavior of a virtual machine access policy, including SSH and RDP profiles.
 type IdsecUAPSSIAVMBehavior struct {
-	SSHProfile *IdsecUAPSSIAVMSSHProfile `json:"ssh_profile,omitempty" mapstructure:"ssh_profile" flag:"ssh-profile" desc:"The SSH profile for this virtual machine access policy"`
-	RDPProfile *IdsecUAPSSIAVMRDPProfile `json:"rdp_profile,omitempty" mapstructure:"rdp_profile" flag:"rdp-profile" desc:"The RDP profile for this virtual machine access policy"`
+	SSHProfile *IdsecUAPSSIAVMSSHProfile `json:"ssh_profile,omitempty" mapstructure:"ssh_profile" flag:"ssh-profile" desc:"The SSH profile for the virtual machine access policy."`
+	RDPProfile *IdsecUAPSSIAVMRDPProfile `json:"rdp_profile,omitempty" mapstructure:"rdp_profile" flag:"rdp-profile" desc:"The RDP profile for the virtual machine access policy."`
 }
 
 // Serialize converts the VM behavior to a map.

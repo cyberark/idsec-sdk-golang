@@ -10,7 +10,7 @@ var TerraformActionVMResource = &actions.IdsecServiceTerraformResourceActionDefi
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "uap-vm",
-			ActionDescription: "UAP SIA VM Policy resource.",
+			ActionDescription: "SIA Virtual Machine (VM) policy resource.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -41,7 +41,7 @@ var TerraformActionVMDataSource = &actions.IdsecServiceTerraformDataSourceAction
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "uap-vm",
-			ActionDescription: "UAP SIA VM Policy Data Source.",
+			ActionDescription: "SIA Virtual Machine (VM) policy data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

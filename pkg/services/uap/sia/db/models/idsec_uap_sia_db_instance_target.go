@@ -16,19 +16,19 @@ const (
 
 // IdsecUAPSIADBInstanceTarget represents a database instance target in the UAP SIA DB.
 type IdsecUAPSIADBInstanceTarget struct {
-	InstanceName         string `json:"instance_name" mapstructure:"instance_name" flag:"instance-name" desc:"The name of the database instance" validate:"min=1,max=256"`
-	InstanceType         string `json:"instance_type" mapstructure:"instance_type" flag:"instance-type" desc:"The database type of the database instance" choices:"Postgres,Oracle,MSSQL,MySQL,MariaDB,DB2,Mongo,Unknown"`
-	InstanceID           string `json:"instance_id" mapstructure:"instance_id" flag:"instance-id" desc:"The id of the database instance" validate:"min=1,max=256"`
-	AuthenticationMethod string `json:"authentication_method" mapstructure:"authentication_method" flag:"authentication-method" desc:"The authentication method corresponding to this profile" choices:"ldap_auth,db_auth,oracle_auth,mongo_auth,sqlserver_auth,rds_iam_user_auth"`
+	InstanceName         string `json:"instance_name" mapstructure:"instance_name" flag:"instance-name" desc:"The name of the database instance." validate:"min=1,max=256"`
+	InstanceType         string `json:"instance_type" mapstructure:"instance_type" flag:"instance-type" desc:"The database type of the database instance." choices:"Postgres,Oracle,MSSQL,MySQL,MariaDB,DB2,Mongo,Unknown"`
+	InstanceID           string `json:"instance_id" mapstructure:"instance_id" flag:"instance-id" desc:"The ID of the database instance." validate:"min=1,max=256"`
+	AuthenticationMethod string `json:"authentication_method" mapstructure:"authentication_method" flag:"authentication-method" desc:"The authentication method corresponding to the profile." choices:"ldap_auth,db_auth,oracle_auth,mongo_auth,sqlserver_auth,rds_iam_user_auth"`
 
 	// Profiles, only one of these will be set based on the authentication method.
 	// Note that the API has a single profiles field, but we separate them here for clarity and easier usage.
-	LDAPAuthProfile       *IdsecUAPSIADBLDAPAuthProfile       `json:"ldap_auth_profile,omitempty" mapstructure:"ldap_auth_profile,omitempty" flag:"ldap-auth-profile" desc:"The LDAP authentication profile for this database instance"`
-	DBAuthProfile         *IdsecUAPSIADBDBAuthProfile         `json:"db_auth_profile,omitempty" mapstructure:"db_auth_profile,omitempty" flag:"db-auth-profile" desc:"The local database authentication profile for this database instance"`
-	OracleAuthProfile     *IdsecUAPSIADBOracleAuthProfile     `json:"oracle_auth_profile,omitempty" mapstructure:"oracle_auth_profile,omitempty" flag:"oracle-auth-profile" desc:"The Oracle database authentication profile for this database instance"`
-	MongoAuthProfile      *IdsecUAPSIADBMongoAuthProfile      `json:"mongo_auth_profile,omitempty" mapstructure:"mongo_auth_profile,omitempty" flag:"mongo-auth-profile" desc:"The MongoDB authentication profile for this database instance"`
-	SQLServerAuthProfile  *IdsecUAPSIADBSqlServerAuthProfile  `json:"sqlserver_auth_profile,omitempty" mapstructure:"sqlserver_auth_profile,omitempty" flag:"sqlserver-auth-profile" desc:"The SQL Server authentication profile for this database instance"`
-	RDSIAMUserAuthProfile *IdsecUAPSIADBRDSIAMUserAuthProfile `json:"rds_iam_user_auth_profile,omitempty" mapstructure:"rds_iam_user_auth_profile,omitempty" flag:"rds-iam-user-auth-profile" desc:"The RDS IAM User authentication profile for this database instance"`
+	LDAPAuthProfile       *IdsecUAPSIADBLDAPAuthProfile       `json:"ldap_auth_profile,omitempty" mapstructure:"ldap_auth_profile,omitempty" flag:"ldap-auth-profile" desc:"The LDAP authentication profile for the database instance."`
+	DBAuthProfile         *IdsecUAPSIADBDBAuthProfile         `json:"db_auth_profile,omitempty" mapstructure:"db_auth_profile,omitempty" flag:"db-auth-profile" desc:"The local database authentication profile for the database instance."`
+	OracleAuthProfile     *IdsecUAPSIADBOracleAuthProfile     `json:"oracle_auth_profile,omitempty" mapstructure:"oracle_auth_profile,omitempty" flag:"oracle-auth-profile" desc:"The Oracle database authentication profile for the database instance."`
+	MongoAuthProfile      *IdsecUAPSIADBMongoAuthProfile      `json:"mongo_auth_profile,omitempty" mapstructure:"mongo_auth_profile,omitempty" flag:"mongo-auth-profile" desc:"The MongoDB authentication profile for the database instance."`
+	SQLServerAuthProfile  *IdsecUAPSIADBSqlServerAuthProfile  `json:"sqlserver_auth_profile,omitempty" mapstructure:"sqlserver_auth_profile,omitempty" flag:"sqlserver-auth-profile" desc:"The SQL Server authentication profile for the database instance."`
+	RDSIAMUserAuthProfile *IdsecUAPSIADBRDSIAMUserAuthProfile `json:"rds_iam_user_auth_profile,omitempty" mapstructure:"rds_iam_user_auth_profile,omitempty" flag:"rds-iam-user-auth-profile" desc:"The RDS IAM User authentication profile for the database instance."`
 }
 
 // SerializeProfile serializes the profile of the instance target based on the authentication method.
