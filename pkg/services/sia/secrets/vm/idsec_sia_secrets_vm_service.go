@@ -14,6 +14,7 @@ import (
 
 	"io"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -23,6 +24,35 @@ const (
 	secretURL            = "/api/secrets/%s" // #nosec G101
 	defaultAccountDomain = "local"           // Default domain is "local" for secrets when not specified - align with SIA UI behavior
 )
+
+// mapToStringHook is a custom decode hook for mapstructure that converts map[string]interface{} to JSON string.
+// This is needed because the API returns secret_details as a map, but our models use string for consistency.
+func mapToStringHook(from, to reflect.Type, data interface{}) (interface{}, error) {
+	// Check if we're converting from map to string
+	if from.Kind() == reflect.Map && to.Kind() == reflect.String {
+		// Convert map to JSON string
+		jsonBytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal map to JSON string: %w", err)
+		}
+		return string(jsonBytes), nil
+	}
+	// Return unchanged for other types
+	return data, nil
+}
+
+// decodeWithMapToStringHook decodes using mapstructure with a custom hook to convert maps to strings.
+func decodeWithMapToStringHook(input, output interface{}) error {
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		DecodeHook: mapToStringHook,
+		Result:     output,
+		TagName:    "mapstructure",
+	})
+	if err != nil {
+		return err
+	}
+	return decoder.Decode(input)
+}
 
 // IdsecSIASecretsVMService is the service for managing vm secrets.
 type IdsecSIASecretsVMService struct {
@@ -156,12 +186,13 @@ func (s *IdsecSIASecretsVMService) AddSecret(addSecret *vmsecretsmodels.IdsecSIA
 		return nil, err
 	}
 	var secret vmsecretsmodels.IdsecSIAVMSecret
-	err = mapstructure.Decode(secretJSON, &secret)
+	err = decodeWithMapToStringHook(secretJSON, &secret)
 	if err != nil {
 		return nil, err
 	}
-	if secret.SecretDetails == nil {
-		secret.SecretDetails = make(map[string]interface{})
+	// Ensure SecretDetails is properly set (empty JSON object if not provided)
+	if secret.SecretDetails == "" {
+		secret.SecretDetails = "{}"
 	}
 	return &secret, nil
 }
@@ -196,9 +227,13 @@ func (s *IdsecSIASecretsVMService) ChangeSecret(changeSecret *vmsecretsmodels.Id
 
 		// Start with existing details and merge user-provided changes
 		mergedDetails := make(map[string]interface{})
-		if currentSecret.SecretDetails != nil {
-			for k, v := range currentSecret.SecretDetails {
-				mergedDetails[k] = v
+		if currentSecret.SecretDetails != "" && currentSecret.SecretDetails != "{}" {
+			// Parse existing details from string
+			var existingDetails map[string]interface{}
+			if err := json.Unmarshal([]byte(currentSecret.SecretDetails), &existingDetails); err == nil {
+				for k, v := range existingDetails {
+					mergedDetails[k] = v
+				}
 			}
 		}
 		// Override with user-provided values
@@ -206,9 +241,12 @@ func (s *IdsecSIASecretsVMService) ChangeSecret(changeSecret *vmsecretsmodels.Id
 			mergedDetails[k] = v
 		}
 		changeSecretJSON["secret_details"] = mergedDetails
-	} else if currentSecret.SecretDetails != nil {
-		// Preserve existing details if not changing
-		changeSecretJSON["secret_details"] = currentSecret.SecretDetails
+	} else if currentSecret.SecretDetails != "" && currentSecret.SecretDetails != "{}" {
+		// Preserve existing details if not changing - parse string to map for API
+		var existingDetails map[string]interface{}
+		if err := json.Unmarshal([]byte(currentSecret.SecretDetails), &existingDetails); err == nil {
+			changeSecretJSON["secret_details"] = existingDetails
+		}
 	}
 
 	if changeSecret.ProvisionerUsername != "" && changeSecret.ProvisionerPassword != "" {
@@ -317,14 +355,14 @@ func (s *IdsecSIASecretsVMService) listSecretsWithFilter(secretType string, secr
 		return nil, err
 	}
 	var secrets []*vmsecretsmodels.IdsecSIAVMSecret
-	err = mapstructure.Decode(secretsResponseJSON, &secrets)
+	err = decodeWithMapToStringHook(secretsResponseJSON, &secrets)
 	if err != nil {
 		return nil, err
 	}
-	// Initialize SecretDetails maps to prevent nil pointer issues
+	// Ensure SecretDetails is properly set (empty JSON object if not provided)
 	for _, secret := range secrets {
-		if secret.SecretDetails == nil {
-			secret.SecretDetails = make(map[string]interface{})
+		if secret.SecretDetails == "" {
+			secret.SecretDetails = "{}"
 		}
 	}
 	return secrets, nil
@@ -420,7 +458,12 @@ func (s *IdsecSIASecretsVMService) ListSecretsBy(filter *vmsecretsmodels.IdsecSI
 
 		// Filter by AccountDomain pattern if specified
 		if filter.AccountDomain != "" {
-			accountDomain, ok := secret.SecretDetails["account_domain"].(string)
+			// Parse SecretDetails to get account_domain
+			detailsMap, err := secret.GetSecretDetailsMap()
+			if err != nil {
+				continue
+			}
+			accountDomain, ok := detailsMap["account_domain"].(string)
 			if !ok {
 				continue
 			}
@@ -459,12 +502,13 @@ func (s *IdsecSIASecretsVMService) Secret(getSecret *vmsecretsmodels.IdsecSIAVMG
 		return nil, err
 	}
 	var secret vmsecretsmodels.IdsecSIAVMSecret
-	err = mapstructure.Decode(secretJSON, &secret)
+	err = decodeWithMapToStringHook(secretJSON, &secret)
 	if err != nil {
 		return nil, err
 	}
-	if secret.SecretDetails == nil {
-		secret.SecretDetails = make(map[string]interface{})
+	// Ensure SecretDetails is properly set (empty JSON object if not provided)
+	if secret.SecretDetails == "" {
+		secret.SecretDetails = "{}"
 	}
 	return &secret, nil
 }
