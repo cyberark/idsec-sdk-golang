@@ -35,21 +35,21 @@ type IdsecUAPSCABaseTarget interface {
 
 // IdsecUAPSCATarget represents the base target structure.
 type IdsecUAPSCATarget struct {
-	RoleID        string `json:"role_id" mapstructure:"role_id" flag:"role-id" desc:"The role id of the target"`
-	WorkspaceID   string `json:"workspace_id" mapstructure:"workspace_id" flag:"workspace-id" desc:"The workspace id of the target"`
-	RoleName      string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The role name of the target"`
-	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The workspace name of the target"`
+	RoleID        string `json:"role_id" validate:"required" mapstructure:"role_id" flag:"role-id" desc:"AWS: The unique identifier assigned to the IAM role in AWS (IAM role ARN); AWS organization: The unique identifier assigned to the IAM role in AWS (IAM role ARN); Azure: The identifier of Azure resource role or Entra ID role; GCP: The Google Cloud role and hierarchy structure"`
+	WorkspaceID   string `json:"workspace_id" validate:"required" mapstructure:"workspace_id" flag:"workspace-id" desc:"AWS: The workspace ID given to the standalone AWS account when it was onboarded to CyberArk; AWS organization: The workspace ID given to the AWS organization when it was onboarded to CyberArk; Azure: The workspace ID given to Microsoft Entra ID when it was onboarded to CyberArk; GCP: The workspace ID given to the Google Cloud organization when it was onboarded to CyberArk"`
+	RoleName      string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The name of role with which the identity can access the target workspace"`
+	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The workspace name of the target. GCP: The Google Cloud Workspace"`
 }
 
 // IdsecUAPSCAOrgTarget represents a target with an organization ID.
 type IdsecUAPSCAOrgTarget struct {
 	IdsecUAPSCATarget `mapstructure:",squash"`
-	OrgID             string `json:"org_id" mapstructure:"org_id" flag:"org-id" desc:"The organization id of the cloud target"`
+	OrgID             string `json:"org_id" mapstructure:"org_id" flag:"org-id" desc:"AWSOrg:Management account ID (required only for AWS IAM Identity Center), Azure: Azure directory ID (UUID), GCP: The Google Cloud organization ID"`
 }
 
 // IdsecUAPSCAAWSAccountTarget represents an AWS account target.
 type IdsecUAPSCAAWSAccountTarget struct {
-	IdsecUAPSCATarget `mapstructure:",squash"`
+	IdsecUAPSCATarget `mapstructure:",squash" desc:"AWS account details"`
 }
 
 // Serialize serializes the IdsecUAPSCAAWSAccountTarget to a map.
@@ -118,7 +118,7 @@ func (s *IdsecUAPSCAAWSOrganizationTarget) Deserialize(data map[string]interface
 // IdsecUAPSCAAzureTarget represents an Azure target.
 type IdsecUAPSCAAzureTarget struct {
 	IdsecUAPSCAOrgTarget `mapstructure:",squash"`
-	WorkspaceType        string `json:"workspace_type" mapstructure:"workspace_type" flag:"workspace-type" desc:"The type of the workspace in Azure" choices:"directory,subscription,resource_group,resource,management_group"`
+	WorkspaceType        string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk" choices:"directory,subscription,resource_group,resource,management_group"`
 	RoleType             int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure"`
 }
 
@@ -164,9 +164,9 @@ func (s *IdsecUAPSCAAzureTarget) Deserialize(data map[string]interface{}) error 
 // IdsecUAPSCAGCPTarget represents a GCP target.
 type IdsecUAPSCAGCPTarget struct {
 	IdsecUAPSCAOrgTarget `mapstructure:",squash"`
-	WorkspaceType        string `json:"workspace_type" mapstructure:"workspace_type" flag:"workspace-type" desc:"The type of the workspace in GCP" choices:"gcp_organization,folder,project"`
+	WorkspaceType        string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Google Cloud organization was onboarded to CyberArk - Full organization, folder, project" choices:"gcp_organization,folder,project"`
 	RolePackage          string `json:"role_package,omitempty" mapstructure:"role_package,omitempty" flag:"role-package" desc:"The role package of the target"`
-	RoleType             int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in GCP"`
+	RoleType             int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of role in GCP"`
 }
 
 // Serialize serializes the IdsecUAPSCAGCPTarget to a map.
@@ -214,10 +214,10 @@ func (s *IdsecUAPSCAGCPTarget) Deserialize(data map[string]interface{}) error {
 
 // IdsecUAPSCACloudConsoleTarget represents a cloud console target.
 type IdsecUAPSCACloudConsoleTarget struct {
-	AwsAccountTargets      []IdsecUAPSCAAWSAccountTarget      `json:"aws_account_targets,omitempty" mapstructure:"aws_account_targets,omitempty" flag:"aws-account-targets" desc:"List of AWS account targets"`
-	AwsOrganizationTargets []IdsecUAPSCAAWSOrganizationTarget `json:"aws_organization_targets,omitempty" mapstructure:"aws_organization_targets,omitempty" flag:"aws-organization-targets" desc:"List of AWS organization targets"`
-	AzureTargets           []IdsecUAPSCAAzureTarget           `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"List of Azure targets"`
-	GcpTargets             []IdsecUAPSCAGCPTarget             `json:"gcp_targets,omitempty" mapstructure:"gcp_targets,omitempty" flag:"gcp-targets" desc:"List of GCP targets"`
+	AwsAccountTargets      []IdsecUAPSCAAWSAccountTarget      `json:"aws_account_targets,omitempty" mapstructure:"aws_account_targets,omitempty" flag:"aws-account-targets" desc:"AWS account details"`
+	AwsOrganizationTargets []IdsecUAPSCAAWSOrganizationTarget `json:"aws_organization_targets,omitempty" mapstructure:"aws_organization_targets,omitempty" flag:"aws-organization-targets" desc:"AWS organization workspace details"`
+	AzureTargets           []IdsecUAPSCAAzureTarget           `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"List of Azure targets or Microsoft Entra ID workspace details"`
+	GcpTargets             []IdsecUAPSCAGCPTarget             `json:"gcp_targets,omitempty" mapstructure:"gcp_targets,omitempty" flag:"gcp-targets" desc:"Google Cloud workspace details"`
 }
 
 // SerializeTargets serializes the IdsecUAPSCACloudConsoleTarget to a map.

@@ -27,7 +27,7 @@ var TerraformActionSCADiscoveryDataSource = &actions.IdsecServiceTerraformDataSo
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "sca-discovery",
-			ActionDescription: "Standalone SCA Discovery Data Source.",
+			ActionDescription: "Discover structural updates to an organization/directory that has already been onboarded to CyberArk, and scan for roles and resources",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

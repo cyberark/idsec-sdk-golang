@@ -15,7 +15,7 @@ package models
 // NOTE: File relocated from pkg/services/uap/sca/models/idsec_sca_job_status.go.
 // Import path updated to github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models.
 type IdsecSCAJobStatusResponse struct {
-	JobID          string                 `json:"job_id,omitempty" mapstructure:"job_id,omitempty" flag:"job-id" desc:"Identifier of the job being polled."`
+	JobID          string                 `json:"job_id,omitempty" mapstructure:"job_id,omitempty" flag:"job-id" desc:"The ID of the job being polled."`
 	Operation      string                 `json:"operation,omitempty" mapstructure:"operation,omitempty" flag:"operation" desc:"Backend operation name (optional)."`
 	Status         string                 `json:"status,omitempty" mapstructure:"status,omitempty" flag:"status" desc:"Current job state (running | success | failure)."`
 	LastUpdated    string                 `json:"last_updated,omitempty" mapstructure:"last_updated,omitempty" flag:"last-updated" desc:"Timestamp of last status update (backend defined format)."`

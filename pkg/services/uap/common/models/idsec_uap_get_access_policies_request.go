@@ -37,24 +37,24 @@ var mapAliasToFieldName = map[string]string{
 
 // IdsecUAPGetQueryParams represents the query parameters for retrieving access policies.
 type IdsecUAPGetQueryParams struct {
-	Filter               string `json:"filter,omitempty" mapstructure:"filter,omitempty" flag:"filter" desc:"The filter query to apply on the policies"`
+	Filter               string `json:"filter,omitempty" mapstructure:"filter,omitempty" flag:"filter" desc:"Filter query to retrieve access policies. Supported operations: eq (except Identities which supports only contains), or, and. If you want to query on the same field, use 'or' condition. Use the 'and' operation to filter on two fields or more. Supported field names: policyTags, identities, targetCategory, status, locationType."`
 	ShowEditablePolicies bool   `json:"show_editable_policies,omitempty" mapstructure:"show_editable_policies,omitempty" flag:"show-editable-policies" desc:"Show editable policies"`
-	Q                    string `json:"q,omitempty" mapstructure:"q,omitempty" flag:"q" desc:"Free text search on policy name or description"`
-	NextToken            string `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"The next token for pagination"`
-	Limit                int    `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of policies to return in the response"`
+	Q                    string `json:"q,omitempty" mapstructure:"q,omitempty" flag:"q" desc:"Use this for a free text search on policy name and description."`
+	NextToken            string `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"Token from the previous API response. To retrieve the next N results, use DS1_10;DS2_20. This means that the service will retrieve 10 results from DS_1 and 20 results from DS_2"`
+	Limit                int    `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of access policies to return. You can request up to 50 policies."`
 }
 
-// IdsecUAPFilters represents the filters for UAP policies.
+// IdsecUAPFilters represents the filters for Access control policies.
 type IdsecUAPFilters struct {
-	LocationType         []string `json:"location_type,omitempty" mapstructure:"location_type,omitempty" flag:"location-type" desc:"List of wanted location types for the policies"`
-	TargetCategory       []string `json:"target_category,omitempty" mapstructure:"target_category,omitempty" flag:"target-category" desc:"List of wanted target categories for the policies"`
-	PolicyType           []string `json:"policy_type,omitempty" mapstructure:"policy_type,omitempty" flag:"policy-type" desc:"List of wanted policy types for the policies"`
-	PolicyTags           []string `json:"policy_tags,omitempty" mapstructure:"policy_tags,omitempty" flag:"policy-tags" desc:"List of wanted policy tags for the policies"`
-	Identities           []string `json:"identities,omitempty" mapstructure:"identities,omitempty" flag:"identities" desc:"List of identities to filter the policies by"`
-	Status               []string `json:"status,omitempty" mapstructure:"status,omitempty" flag:"status" desc:"List of wanted policy statuses for the policies"`
-	TextSearch           string   `json:"text_search,omitempty" mapstructure:"text_search,omitempty" flag:"text-search" desc:"Text search filter to apply on the policies names and descriptions"`
-	ShowEditablePolicies bool     `json:"show_editable_policies,omitempty" mapstructure:"show_editable_policies,omitempty" flag:"show-editable-policies" desc:"Whether to show editable policies or not" default:"true"`
-	MaxPages             int      `json:"max_pages" mapstructure:"max_pages" flag:"max-pages" desc:"The maximum number of pages for pagination, default is 1000000" default:"1000000"`
+	LocationType         []string `json:"location_type,omitempty" mapstructure:"location_type,omitempty" flag:"location-type" desc:"List of location types by which to filter the policies"`
+	TargetCategory       []string `json:"target_category,omitempty" mapstructure:"target_category,omitempty" flag:"target-category" desc:"List of target categories by which to filter the policies"`
+	PolicyType           []string `json:"policy_type,omitempty" mapstructure:"policy_type,omitempty" flag:"policy-type" desc:"List of policy types by which to filter the policies"`
+	PolicyTags           []string `json:"policy_tags,omitempty" mapstructure:"policy_tags,omitempty" flag:"policy-tags" desc:"List of policy tags by which to filter the policies"`
+	Identities           []string `json:"identities,omitempty" mapstructure:"identities,omitempty" flag:"identities" desc:"List of identities by which to filter the policies"`
+	Status               []string `json:"status,omitempty" mapstructure:"status,omitempty" flag:"status" desc:"List of policy statuses by which to filter the policies"`
+	TextSearch           string   `json:"text_search,omitempty" mapstructure:"text_search,omitempty" flag:"text-search" desc:"Text search filter to apply on policy names and descriptions"`
+	ShowEditablePolicies bool     `json:"show_editable_policies,omitempty" mapstructure:"show_editable_policies,omitempty" flag:"show-editable-policies" desc:"Whether or not to show editable policies" default:"true"`
+	MaxPages             int      `json:"max_pages" mapstructure:"max_pages" flag:"max-pages" desc:"The maximum number of pages for pagination, Default: 1000000" default:"1000000"`
 }
 
 // NewIdsecUAPFilters initializes a new instance of IdsecUAPFilters with default values.
@@ -120,7 +120,7 @@ func (filters *IdsecUAPFilters) BuildFilterQueryFromFilters() string {
 // IdsecUAPGetAccessPoliciesRequest represents the request to get access policies.
 type IdsecUAPGetAccessPoliciesRequest struct {
 	Filters   *IdsecUAPFilters `json:"filters,omitempty" mapstructure:"filters,omitempty" flag:"filters" desc:"The filter query to apply on the policies"`
-	Limit     int              `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of policies to return in the response" default:"50"`
+	Limit     int              `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of policies to return in the response; Default: 50" default:"50"`
 	NextToken string           `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"The next token for pagination"`
 }
 

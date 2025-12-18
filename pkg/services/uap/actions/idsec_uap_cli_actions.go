@@ -11,7 +11,7 @@ import (
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "uap",
-		ActionDescription: "Access policies define when specified users may access particular assets and for how long. You may use access policies for cloud workspaces, virtual machines, and databases.",
+		ActionDescription: "Access policies define when specified users may access particular assets and for how long. You can define access policies to cloud services, virtual machines, and databases.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

@@ -8,7 +8,7 @@ const (
 
 // IdsecUAPCommonAccessPolicy represents the access policy in UAP.
 type IdsecUAPCommonAccessPolicy struct {
-	Metadata                 IdsecUAPMetadata    `json:"metadata,omitempty" mapstructure:"metadata,omitempty" flag:"metadata" desc:"Policy metadata id name and extra information"`
-	Principals               []IdsecUAPPrincipal `json:"principals,omitempty" mapstructure:"principals,omitempty" flag:"principals" desc:"List of users, groups and roles that the policy applies to"`
-	DelegationClassification string              `json:"delegation_classification" mapstructure:"delegation_classification" flag:"delegation-classification" desc:"Indicates the user rights for the current policy" choices:"Restricted,Unrestricted" default:"Unrestricted"`
+	Metadata                 IdsecUAPMetadata    `json:"metadata,omitempty" validate:"required" mapstructure:"metadata,omitempty" flag:"metadata" desc:"The policy metadata: ID, name, and additional information"`
+	Principals               []IdsecUAPPrincipal `json:"principals,omitempty" validate:"required" mapstructure:"principals,omitempty" flag:"principals" desc:"The identity: user, group, role"`
+	DelegationClassification string              `json:"delegation_classification" validate:"required" mapstructure:"delegation_classification" flag:"delegation-classification" desc:"Indicates the user rights for the policy. Default: Unrestricted" choices:"Restricted,Unrestricted" default:"Unrestricted"`
 }
