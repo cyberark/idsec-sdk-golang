@@ -7,9 +7,9 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	commonuapmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
-	uapscamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca/models"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	policycloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/models"
+	commonpolicymodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
 func main() {
@@ -34,29 +34,29 @@ func main() {
 		panic(err)
 	}
 
-	uapAPI, err := uap.NewIdsecUAPAPI(ispAuth.(*auth.IdsecISPAuth))
+	policyAPI, err := policy.NewIdsecPolicyAPI(ispAuth.(*auth.IdsecISPAuth))
 	if err != nil {
 		panic(err)
 	}
-	policy, err := uapAPI.Sca().AddPolicy(
-		&uapscamodels.IdsecUAPSCACloudConsoleAccessPolicy{
-			IdsecUAPCommonAccessPolicy: commonuapmodels.IdsecUAPCommonAccessPolicy{
-				Metadata: commonuapmodels.IdsecUAPMetadata{
+	policy, err := policyAPI.CloudAccess().AddPolicy(
+		&policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{
+			IdsecPolicyCommonAccessPolicy: commonpolicymodels.IdsecPolicyCommonAccessPolicy{
+				Metadata: commonpolicymodels.IdsecPolicyMetadata{
 					Name:        "Example SCA Access Policy",
 					Description: "This is an example of a SCA access policy.",
-					Status: commonuapmodels.IdsecUAPPolicyStatus{
-						Status: commonuapmodels.StatusTypeValidating,
+					Status: commonpolicymodels.IdsecPolicyStatus{
+						Status: commonpolicymodels.StatusTypeValidating,
 					},
-					PolicyEntitlement: commonuapmodels.IdsecUAPPolicyEntitlement{
+					PolicyEntitlement: commonpolicymodels.IdsecPolicyEntitlement{
 						TargetCategory: commonmodels.CategoryTypeCloudConsole,
 						LocationType:   commonmodels.WorkspaceTypeAWS,
-						PolicyType:     commonuapmodels.PolicyTypeRecurring,
+						PolicyType:     commonpolicymodels.PolicyTypeRecurring,
 					},
 					PolicyTags: []string{},
 				},
-				Principals: []commonuapmodels.IdsecUAPPrincipal{
+				Principals: []commonpolicymodels.IdsecPolicyPrincipal{
 					{
-						Type:                commonuapmodels.PrincipalTypeUser,
+						Type:                commonpolicymodels.PrincipalTypeUser,
 						ID:                  "user-id",
 						Name:                "user@cyberark.cloud.12345",
 						SourceDirectoryName: "CyberArk",
@@ -64,9 +64,9 @@ func main() {
 					},
 				},
 			},
-			Conditions: uapscamodels.IdsecUAPSCAConditions{
-				IdsecUAPConditions: commonuapmodels.IdsecUAPConditions{
-					AccessWindow: commonuapmodels.IdsecUAPTimeCondition{
+			Conditions: policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
+				IdsecPolicyConditions: commonpolicymodels.IdsecPolicyConditions{
+					AccessWindow: commonpolicymodels.IdsecPolicyTimeCondition{
 						DaysOfTheWeek: []int{1, 2, 3, 4, 5},
 						FromHour:      "09:00:00",
 						ToHour:        "17:00:00",
@@ -74,10 +74,10 @@ func main() {
 					MaxSessionDuration: 4,
 				},
 			},
-			Targets: uapscamodels.IdsecUAPSCACloudConsoleTarget{
-				AwsAccountTargets: []uapscamodels.IdsecUAPSCAAWSAccountTarget{
+			Targets: policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
+				AwsAccountTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAWSAccountTarget{
 					{
-						IdsecUAPSCATarget: uapscamodels.IdsecUAPSCATarget{
+						IdsecPolicyCloudAccessTarget: policycloudaccessmodels.IdsecPolicyCloudAccessTarget{
 							RoleID:        "arn:aws:iam::123456789012:role/ExampleRole",
 							RoleName:      "ExampleRole",
 							WorkspaceID:   "123456789012",

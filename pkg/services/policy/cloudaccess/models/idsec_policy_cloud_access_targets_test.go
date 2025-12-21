@@ -9,24 +9,24 @@ import (
 func TestSerializeTargets(t *testing.T) {
 	tests := []struct {
 		name       string
-		target     IdsecUAPSCACloudConsoleTarget
+		target     IdsecPolicyCloudAccessCloudConsoleTarget
 		expectsLen int
 		expectsErr bool
 	}{
 		{
 			name: "success_serialize_all_targets",
-			target: IdsecUAPSCACloudConsoleTarget{
-				AwsAccountTargets:      []IdsecUAPSCAAWSAccountTarget{{IdsecUAPSCATarget: IdsecUAPSCATarget{RoleID: "r1", WorkspaceID: "w1"}}},
-				AwsOrganizationTargets: []IdsecUAPSCAAWSOrganizationTarget{{IdsecUAPSCAOrgTarget: IdsecUAPSCAOrgTarget{IdsecUAPSCATarget: IdsecUAPSCATarget{RoleID: "r2", WorkspaceID: "w2"}, OrgID: "org1"}}},
-				AzureTargets:           []IdsecUAPSCAAzureTarget{{IdsecUAPSCAOrgTarget: IdsecUAPSCAOrgTarget{IdsecUAPSCATarget: IdsecUAPSCATarget{RoleID: "r3", WorkspaceID: "w3"}, OrgID: "azorg"}, WorkspaceType: AzureWSTypeSubscription, RoleType: 1}},
-				GcpTargets:             []IdsecUAPSCAGCPTarget{{IdsecUAPSCAOrgTarget: IdsecUAPSCAOrgTarget{IdsecUAPSCATarget: IdsecUAPSCATarget{RoleID: "r4", WorkspaceID: "w4"}, OrgID: "gcporg"}, WorkspaceType: GCPWSTypeProject, RolePackage: "pkg", RoleType: 2}},
+			target: IdsecPolicyCloudAccessCloudConsoleTarget{
+				AwsAccountTargets:      []IdsecPolicyCloudAccessAWSAccountTarget{{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r1", WorkspaceID: "w1"}}},
+				AwsOrganizationTargets: []IdsecPolicyCloudAccessAWSOrganizationTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r2", WorkspaceID: "w2"}, OrgID: "org1"}}},
+				AzureTargets:           []IdsecPolicyCloudAccessAzureTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r3", WorkspaceID: "w3"}, OrgID: "azorg"}, WorkspaceType: AzureWSTypeSubscription, RoleType: 1}},
+				GcpTargets:             []IdsecPolicyCloudAccessGCPTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r4", WorkspaceID: "w4"}, OrgID: "gcporg"}, WorkspaceType: GCPWSTypeProject, RolePackage: "pkg", RoleType: 2}},
 			},
 			expectsLen: 4,
 			expectsErr: false,
 		},
 		{
 			name:       "serialize_empty",
-			target:     IdsecUAPSCACloudConsoleTarget{},
+			target:     IdsecPolicyCloudAccessCloudConsoleTarget{},
 			expectsLen: 0,
 			expectsErr: false,
 		},
@@ -63,7 +63,7 @@ func TestDeserializeTargets(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      map[string]interface{}
-		expects    IdsecUAPSCACloudConsoleTarget
+		expects    IdsecPolicyCloudAccessCloudConsoleTarget
 		expectsErr bool
 	}{
 		{
@@ -97,7 +97,7 @@ func TestDeserializeTargets(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			var target IdsecUAPSCACloudConsoleTarget
+			var target IdsecPolicyCloudAccessCloudConsoleTarget
 			err := target.DeserializeTargets(tt.input)
 			if tt.expectsErr {
 				if err == nil {
@@ -146,7 +146,7 @@ func TestClearTargetsFromData(t *testing.T) {
 		"gcp_targets":              []interface{}{},
 		"gcpTargets":               []interface{}{},
 	}
-	var target IdsecUAPSCACloudConsoleTarget
+	var target IdsecPolicyCloudAccessCloudConsoleTarget
 	target.ClearTargetsFromData(data)
 	// none of the keys should remain
 	for k := range data {

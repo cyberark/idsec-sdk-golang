@@ -1,10 +1,10 @@
-package sca
+package cloudaccess
 
 import (
 	"reflect"
 	"testing"
 
-	uapcommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
+	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
 // assertErrorMatch validates an error presence and optional message.
@@ -37,29 +37,29 @@ func panicWrapper(fn func()) (panicked bool) {
 
 // TestServiceConfig verifies ServiceConfig method returns the global ServiceConfig value with minimal branching.
 func TestServiceConfig(t *testing.T) {
-	svc := &IdsecUAPSCAService{}
+	svc := &IdsecPolicyCloudAccessService{}
 	if cfg := svc.ServiceConfig(); !reflect.DeepEqual(cfg, ServiceConfig) {
 		t.Fatalf("service_config_mismatch: expected %+v got %+v", ServiceConfig, cfg)
 	}
 }
 
 // evaluatePolicyStatus runs PolicyStatus and asserts results; extracted to reduce complexity in test function.
-func evaluatePolicyStatus(t *testing.T, svc *IdsecUAPSCAService, req *uapcommonmodels.IdsecUAPGetPolicyStatus, expectErr bool, expectMsg string) {
+func evaluatePolicyStatus(t *testing.T, svc *IdsecPolicyCloudAccessService, req *policycommonmodels.IdsecPolicyGetPolicyStatus, expectErr bool, expectMsg string) {
 	_, err := svc.PolicyStatus(req)
 	assertErrorMatch(t, err, expectErr, expectMsg)
 }
 
 // TestPolicyStatus_validation covers validation error scenarios.
 func TestPolicyStatus_validation(t *testing.T) {
-	svc := &IdsecUAPSCAService{}
+	svc := &IdsecPolicyCloudAccessService{}
 	tests := []struct {
 		name      string
-		req       *uapcommonmodels.IdsecUAPGetPolicyStatus
+		req       *policycommonmodels.IdsecPolicyGetPolicyStatus
 		expectErr bool
 		msg       string
 	}{
 		{"error_nil_request", nil, true, "getPolicyStatus cannot be nil"},
-		{"error_both_fields_empty", &uapcommonmodels.IdsecUAPGetPolicyStatus{}, true, "either PolicyID or PolicyName must be provided to retrieve policy status"},
+		{"error_both_fields_empty", &policycommonmodels.IdsecPolicyGetPolicyStatus{}, true, "either PolicyID or PolicyName must be provided to retrieve policy status"},
 	}
 	for _, tc := range tests {
 		caseData := tc // capture for closure
@@ -71,7 +71,7 @@ func TestPolicyStatus_validation(t *testing.T) {
 
 // TestNilInputPanics consolidates panic behavior tests for Add/Update/Delete policy methods.
 func TestNilInputPanics(t *testing.T) {
-	svc := &IdsecUAPSCAService{}
+	svc := &IdsecPolicyCloudAccessService{}
 	tests := []struct {
 		name string
 		fn   func()

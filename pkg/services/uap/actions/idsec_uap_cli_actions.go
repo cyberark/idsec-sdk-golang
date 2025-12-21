@@ -2,7 +2,6 @@ package actions
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
-	uapscaactions "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca/actions"
 	uapsiadbactions "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db/actions"
 	uapsiavmactions "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm/actions"
 )
@@ -17,7 +16,6 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	},
 	ActionAliases: []string{"useraccesspolicies"},
 	Subactions: []*actions.IdsecServiceCLIActionDefinition{
-		uapscaactions.CLIAction,
 		uapsiadbactions.CLIAction,
 		uapsiavmactions.CLIAction,
 	},

@@ -1,18 +1,17 @@
 package models
 
 import (
-	uapcommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
+	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
-// IdsecUAPSCAFilters represents filters specific to the SCA (Security Cloud Access) policies
-// within the UAP (Unified Access Policies) service.
+// IdsecPolicyCloudAccessFilters exposes Cloud Access–specific filter helpers built atop the shared policy filters.
 //
 // You can set the following fields:
 //
 //   - TargetCategory: []common.IdsecCategoryType
 //     A list of target categories to filter the policies by.
 //
-//   - PolicyType: []common.IdsecUAPPolicyType
+//   - PolicyType: []common.IdsecPolicyPolicyType
 //     A list of policy types to filter the policies by.
 //
 //   - PolicyTags: []string
@@ -21,7 +20,7 @@ import (
 //   - Identities: []string
 //     A list of identities to filter the policies by.
 //
-//   - Status: []common.IdsecUAPStatusType
+//   - Status: []common.IdsecPolicyStatusType
 //     A list of policy statuses to filter the policies by.
 //
 //   - TextSearch: *string
@@ -29,6 +28,6 @@ import (
 //
 //   - ShowEditablePolicies: *bool
 //     Whether to show only policies that are editable by the current user.
-type IdsecUAPSCAFilters struct {
-	uapcommonmodels.IdsecUAPFilters `mapstructure:",squash"`
+type IdsecPolicyCloudAccessFilters struct {
+	policycommonmodels.IdsecPolicyFilters `mapstructure:",squash"`
 }

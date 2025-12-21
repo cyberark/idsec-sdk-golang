@@ -17,6 +17,9 @@ import (
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configuration"
@@ -44,7 +47,6 @@ import (
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sm"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common"
-	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm"
 )

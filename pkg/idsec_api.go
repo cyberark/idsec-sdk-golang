@@ -65,6 +65,8 @@ import (
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
+	policy "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
 	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	configuration "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configuration"
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
@@ -87,7 +89,6 @@ import (
 	targetsets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/targetsets"
 	sm "github.com/cyberark/idsec-sdk-golang/pkg/services/sm"
 	uap "github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	sca2 "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca"
 	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db"
 	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm"
 )
@@ -358,6 +359,32 @@ func (api *IdsecAPI) PcloudSafes() (*safes.IdsecPCloudSafesService, error) {
 	}
 	var baseService services.IdsecService = service
 	api.services[safes.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) Policy() (*policy.IdsecPolicyService, error) {
+	if serviceIfs, ok := api.services[policy.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*policy.IdsecPolicyService), nil
+	}
+	service, err := policy.ServiceGenerator(api.loadServiceAuthenticators(policy.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[policy.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) PolicyCloudaccess() (*cloudaccess.IdsecPolicyCloudAccessService, error) {
+	if serviceIfs, ok := api.services[cloudaccess.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*cloudaccess.IdsecPolicyCloudAccessService), nil
+	}
+	service, err := cloudaccess.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[cloudaccess.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -657,19 +684,6 @@ func (api *IdsecAPI) UapDb() (*db3.IdsecUAPSIADBService, error) {
 	}
 	var baseService services.IdsecService = service
 	api.services[db3.ServiceConfig.ServiceName] = &baseService
-	return service, nil
-}
-
-func (api *IdsecAPI) UapSca() (*sca2.IdsecUAPSCAService, error) {
-	if serviceIfs, ok := api.services[sca2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sca2.IdsecUAPSCAService), nil
-	}
-	service, err := sca2.ServiceGenerator(api.loadServiceAuthenticators(sca2.ServiceConfig)...)
-	if err != nil {
-		return nil, err
-	}
-	var baseService services.IdsecService = service
-	api.services[sca2.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

@@ -2,7 +2,6 @@ package uap
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm"
 )
@@ -10,7 +9,6 @@ import (
 // IdsecUAPAPI provides a unified API for accessing various UAP services, including SCA and SIA DB services.
 type IdsecUAPAPI struct {
 	uap *IdsecUAPService
-	sca *sca.IdsecUAPSCAService
 	db  *db.IdsecUAPSIADBService
 	vm  *vm.IdsecUAPSIAVMService
 }
@@ -19,10 +17,6 @@ type IdsecUAPAPI struct {
 func NewIdsecUAPAPI(ispAuth *auth.IdsecISPAuth) (*IdsecUAPAPI, error) {
 	var baseIspAuth auth.IdsecAuth = ispAuth
 	uapService, err := NewIdsecUAPService(baseIspAuth)
-	if err != nil {
-		return nil, err
-	}
-	scaService, err := sca.NewIdsecUAPSCAService(baseIspAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +30,6 @@ func NewIdsecUAPAPI(ispAuth *auth.IdsecISPAuth) (*IdsecUAPAPI, error) {
 	}
 	return &IdsecUAPAPI{
 		uap: uapService,
-		sca: scaService,
 		db:  dbService,
 		vm:  vmService,
 	}, nil
@@ -45,11 +38,6 @@ func NewIdsecUAPAPI(ispAuth *auth.IdsecISPAuth) (*IdsecUAPAPI, error) {
 // Uap returns the IdsecUAPService instance from the IdsecUAPAPI.
 func (api *IdsecUAPAPI) Uap() *IdsecUAPService {
 	return api.uap
-}
-
-// Sca returns the IdsecUAPSCAService instance from the IdsecUAPAPI.
-func (api *IdsecUAPAPI) Sca() *sca.IdsecUAPSCAService {
-	return api.sca
 }
 
 // Db returns the IdsecUAPSIADBService instance from the IdsecUAPAPI.

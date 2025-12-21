@@ -2,19 +2,19 @@ package actions
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
-	uapscamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca/models"
+	cloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/models"
 )
 
-// TerraformActionSCAResource is a struct that defines the UAP SCA resource action for the Idsec service for Terraform.
-var TerraformActionSCAResource = &actions.IdsecServiceTerraformResourceActionDefinition{
+// TerraformActionCloudAccessResource defines the Cloud Access policy resource for Terraform.
+var TerraformActionCloudAccessResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "policy-cloud-access",
-			ActionDescription: "SCA Cloud Access Policy resource.",
+			ActionDescription: "Cloud Access Policy resource.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &uapscamodels.IdsecUAPSCACloudConsoleAccessPolicy{},
+		StateSchema: &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{},
 		ComputedAsSetAttributes: []string{
 			"days_of_the_week",
 		},
@@ -36,16 +36,16 @@ var TerraformActionSCAResource = &actions.IdsecServiceTerraformResourceActionDef
 	},
 }
 
-// TerraformActionSCADataSource is a struct that defines the UAP SCA data source action for the Idsec service for Terraform.
-var TerraformActionSCADataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
+// TerraformActionCloudAccessDataSource defines the Cloud Access policy data source for Terraform.
+var TerraformActionCloudAccessDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "policy-cloud-access",
-			ActionDescription: "SCA Cloud Access Policy Data Source.",
+			ActionDescription: "Cloud Access Policy data source.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &uapscamodels.IdsecUAPSCACloudConsoleAccessPolicy{},
+		StateSchema: &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{},
 	},
 	DataSourceAction: "policy",
 }
