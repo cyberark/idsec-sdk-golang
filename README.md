@@ -790,6 +790,109 @@ func main() {
 
 More examples can be found in the [examples](examples) folder
 
+Terraform Provider Integration
+===============================
+
+## Managing Immutable Attributes
+
+The SDK supports defining immutable attributes for Terraform resources. Immutable attributes are fields that cannot be changed after resource creation - any attempt to modify them will cause the Terraform plan to fail with an error, preventing accidental changes to resource identity fields.
+
+### What are Immutable Attributes?
+
+Immutable attributes represent the identity of a resource. Changing these would fundamentally alter what resource is being managed, so they are protected from modification. Examples include:
+
+- Resource IDs (e.g., `entra_id`, `subscription_id`)
+- Resource names that serve as identifiers
+- Parent references (e.g., tenant IDs)
+
+### How to Define Immutable Attributes
+
+To mark attributes as immutable, add the `ImmutableAttributes` field to your Terraform action definition:
+
+```go
+var TerraformActionEntraResource = &actions.IdsecServiceTerraformResourceActionDefinition{
+    IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+        IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+            ActionName:        "cce-azure-entra",
+            ActionDescription: "CCE Azure Entra resource",
+            ActionVersion:     1,
+            Schemas:           ActionToSchemaMap,
+        },
+        ExtraRequiredAttributes: []string{},
+        ImmutableAttributes: []string{
+            "entra_id",
+            "entra_tenant_name",
+        },
+        StateSchema: &azuremodels.TfIdsecCCEAzureEntra{},
+    },
+    // ... rest of definition
+}
+```
+
+### Adding Immutable Attributes to Existing Resources
+
+1. **Identify identity fields** - Determine which fields uniquely identify the resource
+2. **Add to action definition** - Update the `ImmutableAttributes` slice in the Terraform action
+3. **Test thoroughly** - Verify that:
+   - Resource creation works
+   - Updates to non-immutable fields succeed
+   - Attempts to change immutable fields fail with clear error messages
+
+Example for a new AWS account resource:
+
+```go
+var TerraformActionAWSAccountResource = &actions.IdsecServiceTerraformResourceActionDefinition{
+    IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+        // ... base definition ...
+        ImmutableAttributes: []string{
+            "account_id",      // AWS account ID cannot change
+            "account_name",    // Account name is part of identity
+        },
+        StateSchema: &awsmodels.TfIdsecCCEAWSAccount{},
+    },
+    // ... rest of definition
+}
+```
+
+### Removing Immutable Attributes
+
+To remove immutability protection from an attribute:
+
+1. Remove the attribute name from the `ImmutableAttributes` slice
+2. Consider the impact on existing Terraform state files
+3. Document the change as a breaking change in release notes
+
+**Warning:** Removing immutability is a breaking change. Users who upgrade will be able to modify previously protected fields, which may lead to unexpected resource replacements.
+
+### Best Practices
+
+- **Only mark true identity fields as immutable** - Don't overuse this feature
+- **Use centralized configuration** - The `ImmutableAttributes` field keeps all immutable attributes in one place for easy maintenance
+- **Provide clear descriptions** - Document why a field is immutable in the `desc` tag
+- **Test with Terraform** - Verify the behavior in actual Terraform workflows
+- **Consider backwards compatibility** - Adding immutability to existing resources is a breaking change
+
+### Terraform User Experience
+
+When a user attempts to change an immutable attribute, they will see:
+
+```text
+Error: Immutable Attribute Cannot Be Changed
+
+  with idsec_cce_azure_entra.example,
+  on main.tf line 2, in resource "idsec_cce_azure_entra" "example":
+   2:   entra_id = "new-uuid"
+
+The attribute 'entra_id' is immutable and cannot be changed after resource creation.
+
+Current value: old-uuid
+Attempted new value: new-uuid
+
+To use a different value, you must create a new resource.
+```
+
+This prevents accidental modifications and guides users toward the correct approach.
+
 Telemetry
 =========
 
@@ -798,6 +901,7 @@ The Idsec SDK collects telemetry data to help improve the product and user exper
 ## Telemetry Data Collected
 
 The following telemetry data is collected by the Idsec SDK and is sent on every API call via additional header `X-Cybr-Telemetry`:
+
 - Environment information (e.g., Cloud Console, Region)
 - Metadata about the executed command (e.g., command name, parameters)
 - OS information (e.g., OS type, version)
