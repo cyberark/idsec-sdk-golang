@@ -1458,3 +1458,198 @@ func TestIdsecServiceExecAction_applyDefaultsRec(t *testing.T) {
 		})
 	}
 }
+
+func TestIdsecServiceExecAction_resolveActionArgs(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupCmd      func() *cobra.Command
+		schema        interface{}
+		expectedError bool
+		validateFunc  func(t *testing.T, result []reflect.Value)
+	}{
+		{
+			name: "success_boolean_false_not_overridden_by_default_true",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().Bool("test-bool", false, "test flag")
+				// User explicitly sets it to false
+				_ = cmd.Flags().Set("test-bool", "false")
+				return cmd
+			},
+			schema: &struct {
+				TestBool bool `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					TestBool bool `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+				})
+				if schema.TestBool != false {
+					t.Errorf("User set test-bool=false, but got [%v] - overwrote the user's input", schema.TestBool)
+				}
+			},
+		},
+		{
+			name: "success_boolean_true_not_overridden",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().Bool("test-bool", false, "test flag")
+				_ = cmd.Flags().Set("test-bool", "true")
+				return cmd
+			},
+			schema: &struct {
+				TestBool bool `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					TestBool bool `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+				})
+				if schema.TestBool != true {
+					t.Errorf("Expected true, got %v", schema.TestBool)
+				}
+			},
+		},
+		{
+			name: "success_int_zero_not_overridden_by_default_nonzero",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().Int("test-int", 0, "test flag")
+				// User explicitly sets it to 0
+				_ = cmd.Flags().Set("test-int", "0")
+				return cmd
+			},
+			schema: &struct {
+				TestInt int `mapstructure:"test_int" flag:"test-int" default:"1234"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					TestInt int `mapstructure:"test_int" flag:"test-int" default:"1234"`
+				})
+				if schema.TestInt != 0 {
+					t.Errorf("User set test-int=0, but got [%v] - overwrote the user's input", schema.TestInt)
+				}
+			},
+		},
+		{
+			name: "success_string_empty_not_overridden_by_default",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().String("test-str", "", "test flag")
+				// User explicitly sets it to empty string
+				_ = cmd.Flags().Set("test-str", "")
+				return cmd
+			},
+			schema: &struct {
+				TestStr string `mapstructure:"test_str" flag:"test-str" default:"default_value"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					TestStr string `mapstructure:"test_str" flag:"test-str" default:"default_value"`
+				})
+				if schema.TestStr != "" {
+					t.Errorf("User set test-str='', but got [%v] - overwrote the user's input", schema.TestStr)
+				}
+			},
+		},
+		{
+			name: "success_omitted_flag_gets_default",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().Bool("test-bool", false, "test-bool flag")
+				cmd.Flags().String("name", "", "name flag")
+				cmd.Flags().Int("count", 0, "count flag")
+				// Don't set the flags - user omitted it
+				return cmd
+			},
+			schema: &struct {
+				TestBool bool   `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+				Name     string `mapstructure:"name" flag:"name" default:"default-name"`
+				Count    int    `mapstructure:"count" flag:"count" default:"100"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					TestBool bool   `mapstructure:"test_bool" flag:"test-bool" default:"true"`
+					Name     string `mapstructure:"name" flag:"name" default:"default-name"`
+					Count    int    `mapstructure:"count" flag:"count" default:"100"`
+				})
+				if schema.TestBool != true || schema.Name != "default-name" || schema.Count != 100 {
+					t.Errorf("Defaults not applied correctly: %+v", schema)
+				}
+			},
+		},
+		{
+			name: "success_nonzero_values_not_overridden",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().String("name", "", "name flag")
+				cmd.Flags().Int("count", 0, "count flag")
+				_ = cmd.Flags().Set("name", "my-database")
+				_ = cmd.Flags().Set("count", "42")
+				return cmd
+			},
+			schema: &struct {
+				Name  string `mapstructure:"name" flag:"name" default:"default-name"`
+				Count int    `mapstructure:"count" flag:"count" default:"100"`
+			}{},
+			expectedError: false,
+			validateFunc: func(t *testing.T, result []reflect.Value) {
+				if len(result) != 1 {
+					t.Fatalf("Expected 1 result value, got %d", len(result))
+				}
+				schema := result[0].Interface().(*struct {
+					Name  string `mapstructure:"name" flag:"name" default:"default-name"`
+					Count int    `mapstructure:"count" flag:"count" default:"100"`
+				})
+				if schema.Name != "my-database" {
+					t.Errorf("Expected 'my-database', got %v", schema.Name)
+				}
+				if schema.Count != 42 {
+					t.Errorf("Expected 42, got %v", schema.Count)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			action := NewIdsecServiceExecAction(nil)
+			cmd := tt.setupCmd()
+			execCmd := &cobra.Command{}
+			execCmd.PersistentFlags().String("request-file", "", "request file")
+
+			result, err := action.resolveActionArgs(cmd, execCmd, tt.schema)
+
+			if tt.expectedError && err == nil {
+				t.Error("Expected error, got nil")
+			}
+			if !tt.expectedError && err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+
+			if !tt.expectedError && tt.validateFunc != nil {
+				tt.validateFunc(t, result)
+			}
+		})
+	}
+}

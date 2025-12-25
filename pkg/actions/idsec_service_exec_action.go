@@ -763,6 +763,63 @@ func (s *IdsecServiceExecAction) findMethodByName(value reflect.Value, methodNam
 	return &actionMethod, nil
 }
 
+// resolveActionArgs resolves and prepares action arguments from command flags and schema.
+//
+// resolveActionArgs processes command-line flags, applies validation and defaults,
+// and prepares the final argument values for service method invocation. It handles
+// reading from request files and the complete flow of flag parsing, schema population, and default value application.
+//
+// Parameters:
+//   - cmd: The cobra command being executed, containing the flags to parse
+//   - execCmd: The parent execution command for context, used for accessing persistent flags such as request-file
+//   - actionSchema: The schema struct to populate with flag values and defaults
+//
+// Returns a slice containing a single reflect.Value wrapping the populated schema,
+// ready for use with reflect method invocation. Returns error if file reading,
+// flag parsing, mapstructure decoding, or default application fails.
+//
+// Example:
+//
+//	actionArgs, err := s.resolveActionArgs(cmd, execCmd, &addDatabaseSchema)
+//	if err != nil {
+//	    return nil, err
+//	}
+//	result := actionMethod.Call(actionArgs)
+func (s *IdsecServiceExecAction) resolveActionArgs(cmd *cobra.Command, execCmd *cobra.Command, actionSchema interface{}) ([]reflect.Value, error) {
+	flags := map[string]interface{}{}
+	if requestFile, err := execCmd.PersistentFlags().GetString("request-file"); err == nil && requestFile != "" {
+		fileContent, err := os.ReadFile(requestFile) // #nosec G304
+		if err != nil {
+			return nil, err
+		}
+		var data map[string]interface{}
+		err = json.Unmarshal(fileContent, &data)
+		if err != nil {
+			return nil, err
+		}
+		schemaType := reflect.ValueOf(actionSchema).Type()
+		flags = common.ConvertToSnakeCase(data, &schemaType).(map[string]interface{})
+	}
+	var err error
+	err = s.applyDefaults(actionSchema)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		err = s.parseFlag(f, cmd, flags, actionSchema)
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = mapstructure.Decode(flags, actionSchema)
+	if err != nil {
+		return nil, err
+	}
+	actionArgs := []reflect.Value{reflect.ValueOf(actionSchema)}
+
+	return actionArgs, nil
+}
+
 // DefineExecAction defines the execution actions for all supported service operations.
 //
 // DefineExecAction processes all supported service action definitions and creates
@@ -904,36 +961,10 @@ func (s *IdsecServiceExecAction) RunExecAction(api *cli.IdsecCLIAPI, cmd *cobra.
 	}
 	var result []reflect.Value
 	if actionSchema != nil {
-		flags := map[string]interface{}{}
-		if requestFile, err := execCmd.PersistentFlags().GetString("request-file"); err == nil && requestFile != "" {
-			fileContent, err := os.ReadFile(requestFile) // #nosec G304
-			if err != nil {
-				return err
-			}
-			var data map[string]interface{}
-			err = json.Unmarshal(fileContent, &data)
-			if err != nil {
-				return err
-			}
-			schemaType := reflect.ValueOf(actionSchema).Type()
-			flags = common.ConvertToSnakeCase(data, &schemaType).(map[string]interface{})
-		}
-		err = nil
-		cmd.Flags().VisitAll(func(f *pflag.Flag) {
-			err = s.parseFlag(f, cmd, flags, actionSchema)
-		})
+		actionArgs, err := s.resolveActionArgs(cmd, execCmd, actionSchema)
 		if err != nil {
 			return err
 		}
-		err = mapstructure.Decode(flags, actionSchema)
-		if err != nil {
-			return err
-		}
-		err = s.applyDefaults(actionSchema)
-		if err != nil {
-			return err
-		}
-		actionArgs := []reflect.Value{reflect.ValueOf(actionSchema)}
 		result = actionMethod.Call(actionArgs)
 	} else {
 		var actionArgs []reflect.Value
