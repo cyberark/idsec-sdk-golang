@@ -621,7 +621,7 @@ profiles
 -------
 As one may have multiple environments to manage, this would also imply that multiple profiles are required, either for multiple users in the same environment or multiple tenants
 
-Therefore, the profiles command manages those profiles as a convenice set of methods
+Therefore, the profiles command manages those profiles as a convenient set of methods
 
 Using the profiles as simply running commands under:
 ```shell
@@ -896,28 +896,29 @@ This prevents accidental modifications and guides users toward the correct appro
 Telemetry
 =========
 
-The Idsec SDK collects telemetry data to help improve the product and user experience. This data includes information about command usage, errors, and performance metrics.
+The Idsec SDK collects limited telemetry to support product reliability and improvement. Telemetry is used solely for operational insights such as feature usage trends, error diagnostics, and performance monitoring.
 
 ## Telemetry Data Collected
 
-The following telemetry data is collected by the Idsec SDK and is sent on every API call via additional header `X-Cybr-Telemetry`:
+By default, the Idsec SDK attaches a telemetry header (`X-Cybr-Telemetry`) to API requests. The telemetry data is limited to non-content metadata and may include:
 
-- Environment information (e.g., Cloud Console, Region)
-- Metadata about the executed command (e.g., command name, parameters)
-- OS information (e.g., OS type, version)
+- Execution environment context (e.g., Cloud Console identifier, region)
+- Command metadata (e.g., command name and execution outcome; no secrets or customer data)
+- Operating system type and version
 - SDK version
-- Tool being used (CLI/SDK/Terraform)
+- Interface type (CLI, SDK, Terraform)
 
+Telemetry does not include credentials, secrets, payload content, or customer business data.
 
 ## Disabling Telemetry
 
-Telemetry collection can be disabled by setting the `IDSEC_DISABLE_TELEMETRY_COLLECTION` environment variable to `true`. This can be done in the terminal before running Idsec commands:
+Telemetry collection can be disabled in either of the following ways:
 
 ```shell
 export IDSEC_DISABLE_TELEMETRY_COLLECTION=true
 ```
 
-Alternatively, telemetry can be disabled by using the `--disable-telemetry` flag when executing Idsec commands:
+Alternatively, telemetry can be disabled by using the `--disable-telemetry` flag when executing idsec commands:
 
 ```shell
 idsec exec --disable-telemetry
