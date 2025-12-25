@@ -125,3 +125,5 @@ fregistry_2
 modernca.cer
 scan_repo
 content/
+*.zip
+*.tar.gz
