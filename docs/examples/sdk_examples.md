@@ -431,23 +431,23 @@ func main() {
 }
 ```
 
-## UAP
+## Policy
 
-In this example we authenticate to our ISP tenant and create a UAP DB policy:
+In this example we authenticate to our ISP tenant and create a DB policy:
 ```go
 package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db/models"
-	commonuapmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
-	uapsia "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/common/models"
-	uapdbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db/models"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	"os"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	policycommomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
+	policydbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db/models"
+	dbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db/models"
 )
 
 func main() {
@@ -472,30 +472,30 @@ func main() {
 		panic(err)
 	}
 
-	uapAPI, err := uap.NewIdsecUAPAPI(ispAuth.(*auth.IdsecISPAuth))
+	policyAPI, err := policy.NewIdsecPolicyAPI(ispAuth.(*auth.IdsecISPAuth))
 	if err != nil {
 		panic(err)
 	}
-	policy, err := uapAPI.Db().AddPolicy(
-		&uapdbmodels.IdsecUAPSIADBAccessPolicy{
-			IdsecUAPSIACommonAccessPolicy: uapsia.IdsecUAPSIACommonAccessPolicy{
-				IdsecUAPCommonAccessPolicy: commonuapmodels.IdsecUAPCommonAccessPolicy{
-					Metadata: commonuapmodels.IdsecUAPMetadata{
+	policy, err := policyAPI.Db().AddPolicy(
+		&policydbmodels.IdsecPolicyDBAccessPolicy{
+			IdsecPolicyInfraCommonAccessPolicy: policycommomodels.IdsecPolicyInfraCommonAccessPolicy{
+				IdsecPolicyCommonAccessPolicy: policycommomodels.IdsecPolicyCommonAccessPolicy{
+					Metadata: policycommomodels.IdsecPolicyMetadata{
 						Name:        "Example DB Access Policy",
-						Description: "This is an example of a DB access policy for SIA.",
-						Status: commonuapmodels.IdsecUAPPolicyStatus{
-							Status: commonuapmodels.StatusTypeActive,
+						Description: "This is an example of a DB access policy for Infrastructure.",
+						Status: policycommomodels.IdsecPolicyStatus{
+							Status: policycommomodels.StatusTypeActive,
 						},
-						PolicyEntitlement: commonuapmodels.IdsecUAPPolicyEntitlement{
+						PolicyEntitlement: policycommomodels.IdsecPolicyEntitlement{
 							TargetCategory: commonmodels.CategoryTypeDB,
 							LocationType:   commonmodels.WorkspaceTypeFQDNIP,
-							PolicyType:     commonuapmodels.PolicyTypeRecurring,
+							PolicyType:     policycommomodels.PolicyTypeRecurring,
 						},
 						PolicyTags: []string{},
 					},
-					Principals: []commonuapmodels.IdsecUAPPrincipal{
+					Principals: []policycommomodels.IdsecPolicyPrincipal{
 						{
-							Type:                commonuapmodels.PrincipalTypeUser,
+							Type:                policycommomodels.PrincipalTypeUser,
 							ID:                  "user-id",
 							Name:                "user@cyberark.cloud.12345",
 							SourceDirectoryName: "CyberArk",
@@ -503,9 +503,9 @@ func main() {
 						},
 					},
 				},
-				Conditions: uapsia.IdsecUAPSIACommonConditions{
-					IdsecUAPConditions: commonuapmodels.IdsecUAPConditions{
-						AccessWindow: commonuapmodels.IdsecUAPTimeCondition{
+				Conditions: policycommomodels.IdsecPolicyInfraCommonConditions{
+					IdsecPolicyConditions: policycommomodels.IdsecPolicyConditions{
+						AccessWindow: policycommomodels.IdsecPolicyTimeCondition{
 							DaysOfTheWeek: []int{1, 2, 3, 4, 5},
 							FromHour:      "09:00",
 							ToHour:        "17:00",
@@ -515,15 +515,15 @@ func main() {
 					IdleTime: 10,
 				},
 			},
-			Targets: map[string]uapdbmodels.IdsecUAPSIADBTargets{
+			Targets: map[string]policydbmodels.IdsecPolicyDBTargets{
 				commonmodels.WorkspaceTypeFQDNIP: {
-					Instances: []uapdbmodels.IdsecUAPSIADBInstanceTarget{
+					Instances: []policydbmodels.IdsecPolicyDBInstanceTarget{
 						{
 							InstanceName:         "example-db-instance",
-							InstanceType:         db.FamilyTypeMSSQL,
+							InstanceType:         dbmodels.FamilyTypeMSSQL,
 							InstanceID:           "1",
-							AuthenticationMethod: uapdbmodels.AuthMethodLDAPAuth,
-							LDAPAuthProfile: &uapdbmodels.IdsecUAPSIADBLDAPAuthProfile{
+							AuthenticationMethod: policydbmodels.AuthMethodLDAPAuth,
+							LDAPAuthProfile: &policydbmodels.IdsecPolicyDBLDAPAuthProfile{
 								AssignGroups: []string{"mygroup"},
 							},
 						},
@@ -539,20 +539,20 @@ func main() {
 }
 ```
 
-In this example we authenticate to our ISP tenant and create a UAP SIA VM policy:
+In this example we authenticate to our ISP tenant and create a VM policy:
 ```go
 package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
-	commonuapmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
-	uapsia "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/common/models"
-	uapvmmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm/models"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	"os"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	policycommomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
+	policyvmmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm/models"
 )
 
 func main() {
@@ -577,30 +577,30 @@ func main() {
 		panic(err)
 	}
 
-	uapAPI, err := uap.NewIdsecUAPAPI(ispAuth.(*auth.IdsecISPAuth))
+	policyAPI, err := policy.NewIdsecPolicyAPI(ispAuth.(*auth.IdsecISPAuth))
 	if err != nil {
 		panic(err)
 	}
-	policy, err := uapAPI.Vm().AddPolicy(
-		&uapvmmodels.IdsecUAPSIAVMAccessPolicy{
-			IdsecUAPSIACommonAccessPolicy: uapsia.IdsecUAPSIACommonAccessPolicy{
-				IdsecUAPCommonAccessPolicy: commonuapmodels.IdsecUAPCommonAccessPolicy{
-					Metadata: commonuapmodels.IdsecUAPMetadata{
+	policy, err := policyAPI.VM().AddPolicy(
+		&policyvmmodels.IdsecPolicyVMAccessPolicy{
+			IdsecPolicyInfraCommonAccessPolicy: policycommomodels.IdsecPolicyInfraCommonAccessPolicy{
+				IdsecPolicyCommonAccessPolicy: policycommomodels.IdsecPolicyCommonAccessPolicy{
+					Metadata: policycommomodels.IdsecPolicyMetadata{
 						Name:        "Example VM Access Policy",
-						Description: "This is an example of a VM access policy for SIA.",
-						Status: commonuapmodels.IdsecUAPPolicyStatus{
-							Status: commonuapmodels.StatusTypeActive,
+						Description: "This is an example of a VM access policy for Infrastructure.",
+						Status: policycommomodels.IdsecPolicyStatus{
+							Status: policycommomodels.StatusTypeActive,
 						},
-						PolicyEntitlement: commonuapmodels.IdsecUAPPolicyEntitlement{
+						PolicyEntitlement: policycommomodels.IdsecPolicyEntitlement{
 							TargetCategory: commonmodels.CategoryTypeVM,
 							LocationType:   commonmodels.WorkspaceTypeFQDNIP,
-							PolicyType:     commonuapmodels.PolicyTypeRecurring,
+							PolicyType:     policycommomodels.PolicyTypeRecurring,
 						},
 						PolicyTags: []string{},
 					},
-					Principals: []commonuapmodels.IdsecUAPPrincipal{
+					Principals: []policycommomodels.IdsecPolicyPrincipal{
 						{
-							Type:                commonuapmodels.PrincipalTypeUser,
+							Type:                policycommomodels.PrincipalTypeUser,
 							ID:                  "user-id",
 							Name:                "user@cyberark.cloud.12345",
 							SourceDirectoryName: "CyberArk",
@@ -608,9 +608,9 @@ func main() {
 						},
 					},
 				},
-				Conditions: uapsia.IdsecUAPSIACommonConditions{
-					IdsecUAPConditions: commonuapmodels.IdsecUAPConditions{
-						AccessWindow: commonuapmodels.IdsecUAPTimeCondition{
+				Conditions: policycommomodels.IdsecPolicyInfraCommonConditions{
+					IdsecPolicyConditions: policycommomodels.IdsecPolicyConditions{
+						AccessWindow: policycommomodels.IdsecPolicyTimeCondition{
 							DaysOfTheWeek: []int{1, 2, 3, 4, 5},
 							FromHour:      "09:00",
 							ToHour:        "17:00",
@@ -620,23 +620,23 @@ func main() {
 					IdleTime: 10,
 				},
 			},
-			Targets: uapvmmodels.IdsecUAPSIAVMPlatformTargets{
-				FQDNIPResource: &uapvmmodels.IdsecUAPSIAVMFQDNIPResource{
-					FQDNRules: []uapvmmodels.IdsecUAPSIAVMFQDNRule{
+			Targets: policyvmmodels.IdsecPolicyVMPlatformTargets{
+				FQDNIPResource: &policyvmmodels.IdsecPolicyVMFQDNIPResource{
+					FQDNRules: []policyvmmodels.IdsecPolicyVMFQDNRule{
 						{
-							Operator:            uapvmmodels.VMFQDNOperatorExactly,
+							Operator:            policyvmmodels.VMFQDNOperatorExactly,
 							ComputernamePattern: "example-vm",
 							Domain:              "mydomain.com",
 						},
 					},
 				},
 			},
-			Behavior: uapvmmodels.IdsecUAPSSIAVMBehavior{
-				SSHProfile: &uapvmmodels.IdsecUAPSSIAVMSSHProfile{
+			Behavior: policyvmmodels.IdsecPolicyVMBehavior{
+				SSHProfile: &policyvmmodels.IdsecPolicyVMSSHProfile{
 					Username: "root",
 				},
-				RDPProfile: &uapvmmodels.IdsecUAPSSIAVMRDPProfile{
-					LocalEphemeralUser: &uapvmmodels.IdsecUAPSSIAVMEphemeralUser{
+				RDPProfile: &policyvmmodels.IdsecPolicyVMRDPProfile{
+					LocalEphemeralUser: &policyvmmodels.IdsecPolicyVMEphemeralUser{
 						AssignGroups: []string{"Remote Desktop Users"},
 					},
 				},
@@ -650,19 +650,20 @@ func main() {
 }
 ```
 
-In this example we authenticate to our ISP tenant and create a UAP SCA policy:
+In this example we authenticate to our ISP tenant and create a Cloud Access policy:
 ```go
 package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
-	commonuapmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/common/models"
-	uapscamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sca/models"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	"os"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
+	policycloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/models"
+	commonpolicymodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
 func main() {
@@ -687,29 +688,29 @@ func main() {
 		panic(err)
 	}
 
-	uapAPI, err := uap.NewIdsecUAPAPI(ispAuth.(*auth.IdsecISPAuth))
+	policyAPI, err := policy.NewIdsecPolicyAPI(ispAuth.(*auth.IdsecISPAuth))
 	if err != nil {
 		panic(err)
 	}
-	policy, err := uapAPI.Sca().AddPolicy(
-		&uapscamodels.IdsecUAPSCACloudConsoleAccessPolicy{
-			IdsecUAPCommonAccessPolicy: commonuapmodels.IdsecUAPCommonAccessPolicy{
-				Metadata: commonuapmodels.IdsecUAPMetadata{
+	policy, err := policyAPI.CloudAccess().AddPolicy(
+		&policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{
+			IdsecPolicyCommonAccessPolicy: commonpolicymodels.IdsecPolicyCommonAccessPolicy{
+				Metadata: commonpolicymodels.IdsecPolicyMetadata{
 					Name:        "Example SCA Access Policy",
 					Description: "This is an example of a SCA access policy.",
-					Status: commonuapmodels.IdsecUAPPolicyStatus{
-						Status: commonuapmodels.StatusTypeValidating,
+					Status: commonpolicymodels.IdsecPolicyStatus{
+						Status: commonpolicymodels.StatusTypeValidating,
 					},
-					PolicyEntitlement: commonuapmodels.IdsecUAPPolicyEntitlement{
+					PolicyEntitlement: commonpolicymodels.IdsecPolicyEntitlement{
 						TargetCategory: commonmodels.CategoryTypeCloudConsole,
 						LocationType:   commonmodels.WorkspaceTypeAWS,
-						PolicyType:     commonuapmodels.PolicyTypeRecurring,
+						PolicyType:     commonpolicymodels.PolicyTypeRecurring,
 					},
 					PolicyTags: []string{},
 				},
-				Principals: []commonuapmodels.IdsecUAPPrincipal{
+				Principals: []commonpolicymodels.IdsecPolicyPrincipal{
 					{
-						Type:                commonuapmodels.PrincipalTypeUser,
+						Type:                commonpolicymodels.PrincipalTypeUser,
 						ID:                  "user-id",
 						Name:                "user@cyberark.cloud.12345",
 						SourceDirectoryName: "CyberArk",
@@ -717,9 +718,9 @@ func main() {
 					},
 				},
 			},
-			Conditions: uapscamodels.IdsecUAPSCAConditions{
-				IdsecUAPConditions: commonuapmodels.IdsecUAPConditions{
-					AccessWindow: commonuapmodels.IdsecUAPTimeCondition{
+			Conditions: policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
+				IdsecPolicyConditions: commonpolicymodels.IdsecPolicyConditions{
+					AccessWindow: commonpolicymodels.IdsecPolicyTimeCondition{
 						DaysOfTheWeek: []int{1, 2, 3, 4, 5},
 						FromHour:      "09:00:00",
 						ToHour:        "17:00:00",
@@ -727,10 +728,10 @@ func main() {
 					MaxSessionDuration: 4,
 				},
 			},
-			Targets: uapscamodels.IdsecUAPSCACloudConsoleTarget{
-				AwsAccountTargets: []uapscamodels.IdsecUAPSCAAWSAccountTarget{
+			Targets: policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
+				AwsAccountTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAWSAccountTarget{
 					{
-						uapscamodels.IdsecUAPSCATarget{
+						IdsecPolicyCloudAccessTarget: policycloudaccessmodels.IdsecPolicyCloudAccessTarget{
 							RoleID:        "arn:aws:iam::123456789012:role/ExampleRole",
 							RoleName:      "ExampleRole",
 							WorkspaceID:   "123456789012",

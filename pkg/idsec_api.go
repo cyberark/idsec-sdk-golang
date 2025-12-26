@@ -67,6 +67,8 @@ import (
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 	policy "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
 	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
+	db "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db"
+	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	configuration "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configuration"
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
@@ -77,7 +79,7 @@ import (
 	syncpolicies "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/syncpolicies"
 	access "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/access"
 	certificates "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/certificates"
-	db "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
+	db2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
 	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
 	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/db"
 	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/vm"
@@ -85,12 +87,9 @@ import (
 	shortenedconnectionstring "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/shortenedconnectionstring"
 	sshca "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca"
 	sso "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
-	db2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db"
+	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db"
 	targetsets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/targetsets"
 	sm "github.com/cyberark/idsec-sdk-golang/pkg/services/sm"
-	uap "github.com/cyberark/idsec-sdk-golang/pkg/services/uap"
-	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/db"
-	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/uap/sia/vm"
 )
 
 // IdsecAPI wraps different API functionality of Idsec Services.
@@ -388,6 +387,32 @@ func (api *IdsecAPI) PolicyCloudaccess() (*cloudaccess.IdsecPolicyCloudAccessSer
 	return service, nil
 }
 
+func (api *IdsecAPI) PolicyDb() (*db.IdsecPolicyDBService, error) {
+	if serviceIfs, ok := api.services[db.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*db.IdsecPolicyDBService), nil
+	}
+	service, err := db.ServiceGenerator(api.loadServiceAuthenticators(db.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[db.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) PolicyVm() (*vm.IdsecPolicyVMService, error) {
+	if serviceIfs, ok := api.services[vm.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*vm.IdsecPolicyVMService), nil
+	}
+	service, err := vm.ServiceGenerator(api.loadServiceAuthenticators(vm.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[vm.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) Sca() (*sca.IdsecSCAService, error) {
 	if serviceIfs, ok := api.services[sca.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*sca.IdsecSCAService), nil
@@ -518,16 +543,16 @@ func (api *IdsecAPI) SiaCertificates() (*certificates.IdsecSIACertificatesServic
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaDb() (*db.IdsecSIADBService, error) {
-	if serviceIfs, ok := api.services[db.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db.IdsecSIADBService), nil
+func (api *IdsecAPI) SiaDb() (*db2.IdsecSIADBService, error) {
+	if serviceIfs, ok := api.services[db2.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*db2.IdsecSIADBService), nil
 	}
-	service, err := db.ServiceGenerator(api.loadServiceAuthenticators(db.ServiceConfig)...)
+	service, err := db2.ServiceGenerator(api.loadServiceAuthenticators(db2.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[db.ServiceConfig.ServiceName] = &baseService
+	api.services[db2.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -622,16 +647,16 @@ func (api *IdsecAPI) SiaSso() (*sso.IdsecSIASSOService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaWorkspacesDb() (*db2.IdsecSIAWorkspacesDBService, error) {
-	if serviceIfs, ok := api.services[db2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db2.IdsecSIAWorkspacesDBService), nil
+func (api *IdsecAPI) SiaWorkspacesDb() (*db3.IdsecSIAWorkspacesDBService, error) {
+	if serviceIfs, ok := api.services[db3.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*db3.IdsecSIAWorkspacesDBService), nil
 	}
-	service, err := db2.ServiceGenerator(api.loadServiceAuthenticators(db2.ServiceConfig)...)
+	service, err := db3.ServiceGenerator(api.loadServiceAuthenticators(db3.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[db2.ServiceConfig.ServiceName] = &baseService
+	api.services[db3.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -658,44 +683,5 @@ func (api *IdsecAPI) Sm() (*sm.IdsecSMService, error) {
 	}
 	var baseService services.IdsecService = service
 	api.services[sm.ServiceConfig.ServiceName] = &baseService
-	return service, nil
-}
-
-func (api *IdsecAPI) Uap() (*uap.IdsecUAPService, error) {
-	if serviceIfs, ok := api.services[uap.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*uap.IdsecUAPService), nil
-	}
-	service, err := uap.ServiceGenerator(api.loadServiceAuthenticators(uap.ServiceConfig)...)
-	if err != nil {
-		return nil, err
-	}
-	var baseService services.IdsecService = service
-	api.services[uap.ServiceConfig.ServiceName] = &baseService
-	return service, nil
-}
-
-func (api *IdsecAPI) UapDb() (*db3.IdsecUAPSIADBService, error) {
-	if serviceIfs, ok := api.services[db3.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db3.IdsecUAPSIADBService), nil
-	}
-	service, err := db3.ServiceGenerator(api.loadServiceAuthenticators(db3.ServiceConfig)...)
-	if err != nil {
-		return nil, err
-	}
-	var baseService services.IdsecService = service
-	api.services[db3.ServiceConfig.ServiceName] = &baseService
-	return service, nil
-}
-
-func (api *IdsecAPI) UapVm() (*vm.IdsecUAPSIAVMService, error) {
-	if serviceIfs, ok := api.services[vm.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*vm.IdsecUAPSIAVMService), nil
-	}
-	service, err := vm.ServiceGenerator(api.loadServiceAuthenticators(vm.ServiceConfig)...)
-	if err != nil {
-		return nil, err
-	}
-	var baseService services.IdsecService = service
-	api.services[vm.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }

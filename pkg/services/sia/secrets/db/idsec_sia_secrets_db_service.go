@@ -39,6 +39,12 @@ const (
 	PlatformAWSAccessKeys = "AWSAccessKeys"
 )
 
+const (
+	defaultLimit = 500
+	minLimit     = 1
+	maxLimit     = 1000
+)
+
 var (
 	// platformToRequiredAccountProperties maps each platform to its required account properties.
 	platformToRequiredAccountProperties = map[string][]string{
@@ -624,7 +630,7 @@ func hasValue(value interface{}) bool {
 	return true
 }
 
-// serializePamAccountProperties serializes account properties for PAM accounts.
+// serializePamAccountProperties serializes strong account properties for PAM accounts.
 func serializePamAccountProperties(accountModel map[string]interface{}) (map[string]interface{}, error) {
 	properties := make(map[string]interface{})
 
@@ -640,7 +646,7 @@ func serializePamAccountProperties(accountModel map[string]interface{}) (map[str
 	return properties, nil
 }
 
-// serializePlatformAccountProperties serializes account properties for database platforms.
+// serializePlatformAccountProperties serializes strong account properties for database platforms.
 func serializePlatformAccountProperties(platform string, accountModel map[string]interface{}) (map[string]interface{}, error) {
 	properties := map[string]interface{}{
 		"platform": platform,
@@ -714,7 +720,7 @@ func serializePasswordSecretObject(platform string, accountModel map[string]inte
 func (s *IdsecSIASecretsDBService) deserializeManagedAccountProperties(accountModel map[string]interface{}, accountProperties map[string]interface{}) error {
 	platform, ok := accountProperties["platform"].(string)
 	if !ok {
-		s.Logger.Warning("Missing platform for managed account, fallback to all fields within properties")
+		s.Logger.Warning("Missing platform for managed strong account, fallback to all fields within properties")
 		for key, value := range accountProperties {
 			if _, ok := accountModel[key]; !ok {
 				accountModel[key] = value
@@ -731,7 +737,7 @@ func (s *IdsecSIASecretsDBService) deserializeManagedAccountProperties(accountMo
 		if value, ok := accountProperties[field]; ok && hasValue(value) {
 			accountModel[field] = value
 		} else {
-			s.Logger.Warning("Failed to deserialize account properties for platform %s: %s is missing", platform, field)
+			s.Logger.Warning("Failed to deserialize strong account properties for platform %s: %s is missing", platform, field)
 		}
 	}
 	optionalFields, hasOptional := platformToOptionalAccountProperties[platform]
@@ -750,65 +756,68 @@ func (s *IdsecSIASecretsDBService) deserializePamAccountProperties(accountModel 
 		if value, ok := accountProperties[field]; ok && hasValue(value) {
 			accountModel[field] = value
 		} else {
-			s.Logger.Error("Failed to fully deserialize PAM account properties: %s is missing", field)
+			s.Logger.Error("Failed to fully deserialize PAM strong account properties: %s is missing", field)
 		}
 	}
 	return nil
 }
 
-func (s *IdsecSIASecretsDBService) deserializeStrongAccount(accountJSONMap map[string]interface{}) error {
-	storeType, ok := accountJSONMap["store_type"].(string)
+func (s *IdsecSIASecretsDBService) deserializeStrongAccount(strongAccountJSONMap map[string]interface{}) error {
+	if strongAccountID, ok := strongAccountJSONMap["id"].(string); ok {
+		strongAccountJSONMap["strong_account_id"] = strongAccountID
+	}
+	storeType, ok := strongAccountJSONMap["store_type"].(string)
 	if !ok {
 		return fmt.Errorf("store_type is required")
 	}
 	if storeType == dbsecretsmodels.PAM {
-		err := s.deserializePamAccountProperties(accountJSONMap, accountJSONMap["account_properties"].(map[string]interface{}))
+		err := s.deserializePamAccountProperties(strongAccountJSONMap, strongAccountJSONMap["account_properties"].(map[string]interface{}))
 		if err != nil {
 			return err
 		}
 	} else {
-		err := s.deserializeManagedAccountProperties(accountJSONMap, accountJSONMap["account_properties"].(map[string]interface{}))
+		err := s.deserializeManagedAccountProperties(strongAccountJSONMap, strongAccountJSONMap["account_properties"].(map[string]interface{}))
 		if err != nil {
 			return err
 		}
 	}
-	delete(accountJSONMap, "account_properties")
+	delete(strongAccountJSONMap, "account_properties")
 	return nil
 }
 
 // AddStrongAccount adds a new strong account to the Idsec SIA DB.
-func (s *IdsecSIASecretsDBService) AddStrongAccount(addAccount *dbsecretsmodels.IdsecSIADBAddStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
-	if addAccount.StoreType == "" {
+func (s *IdsecSIASecretsDBService) AddStrongAccount(addStrongAccount *dbsecretsmodels.IdsecSIADBAddStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
+	if addStrongAccount.StoreType == "" {
 		return nil, errors.New("store_type is required")
 	}
-	if addAccount.Name == "" {
+	if addStrongAccount.Name == "" {
 		return nil, errors.New("name is required")
 	}
 
 	// Convert struct to map for serialization
-	accountModel := make(map[string]interface{})
-	if err := mapstructure.Decode(addAccount, &accountModel); err != nil {
-		return nil, fmt.Errorf("failed to decode add account: %w", err)
+	strongAccountModel := make(map[string]interface{})
+	if err := mapstructure.Decode(addStrongAccount, &strongAccountModel); err != nil {
+		return nil, fmt.Errorf("failed to decode add strong account: %w", err)
 	}
-	// Serialize account properties based on store type and platform
-	addAccountJSON := map[string]interface{}{
-		"store_type": addAccount.StoreType,
-		"name":       addAccount.Name,
+	// Serialize strong account properties based on store type and platform
+	addStrongAccountJSON := map[string]interface{}{
+		"store_type": addStrongAccount.StoreType,
+		"name":       addStrongAccount.Name,
 	}
-	serializedAccountProperties, err := serializeAccountProperties(addAccount.StoreType, accountModel)
+	serializedStrongAccountProperties, err := serializeAccountProperties(addStrongAccount.StoreType, strongAccountModel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize account properties: %w", err)
+		return nil, fmt.Errorf("failed to serialize strong account properties: %w", err)
 	}
-	addAccountJSON["account_properties"] = serializedAccountProperties
-	if addAccount.StoreType == dbsecretsmodels.Managed {
-		serializedPasswordSecretObject, err := serializePasswordSecretObject(addAccount.Platform, accountModel)
+	addStrongAccountJSON["account_properties"] = serializedStrongAccountProperties
+	if addStrongAccount.StoreType == dbsecretsmodels.Managed {
+		serializedPasswordSecretObject, err := serializePasswordSecretObject(addStrongAccount.Platform, strongAccountModel)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize password secret object: %w", err)
 		}
-		addAccountJSON["password_secret_object"] = serializedPasswordSecretObject
+		addStrongAccountJSON["password_secret_object"] = serializedPasswordSecretObject
 	}
-	addAccountJSONCamel := common.ConvertToCamelCase(addAccountJSON, nil)
-	response, err := s.client.Post(context.Background(), strongAccountsURL, addAccountJSONCamel)
+	addStrongAccountJSONCamel := common.ConvertToCamelCase(addStrongAccountJSON, nil)
+	response, err := s.client.Post(context.Background(), strongAccountsURL, addStrongAccountJSONCamel)
 	if err != nil {
 		return nil, err
 	}
@@ -821,65 +830,65 @@ func (s *IdsecSIASecretsDBService) AddStrongAccount(addAccount *dbsecretsmodels.
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to add account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountJSONResponse, err := common.DeserializeJSONSnake(response.Body)
+	strongAccountJSONResponse, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	accountJSONResponseMap := accountJSONResponse.(map[string]interface{})
+	strongAccountJSONResponseMap := strongAccountJSONResponse.(map[string]interface{})
 
-	s.Logger.Info("Account added successfully with id [%s]", accountJSONResponseMap["id"].(string))
+	s.Logger.Info("Account added successfully with id [%s]", strongAccountJSONResponseMap["id"].(string))
 
-	return s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{ID: accountJSONResponseMap["id"].(string)})
+	return s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{StrongAccountID: strongAccountJSONResponseMap["id"].(string)})
 }
 
 // UpdateStrongAccount updates an existing strong account in the Idsec SIA DB.
-func (s *IdsecSIASecretsDBService) UpdateStrongAccount(updateAccount *dbsecretsmodels.IdsecSIADBUpdateStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
-	if updateAccount.ID == "" {
+func (s *IdsecSIASecretsDBService) UpdateStrongAccount(updateStrongAccount *dbsecretsmodels.IdsecSIADBUpdateStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
+	if updateStrongAccount.StrongAccountID == "" {
 		return nil, errors.New("id is required")
 	}
-	s.Logger.Info("Updating existing db account with id [%s]", updateAccount.ID)
+	s.Logger.Info("Updating existing db strong account with id [%s]", updateStrongAccount.StrongAccountID)
 
-	existingAccount, err := s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{ID: updateAccount.ID})
+	existingStrongAccount, err := s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{StrongAccountID: updateStrongAccount.StrongAccountID})
 	if err != nil {
 		return nil, err
 	}
-	existingAccountMap := make(map[string]interface{})
-	if err := mapstructure.Decode(existingAccount, &existingAccountMap); err != nil {
+	existingStrongAccountMap := make(map[string]interface{})
+	if err := mapstructure.Decode(existingStrongAccount, &existingStrongAccountMap); err != nil {
 		return nil, fmt.Errorf("failed to decode update account: %w", err)
 	}
 
-	accountModel := make(map[string]interface{})
-	if err := mapstructure.Decode(updateAccount, &accountModel); err != nil {
+	strongAccountModel := make(map[string]interface{})
+	if err := mapstructure.Decode(updateStrongAccount, &strongAccountModel); err != nil {
 		return nil, fmt.Errorf("failed to decode update account: %w", err)
 	}
 
-	for field, existingValue := range existingAccountMap {
-		if fieldValue, ok := accountModel[field]; ok && hasValue(fieldValue) {
+	for field, existingValue := range existingStrongAccountMap {
+		if fieldValue, ok := strongAccountModel[field]; ok && hasValue(fieldValue) {
 			continue
 		}
 		if hasValue(existingValue) {
-			accountModel[field] = existingValue
+			strongAccountModel[field] = existingValue
 		}
 	}
 
-	updateAccountJSON := map[string]interface{}{
-		"store_type": updateAccount.StoreType,
-		"name":       updateAccount.Name,
+	updateStrongAccountJSON := map[string]interface{}{
+		"store_type": updateStrongAccount.StoreType,
+		"name":       updateStrongAccount.Name,
 	}
-	serializedAccountProperties, err := serializeAccountProperties(updateAccount.StoreType, accountModel)
+	serializedStrongAccountProperties, err := serializeAccountProperties(updateStrongAccount.StoreType, strongAccountModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize account properties: %w", err)
 	}
-	updateAccountJSON["account_properties"] = serializedAccountProperties
-	if updateAccount.StoreType == dbsecretsmodels.Managed {
-		serializedPasswordSecretObject, err := serializePasswordSecretObject(updateAccount.Platform, accountModel)
+	updateStrongAccountJSON["account_properties"] = serializedStrongAccountProperties
+	if updateStrongAccount.StoreType == dbsecretsmodels.Managed {
+		serializedPasswordSecretObject, err := serializePasswordSecretObject(updateStrongAccount.Platform, strongAccountModel)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize password secret object: %w", err)
 		}
-		updateAccountJSON["password_secret_object"] = serializedPasswordSecretObject
+		updateStrongAccountJSON["password_secret_object"] = serializedPasswordSecretObject
 	}
-	updateAccountJSONCamel := common.ConvertToCamelCase(updateAccountJSON, nil)
-	response, err := s.client.Put(context.Background(), fmt.Sprintf(strongAccountURL, updateAccount.ID), updateAccountJSONCamel)
+	updateStrongAccountJSONCamel := common.ConvertToCamelCase(updateStrongAccountJSON, nil)
+	response, err := s.client.Put(context.Background(), fmt.Sprintf(strongAccountURL, updateStrongAccount.StrongAccountID), updateStrongAccountJSONCamel)
 	if err != nil {
 		return nil, err
 	}
@@ -893,22 +902,22 @@ func (s *IdsecSIASecretsDBService) UpdateStrongAccount(updateAccount *dbsecretsm
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to update account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountResponseJSON, err := common.DeserializeJSONSnake(response.Body)
+	strongAccountResponseJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	accountResponseJSONMap := accountResponseJSON.(map[string]interface{})
+	strongAccountResponseJSONMap := strongAccountResponseJSON.(map[string]interface{})
 
-	return s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{ID: accountResponseJSONMap["id"].(string)})
+	return s.StrongAccount(&dbsecretsmodels.IdsecSIADBGetStrongAccount{StrongAccountID: strongAccountResponseJSONMap["id"].(string)})
 }
 
 // DeleteStrongAccount deletes a strong account from the Idsec SIA DB.
-func (s *IdsecSIASecretsDBService) DeleteStrongAccount(deleteAccount *dbsecretsmodels.IdsecSIADBDeleteStrongAccount) error {
-	if deleteAccount.ID == "" {
+func (s *IdsecSIASecretsDBService) DeleteStrongAccount(deleteStrongAccount *dbsecretsmodels.IdsecSIADBDeleteStrongAccount) error {
+	if deleteStrongAccount.StrongAccountID == "" {
 		return errors.New("id is required")
 	}
-	s.Logger.Info("Deleting db account by id [%s]", deleteAccount.ID)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(strongAccountURL, deleteAccount.ID), nil, nil)
+	s.Logger.Info("Deleting db strong account by id [%s]", deleteStrongAccount.StrongAccountID)
+	response, err := s.client.Delete(context.Background(), fmt.Sprintf(strongAccountURL, deleteStrongAccount.StrongAccountID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -919,18 +928,18 @@ func (s *IdsecSIASecretsDBService) DeleteStrongAccount(deleteAccount *dbsecretsm
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to delete db account [%s] - [%d]", common.SerializeResponseToJSON(response.Body), response.StatusCode)
+		return fmt.Errorf("failed to delete db strong account [%s] - [%d]", common.SerializeResponseToJSON(response.Body), response.StatusCode)
 	}
 	return nil
 }
 
 // StrongAccount retrieves a strong account from the Idsec SIA DB by its ID.
-func (s *IdsecSIASecretsDBService) StrongAccount(getAccount *dbsecretsmodels.IdsecSIADBGetStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
-	if getAccount.ID == "" {
+func (s *IdsecSIASecretsDBService) StrongAccount(getStrongAccount *dbsecretsmodels.IdsecSIADBGetStrongAccount) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccount, error) {
+	if getStrongAccount.StrongAccountID == "" {
 		return nil, errors.New("id is required")
 	}
-	s.Logger.Info("Getting db account [%s]", getAccount.ID)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(strongAccountURL, getAccount.ID), nil)
+	s.Logger.Info("Getting db strong account [%s]", getStrongAccount.StrongAccountID)
+	response, err := s.client.Get(context.Background(), fmt.Sprintf(strongAccountURL, getStrongAccount.StrongAccountID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -941,37 +950,39 @@ func (s *IdsecSIASecretsDBService) StrongAccount(getAccount *dbsecretsmodels.Ids
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get db account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to get db strong account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountJSON, err := common.DeserializeJSONSnake(response.Body)
+	strongAccountJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	accountJSONMap := accountJSON.(map[string]interface{})
-	err = s.deserializeStrongAccount(accountJSONMap)
+	strongAccountJSONMap := strongAccountJSON.(map[string]interface{})
+	err = s.deserializeStrongAccount(strongAccountJSONMap)
 	if err != nil {
 		return nil, err
 	}
-
-	var account dbsecretsmodels.IdsecSIADBDatabaseStrongAccount
-	err = mapstructure.Decode(accountJSONMap, &account)
+	if strongAccountID, ok := strongAccountJSONMap["id"].(string); ok {
+		strongAccountJSONMap["strong_account_id"] = strongAccountID
+	}
+	var strongAccount dbsecretsmodels.IdsecSIADBDatabaseStrongAccount
+	err = mapstructure.Decode(strongAccountJSONMap, &strongAccount)
 	if err != nil {
 		return nil, err
 	}
-	return &account, nil
+	return &strongAccount, nil
 }
 
 // ListStrongAccounts lists strong accounts from the Idsec SIA DB with pagination support.
 func (s *IdsecSIASecretsDBService) ListStrongAccounts(listStrongAccounts *dbsecretsmodels.IdsecSIADBListStrongAccounts) (*dbsecretsmodels.IdsecSIADBDatabaseStrongAccountsList, error) {
-	limit := 500 // default limit
+	limit := defaultLimit
 	if listStrongAccounts.Limit != nil {
 		limit = *listStrongAccounts.Limit
-		if limit < 1 || limit > 1000 {
-			return nil, fmt.Errorf("limit must be between 1 and 1000, got %d", limit)
+		if limit < minLimit || limit > maxLimit {
+			return nil, fmt.Errorf("limit must be between %d and %d, got %d", minLimit, maxLimit, limit)
 		}
 	}
 	hasCursor := listStrongAccounts.Cursor != ""
-	s.Logger.Info("Listing db accounts [HasCursor=%v, Limit=%d]",
+	s.Logger.Info("Listing db strong accounts [HasCursor=%v, Limit=%d]",
 		hasCursor, limit)
 
 	queryParams := make(map[string]string)
@@ -991,16 +1002,16 @@ func (s *IdsecSIASecretsDBService) ListStrongAccounts(listStrongAccounts *dbsecr
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list db accounts - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to list db strong accounts - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountsJSON, err := common.DeserializeJSONSnake(response.Body)
+	strongAccountsJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
 		return nil, err
 	}
 
 	// Deserialize account properties for each account in the list
-	accountsJSONMap := accountsJSON.(map[string]interface{})
-	if items, ok := accountsJSONMap["items"].([]interface{}); ok {
+	strongAccountsJSONMap := strongAccountsJSON.(map[string]interface{})
+	if items, ok := strongAccountsJSONMap["items"].([]interface{}); ok {
 		for _, item := range items {
 			if itemMap, ok := item.(map[string]interface{}); ok {
 				err := s.deserializeStrongAccount(itemMap)
@@ -1015,7 +1026,7 @@ func (s *IdsecSIASecretsDBService) ListStrongAccounts(listStrongAccounts *dbsecr
 	}
 
 	var listResponse dbsecretsmodels.IdsecSIADBDatabaseStrongAccountsList
-	err = mapstructure.Decode(accountsJSONMap, &listResponse)
+	err = mapstructure.Decode(strongAccountsJSONMap, &listResponse)
 	if err != nil {
 		return nil, err
 	}

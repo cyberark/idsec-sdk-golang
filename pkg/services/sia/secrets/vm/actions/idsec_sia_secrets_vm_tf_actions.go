@@ -18,9 +18,6 @@ var TerraformActionSecretsVMResource = &actions.IdsecServiceTerraformResourceAct
 			"provisioner_password",
 			"secret_data",
 		},
-		ExtraRequiredAttributes: []string{
-			"secret_name",
-		},
 		StateSchema: &secretsvmmodels.IdsecSIAVMSecret{},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{

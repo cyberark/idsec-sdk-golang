@@ -6,7 +6,7 @@ import (
 	policyactions "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/actions"
 )
 
-// ServiceConfig is the configuration for the uap service.
+// ServiceConfig is the configuration for the policy service.
 var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "policy",
 	RequiredAuthenticatorNames: []string{"isp"},

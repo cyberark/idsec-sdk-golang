@@ -30,9 +30,9 @@ type IdsecSIADBUpdateSecret struct {
 
 // IdsecSIADBUpdateStrongAccount is the struct for updating a strong account in the Idsec SIA DB.
 type IdsecSIADBUpdateStrongAccount struct {
-	ID        string `json:"id" mapstructure:"id" flag:"id" desc:"The ID of the account to update."`
-	StoreType string `json:"store_type" mapstructure:"store_type" flag:"store-type" desc:"The store type of the account (managed,pam)." choices:"managed,pam"`
-	Name      string `json:"name,omitempty" mapstructure:"name,omitempty" flag:"name" desc:"The name of the account."`
+	StrongAccountID string `json:"strong_account_id" mapstructure:"strong_account_id" flag:"strong-account-id" desc:"The ID of the account to update."`
+	StoreType       string `json:"store_type" mapstructure:"store_type" flag:"store-type" desc:"The store type of the account (managed,pam)." choices:"managed,pam"`
+	Name            string `json:"name,omitempty" mapstructure:"name,omitempty" flag:"name" desc:"The name of the account."`
 
 	// Used in case the StoreType is pam
 	Safe        string `json:"safe,omitempty" mapstructure:"safe" flag:"safe" desc:"The Safe of the account."`

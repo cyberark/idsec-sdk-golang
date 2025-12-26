@@ -295,6 +295,11 @@ func (s *IdsecServiceExecAction) setFromString(v reflect.Value, str string) erro
 		}
 		v.Set(elem)
 
+	case reflect.Array, reflect.Slice:
+		// assume comma-separated values
+		parts := strings.Split(str, ",")
+		slice := reflect.MakeSlice(v.Type(), len(parts), len(parts))
+		v.Set(slice)
 	default:
 		return fmt.Errorf("unsupported type %s", v.Kind())
 	}

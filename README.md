@@ -58,8 +58,8 @@ CyberArk's Official SDK and CLI for different services operations
   - [x] Secrets Hub Configuration Service
   - [x] Secrets Hub Filters Service
   - [x] Session Monitoring Service
-  - [x] Unified Access Policies Service
-    - [x] SCA - Secure Cloud Access
+  - [x] Access Control Policies Service
+    - [x] Cloud Access - Cloud Consoles
     - [x] DB - Databases
     - [x] VM - Virtual Machines
 - [x] Filesystem Inputs and Outputs for the CLI

@@ -22,6 +22,10 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/profiles"
 )
 
+const (
+	flagAccessedNotDefinedErr = "flag accessed but not defined"
+)
+
 // IdsecConfigureAction is a struct that implements the IdsecAction interface for configuring the CLI profiles.
 //
 // IdsecConfigureAction provides functionality for managing CLI configuration profiles,
@@ -274,7 +278,7 @@ func (a *IdsecConfigureAction) runInteractiveConfigureAction(cmd *cobra.Command,
 			continue
 		}
 		val, err := cmd.Flags().GetString(flag.Name)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), flagAccessedNotDefinedErr) {
 			return nil, err
 		}
 		if val == "" {
@@ -396,7 +400,7 @@ func (a *IdsecConfigureAction) runInteractiveConfigureAction(cmd *cobra.Command,
 			}
 			for _, flag := range authProfileFlags {
 				val, err := cmd.Flags().GetString(flag.Name)
-				if err != nil {
+				if err != nil && !strings.Contains(err.Error(), flagAccessedNotDefinedErr) {
 					return nil, err
 				}
 				if val == "" {
@@ -485,7 +489,7 @@ func (a *IdsecConfigureAction) runInteractiveConfigureAction(cmd *cobra.Command,
 					methodSettingsAnswers[strings.ReplaceAll(strings.TrimPrefix(flag.Name, authPrefix), "-", "_")] = val
 				} else {
 					val, err := cmd.Flags().GetString(flag.Name)
-					if err != nil {
+					if err != nil && !strings.Contains(err.Error(), flagAccessedNotDefinedErr) {
 						return nil, err
 					}
 					if val == "" {
@@ -594,8 +598,12 @@ func (a *IdsecConfigureAction) runSilentConfigureAction(cmd *cobra.Command, args
 			var authMethod authmodels.IdsecAuthMethod
 			if len(authenticator.SupportedAuthMethods()) > 1 {
 				authMethodStr, err := cmd.Flags().GetString(fmt.Sprintf("%s-auth-method", authenticator.AuthenticatorName()))
-				if err != nil {
+				if err != nil && !strings.Contains(err.Error(), flagAccessedNotDefinedErr) {
 					return nil, err
+				}
+				if authMethodStr == "" {
+					authMethod, _ = authenticator.DefaultAuthMethod()
+					authMethodStr = string(authMethod)
 				}
 				authMethod = authmodels.IdsecAuthMethod(authMethodStr)
 				if authMethod == authmodels.Default {

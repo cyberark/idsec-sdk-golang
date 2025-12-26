@@ -126,9 +126,9 @@ The Session Monitoring (sm) service requires the IdsecISPAuth authenticator, and
 
 - **IdsecSMService** - Session Monitoring service
 
-## UAP
-The Unified Access Policies (uap) service requires the IdsecISPAuth authenticator, and exposes those service classes:
-- **IdsecUAPService** - Unified Access Policies service
-  - **IdsecUAPSCAService** - Unified Access Policies SCA service
-  - **IdsecUAPSIADBService** - Unified Access Policies SIA DB service
-  - **IdsecUAPSIAVMService** - Unified Access Policies SIA VM service
+## Policy
+The Access Control Policies (policy) service requires the IdsecISPAuth authenticator, and exposes those service classes:
+- **IdsecPolicyService** - Access Control Policies service
+  - **IdsecPolicyCloudAccessService** - Access Control Policies Cloud Access service
+  - **IdsecPolicyDBService** - Access Control Policies DB service
+  - **IdsecPolicyVMService** - Access Control Policies VM service

@@ -1,5 +1,5 @@
 // Package models provides data structures for SCA discovery operations including
-// request, response and account info types relocated from the UAP SCA module.
+// request, response and account info types relocated from the Cloud Access Policy module.
 package models
 
 // IdsecSCADiscoveryResponse represents the initial response returned after starting an SCA discovery job.
@@ -8,8 +8,6 @@ package models
 //   - Status: HTTP-like status code returned in the body.
 //   - JobID: Unique identifier of the asynchronous discovery job.
 //   - AlreadyRunning: Indicates a discovery job for the same scope was already in progress.
-//
-// NOTE: Relocated from pkg/services/uap/sca/models/idsec_sca_discovery.go.
 type IdsecSCADiscoveryResponse struct {
 	Status         int    `json:"status" mapstructure:"status" flag:"status" desc:"HTTP-like status code returned in the body"`
 	JobID          string `json:"job_id" mapstructure:"job_id" flag:"job-id" desc:"The ID of the job associated with the discovery process"`

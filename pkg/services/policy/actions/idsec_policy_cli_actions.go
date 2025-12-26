@@ -3,6 +3,8 @@ package actions
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	policycloudaccessactions "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/actions"
+	policydb "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db/actions"
+	policyvm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm/actions"
 )
 
 // CLIAction is a struct that defines the policy action for the Idsec service CLI.
@@ -13,8 +15,10 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},
-	ActionAliases: []string{"accesspolicies"},
+	ActionAliases: []string{"accesspolicies", "acp"},
 	Subactions: []*actions.IdsecServiceCLIActionDefinition{
 		policycloudaccessactions.CLIAction,
+		policyvm.CLIAction,
+		policydb.CLIAction,
 	},
 }
