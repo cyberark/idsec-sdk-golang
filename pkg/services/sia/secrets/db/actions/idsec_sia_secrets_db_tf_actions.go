@@ -19,7 +19,7 @@ var TerraformActionDBStrongAccountResource = &actions.IdsecServiceTerraformResou
 			"password",
 			"secret_access_key",
 		},
-		StateSchema: &secretsdbmodels.IdsecSIADBSecretMetadata{},
+		StateSchema: &secretsdbmodels.IdsecSIADBDatabaseStrongAccount{},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,

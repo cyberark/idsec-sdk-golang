@@ -542,6 +542,12 @@ func (c *IdsecWinRMConnection) RunCommand(command *connectionsmodels.IdsecConnec
 	if !c.isConnected || c.isSuspended {
 		return nil, fmt.Errorf("cannot run command while not being connected")
 	}
+	if command.RetryCount < 1 {
+		command.RetryCount = 1
+	}
+	if command.RetryDelay < 1 {
+		command.RetryDelay = 1
+	}
 	var result *connectionsmodels.IdsecConnectionResult
 	var err error
 	retryErr := common.RetryCall(

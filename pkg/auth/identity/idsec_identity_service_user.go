@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
@@ -90,7 +91,6 @@ func (ai *IdsecIdentityServiceUser) loadCache(profile *models.IdsecProfile) bool
 
 func (ai *IdsecIdentityServiceUser) saveCache(profile *models.IdsecProfile) error {
 	if ai.keyring != nil && profile != nil && ai.sessionToken != "" {
-		ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(4 * time.Hour))
 		err := ai.keyring.SaveToken(profile, &auth.IdsecToken{
 			Token:      ai.sessionToken,
 			Username:   ai.username,
@@ -202,8 +202,17 @@ func (ai *IdsecIdentityServiceUser) AuthIdentity(profile *models.IdsecProfile, f
 	}
 
 	ai.sessionToken = idTokens[0]
+
+	// Try and decode exp from token
+	newTokenClaims, _, err := new(jwt.Parser).ParseUnverified(ai.sessionToken, jwt.MapClaims{})
+	if err != nil {
+		return err
+	}
+	newClaims := newTokenClaims.Claims.(jwt.MapClaims)
+	exp := int64(newClaims["exp"].(float64))
+	iat := int64(newClaims["iat"].(float64))
+	ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(int(exp-iat)) * time.Second))
 	ai.session.UpdateToken(ai.sessionToken, "Bearer")
-	ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(4 * time.Hour))
 	ai.logger.Info("Created a service user session via endpoint [%s] with user [%s] to platform", ai.identityURL, ai.username)
 
 	if ai.cacheAuthentication {

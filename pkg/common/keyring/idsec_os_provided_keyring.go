@@ -145,7 +145,10 @@ func (b *IdsecOSProvidedKeyring) GetPassword(serviceName string, username string
 	}
 	item, err := keyringStore.Get(fmt.Sprintf("%s_%s", keyringPrefix, username))
 	if err != nil {
-		if errors.Is(err, keyring.ErrKeyNotFound) {
+		// If the key is not found, return empty without error on non-Windows systems
+		// This is because windows permissions might block us from even setting the key
+		// Or the cred themselves are too long for windows cred manager
+		if errors.Is(err, keyring.ErrKeyNotFound) && runtime.GOOS != "windows" {
 			return "", nil
 		}
 		b.logger.Warning("Failed to get password from OS keyring: %v. Falling back to basic keyring.", err)

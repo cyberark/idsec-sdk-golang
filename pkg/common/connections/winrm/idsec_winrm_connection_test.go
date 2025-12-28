@@ -686,29 +686,6 @@ func TestIdsecWinRMConnection_RunCommand_RetryLogic(t *testing.T) {
 			expectedAttempts: 3,
 		},
 		{
-			name: "error_zero_retry_count_returns_retries_exhausted",
-			command: &connectionsmodels.IdsecConnectionCommand{
-				Command:    "echo test",
-				ExpectedRC: 0,
-				RetryCount: 0,
-				RetryDelay: 0,
-			},
-			setupFunc: func(conn *IdsecWinRMConnection) {
-				conn.isConnected = true
-				conn.isSuspended = false
-			},
-			mockRunCommand: func(attempt int) (*connectionsmodels.IdsecConnectionResult, error) {
-				return &connectionsmodels.IdsecConnectionResult{
-					Stdout: "test output",
-					Stderr: "",
-					RC:     0,
-				}, nil
-			},
-			expectedError:    true,
-			expectedErrorMsg: "retries exhausted",
-			expectedAttempts: 0,
-		},
-		{
 			name: "success_multiple_retries_with_delay",
 			command: &connectionsmodels.IdsecConnectionCommand{
 				Command:    "echo test",

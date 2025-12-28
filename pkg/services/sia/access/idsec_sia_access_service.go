@@ -216,15 +216,24 @@ func (s *IdsecSIAAccessService) installConnectorOnMachine(
 	}(connection)
 
 	// Run commands to stop, remove service, and remove files
-	_, _ = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
 		Command: cmdSet["stopConnectorService"],
 	})
-	_, _ = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+	if err != nil {
+		s.Logger.Debug("failed to stop existing connector service (if any): %v", err)
+	}
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
 		Command: cmdSet["removeConnectorService"],
 	})
-	_, _ = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+	if err != nil {
+		s.Logger.Debug("failed to remove existing connector service (if any): %v", err)
+	}
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
 		Command: cmdSet["removeConnectorFiles"],
 	})
+	if err != nil {
+		s.Logger.Debug("failed to remove existing connector files (if any): %v", err)
+	}
 
 	// Install the connector
 	if osType == commonmodels.OSTypeWindows {
