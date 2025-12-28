@@ -14,57 +14,9 @@ Idsec SDK Golang
 
 📜[**Documentation**](https://cyberark.github.io/idsec-sdk-golang/)
 
-CyberArk's Official SDK and CLI for different services operations
+CyberArk's Official SDK for different services operations
 
 ## Features and Services
-- [x] Extensive and Interactive CLI
-- [x] Different Authenticators
-    - [x] Identity Authentication Methods
-    - [x] MFA Support for Identity
-    - [x] Identity Security Platform
-- [x] Ready to use SDK in Golang
-- [x] Fully Interactive CLI comprising of main actions
-    - [x] Configure
-    - [x] Login
-    - [x] Exec
-    - [x] Profiles
-    - [x] Cache
-    - [x] Upgrade
-- [x] Services API
-  - [x] SIA SSO Service
-  - [x] SIA K8S Service
-  - [x] SIA VM Secrets Service
-  - [x] SIA DB Secrets Service
-  - [x] SIA Target Sets Workspace Service
-  - [x] SIA DB Workspace Service
-  - [x] SIA Access Service
-  - [x] SIA SSH CA Key Service
-  - [x] SIA DB Service
-  - [x] SIA Shortened Connection String Service
-  - [x] SIA Settings Service
-  - [x] SIA Certificates Service
-  - [x] Connector Manager Service
-  - [x] PCloud Accounts Service
-  - [x] PCloud Safes Service
-  - [x] PCloud Platforms Service
-  - [x] Identity Directories Service
-  - [x] Identity Roles Service
-  - [x] Identity Users Service
-  - [x] Secrets Hub Secret Stores Service
-  - [x] Secrets Hub Secrets Service
-  - [x] Secrets Hub Sync Policies Service
-  - [x] Secrets Hub Scans Service
-  - [x] Secrets Hub Service Info Service
-  - [x] Secrets Hub Configuration Service
-  - [x] Secrets Hub Filters Service
-  - [x] Session Monitoring Service
-  - [x] Access Control Policies Service
-    - [x] Cloud Access - Cloud Consoles
-    - [x] DB - Databases
-    - [x] VM - Virtual Machines
-- [x] Filesystem Inputs and Outputs for the CLI
-- [x] Silent and Verbose logging
-- [x] Profile Management and Authentication Caching
 
 ### Supported Environments
 
@@ -85,13 +37,12 @@ TL;DR
 
 SDK Usage
 =========
-As well as using the CLI, one can also develop under the idsec sdk using its API / class driven design
-
-The same idea as the CLI applies here as well
+One can develop using the idsec SDK using its API / class-driven design
 
 Let's say we want to generate a short lived password from the code
 
 To do so, we can use the following script:
+
 ```go
 package main
 
