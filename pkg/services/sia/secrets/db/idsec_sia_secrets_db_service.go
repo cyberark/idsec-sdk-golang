@@ -47,6 +47,7 @@ const (
 
 var (
 	// platformToRequiredAccountProperties maps each platform to its required account properties.
+	// Matches Python managed_account_request.py requirements.
 	platformToRequiredAccountProperties = map[string][]string{
 		PlatformPostgreSQL:    {"username"},
 		PlatformMySQL:         {"username"},
@@ -61,15 +62,15 @@ var (
 
 	// platformToOptionalAccountProperties maps each platform to its optional account properties.
 	platformToOptionalAccountProperties = map[string][]string{
-		PlatformPostgreSQL:    {"port", "database", "dsn", "address"},
-		PlatformMySQL:         {"port", "database", "dsn", "address"},
-		PlatformMariaDB:       {"port", "database", "dsn", "address"},
-		PlatformMSSql:         {"port", "database", "dsn", "address"},
-		PlatformOracle:        {"port", "database", "dsn", "address"},
-		PlatformMongoDB:       {"port", "auth_database"},
-		PlatformDB2UnixSSH:    {},
-		PlatformDomainAccount: {},
-		PlatformAWSAccessKeys: {},
+		PlatformPostgreSQL:    {"port", "database", "dsn", "address"},                             // Optional: address, port, database, dsn
+		PlatformMySQL:         {"port", "database", "dsn", "address"},                             // Optional: address, port, database, dsn
+		PlatformMariaDB:       {"port", "database", "dsn", "address"},                             // Optional: address, port, database, dsn
+		PlatformMSSql:         {"port", "database", "dsn", "address", "reconcile_is_win_account"}, // Optional: address, port, database, dsn, reconcile_is_win_account
+		PlatformOracle:        {"port", "database", "dsn", "address"},                             // Optional: address, port, database, dsn
+		PlatformMongoDB:       {"port", "auth_database", "dsn", "replica_set", "use_ssl"},         // Optional: port, auth_database, dsn, replica_set, use_ssl
+		PlatformDB2UnixSSH:    {},                                                                 // No optional fields
+		PlatformDomainAccount: {},                                                                 // No optional fields
+		PlatformAWSAccessKeys: {},                                                                 // No optional fields
 	}
 
 	platformToRequiredSecretPasswordObjectProperties = map[string][]string{
@@ -630,6 +631,39 @@ func hasValue(value interface{}) bool {
 	return true
 }
 
+// validateManagedAccountUpdateFields validates that all required fields for managed accounts are provided in the update request.
+func validateManagedAccountUpdateFields(updateAccountModel map[string]interface{}) error {
+	// Platform is a required field for all managed accounts
+	platform, ok := updateAccountModel["platform"].(string)
+	if !ok || platform == "" {
+		return fmt.Errorf("platform is required for managed accounts (all required fields must be provided in update request)")
+	}
+	// Validate required account property fields for the platform are provided in the update request
+	// Note: password is NOT included here - it's optional for updates
+	requiredFields, ok := platformToRequiredAccountProperties[platform]
+	if !ok {
+		return fmt.Errorf("unsupported platform: %s", platform)
+	}
+	// Validate all required fields for this platform are provided
+	for _, field := range requiredFields {
+		if value, ok := updateAccountModel[field]; !ok || !hasValue(value) {
+			return fmt.Errorf("%s is required for platform %s (all required fields must be provided in update request)", field, platform)
+		}
+	}
+	return nil
+}
+
+// validatePamAccountUpdateFields validates that all required fields for PAM accounts are provided in the update request.
+func validatePamAccountUpdateFields(updateAccountModel map[string]interface{}) error {
+	// Validate required fields for PAM accounts are provided in the update request
+	for _, field := range pamRequiredProperties {
+		if value, ok := updateAccountModel[field]; !ok || !hasValue(value) {
+			return fmt.Errorf("%s is required for PAM accounts (all required fields must be provided in update request)", field)
+		}
+	}
+	return nil
+}
+
 // serializePamAccountProperties serializes strong account properties for PAM accounts.
 func serializePamAccountProperties(accountModel map[string]interface{}) (map[string]interface{}, error) {
 	properties := make(map[string]interface{})
@@ -695,20 +729,48 @@ func serializeAccountProperties(storeType string, accountModel map[string]interf
 }
 
 // serializePasswordSecretObject serializes PasswordSecretObject based on platform.
-func serializePasswordSecretObject(platform string, accountModel map[string]interface{}) (map[string]interface{}, error) {
-	secretPasswordObject := make(map[string]interface{})
-
+// If isOptional is true, returns nil if no password fields are provided (for updates).
+// If isOptional is false, returns an error if password fields are missing (for creates).
+// Validates that the correct password type matches the platform (password for most, secret_access_key for AWS).
+func serializePasswordSecretObject(platform string, accountModel map[string]interface{}, isOptional bool) (map[string]interface{}, error) {
 	requiredFields, ok := platformToRequiredSecretPasswordObjectProperties[platform]
 	if !ok {
 		return nil, fmt.Errorf("unsupported platform: %s", platform)
 	}
+	// Check if any password field is provided
+	hasPassword := hasValue(accountModel["password"])
+	hasSecretAccessKey := hasValue(accountModel["secret_access_key"])
+	hasPasswordField := hasPassword || hasSecretAccessKey
+
+	// If password is optional and not provided, return nil
+	if isOptional && !hasPasswordField {
+		return nil, nil
+	}
+
+	// Validate that the correct password type is provided for the platform
+	isAWS := platform == PlatformAWSAccessKeys
+	if hasPasswordField {
+		if isAWS && !hasSecretAccessKey {
+			return nil, fmt.Errorf("AWSAccessKeys platform requires secret_access_key in password_secret_object")
+		}
+		if !isAWS && hasSecretAccessKey {
+			return nil, fmt.Errorf("%s platform requires password in password_secret_object", platform)
+		}
+	}
+
+	// Validate that the required field is provided
+	secretPasswordObject := make(map[string]interface{})
 	for _, field := range requiredFields {
 		if value, ok := accountModel[field]; ok && hasValue(value) {
 			secretPasswordObject[field] = value
 		} else {
+			if isOptional {
+				return nil, fmt.Errorf("%s is required for platform %s when updating password", field, platform)
+			}
 			return nil, fmt.Errorf("%s is required for platform %s", field, platform)
 		}
 	}
+
 	return secretPasswordObject, nil
 }
 
@@ -809,8 +871,9 @@ func (s *IdsecSIASecretsDBService) AddStrongAccount(addStrongAccount *dbsecretsm
 		return nil, fmt.Errorf("failed to serialize strong account properties: %w", err)
 	}
 	addStrongAccountJSON["account_properties"] = serializedStrongAccountProperties
-	if addStrongAccount.StoreType == dbsecretsmodels.Managed {
-		serializedPasswordSecretObject, err := serializePasswordSecretObject(addStrongAccount.Platform, strongAccountModel)
+	switch addStrongAccount.StoreType {
+	case dbsecretsmodels.Managed:
+		serializedPasswordSecretObject, err := serializePasswordSecretObject(addStrongAccount.Platform, strongAccountModel, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize password secret object: %w", err)
 		}
@@ -857,11 +920,34 @@ func (s *IdsecSIASecretsDBService) UpdateStrongAccount(updateStrongAccount *dbse
 		return nil, fmt.Errorf("failed to decode update account: %w", err)
 	}
 
+	// Decode the update request to validate it first
+	updateAccountModel := make(map[string]interface{})
+	if err := mapstructure.Decode(updateStrongAccount, &updateAccountModel); err != nil {
+		return nil, fmt.Errorf("failed to decode update account: %w", err)
+	}
+
+	// Check if password is provided in the update request (before merging)
+	hasPasswordInUpdate := hasValue(updateAccountModel["password"]) || hasValue(updateAccountModel["secret_access_key"])
+
+	// Validate that required fields are provided in the update request (matching Python PUT behavior)
+	switch updateStrongAccount.StoreType {
+	case dbsecretsmodels.Managed:
+		if err := validateManagedAccountUpdateFields(updateAccountModel); err != nil {
+			return nil, err
+		}
+	case dbsecretsmodels.PAM:
+		if err := validatePamAccountUpdateFields(updateAccountModel); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported store_type: %s", updateStrongAccount.StoreType)
+	}
+
+	// Merge with existing account for serialization (fill in missing fields from existing account)
 	strongAccountModel := make(map[string]interface{})
 	if err := mapstructure.Decode(updateStrongAccount, &strongAccountModel); err != nil {
 		return nil, fmt.Errorf("failed to decode update account: %w", err)
 	}
-
 	for field, existingValue := range existingStrongAccountMap {
 		if fieldValue, ok := strongAccountModel[field]; ok && hasValue(fieldValue) {
 			continue
@@ -880,12 +966,24 @@ func (s *IdsecSIASecretsDBService) UpdateStrongAccount(updateStrongAccount *dbse
 		return nil, fmt.Errorf("failed to serialize account properties: %w", err)
 	}
 	updateStrongAccountJSON["account_properties"] = serializedStrongAccountProperties
-	if updateStrongAccount.StoreType == dbsecretsmodels.Managed {
-		serializedPasswordSecretObject, err := serializePasswordSecretObject(updateStrongAccount.Platform, strongAccountModel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize password secret object: %w", err)
+	switch updateStrongAccount.StoreType {
+	case dbsecretsmodels.Managed:
+		if hasPasswordInUpdate {
+			// Get platform from strongAccountModel (from update request, already validated above)
+			platform, ok := strongAccountModel["platform"].(string)
+			if !ok || platform == "" {
+				return nil, fmt.Errorf("platform is required for managed accounts")
+			}
+			// Use updateAccountModel for password serialization (original update request)
+			serializedPasswordSecretObject, err := serializePasswordSecretObject(platform, updateAccountModel, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to serialize password secret object: %w", err)
+			}
+			// Only add to JSON if password object was serialized (not nil)
+			if serializedPasswordSecretObject != nil {
+				updateStrongAccountJSON["password_secret_object"] = serializedPasswordSecretObject
+			}
 		}
-		updateStrongAccountJSON["password_secret_object"] = serializedPasswordSecretObject
 	}
 	updateStrongAccountJSONCamel := common.ConvertToCamelCase(updateStrongAccountJSON, nil)
 	response, err := s.client.Put(context.Background(), fmt.Sprintf(strongAccountURL, updateStrongAccount.StrongAccountID), updateStrongAccountJSONCamel)

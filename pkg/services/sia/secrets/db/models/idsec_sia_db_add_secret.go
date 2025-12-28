@@ -26,8 +26,8 @@ type IdsecSIADBAddSecret struct {
 	// Atlas Secret Type
 	AtlasPublicKey  string `json:"atlas_public_key,omitempty" mapstructure:"atlas_public_key" flag:"atlas-public-key" desc:"The public part of MongoDB Atlas access keys."`
 	AtlasPrivateKey string `json:"atlas_private_key,omitempty" mapstructure:"atlas_private_key" flag:"atlas-private-key" desc:"The private part of MongoDB Atlas access keys."`
-
 }
+
 // IdsecSIADBAddStrongAccount is the struct for adding a strong account to the Idsec SIA DB.
 type IdsecSIADBAddStrongAccount struct {
 	StoreType string `json:"store_type" mapstructure:"store_type" flag:"store-type" desc:"The Store type of the account (managed,pam)." choices:"managed,pam"`
@@ -44,10 +44,18 @@ type IdsecSIADBAddStrongAccount struct {
 	Username string `json:"username,omitempty" mapstructure:"username" flag:"username" desc:"The username of the account."`
 	Port     int    `json:"port,omitempty" mapstructure:"port" flag:"port" desc:"The port of the account."`
 	Database string `json:"database,omitempty" mapstructure:"database" flag:"database" desc:"The database of the account."`
+	DSN      string `json:"dsn,omitempty" mapstructure:"dsn" flag:"dsn" desc:"The DSN of the account."`
 
 	AwsAccessKeyId string `json:"aws_access_key_id,omitempty" mapstructure:"aws_access_key_id" flag:"aws-access-key-id" desc:"The AWS access key ID of the account."`
 	AwsAccountId   string `json:"aws_account_id,omitempty" mapstructure:"aws_account_id" flag:"aws-account-id" desc:"The AWS account ID of the account."`
 	AuthDatabase   string `json:"auth_database,omitempty" mapstructure:"auth_database" flag:"auth-database" desc:"The authentication database of the account."`
+
+	// MongoDB specific optional fields
+	ReplicaSet string `json:"replica_set,omitempty" mapstructure:"replica_set" flag:"replica-set" desc:"The replica set name for MongoDB."`
+	UseSSL     string `json:"use_ssl,omitempty" mapstructure:"use_ssl" flag:"use-ssl" desc:"The SSL usage setting for MongoDB."`
+
+	// MSSql specific optional field
+	ReconcileIsWinAccount bool `json:"reconcile_is_win_account,omitempty" mapstructure:"reconcile_is_win_account" flag:"reconcile-is-win-account" desc:"Whether to reconcile as Windows account for MSSql."`
 
 	// PasswordSecretObject Fields
 	Password        string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password of the account."`
