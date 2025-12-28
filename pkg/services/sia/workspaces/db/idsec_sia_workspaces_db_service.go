@@ -721,7 +721,21 @@ func (s *IdsecSIAWorkspacesDBService) DatabaseTarget(getDatabase *workspacesdbmo
 // ListDatabaseTargets lists all databases using the database-onboarding new API
 func (s *IdsecSIAWorkspacesDBService) ListDatabaseTargets() (*workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList, error) {
 	s.Logger.Info("Listing all databases")
-	return s.listDatabaseTargetsWithFilters("", 0, nil)
+	allTargets := workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList{}
+	nextCursor := ""
+	for {
+		databases, err := s.listDatabaseTargetsWithFilters("", 0, nextCursor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list databases with pagination: %w", err)
+		}
+		allTargets.Items = append(allTargets.Items, databases.Items...)
+		if databases.NextCursor == "" {
+			break
+		}
+		nextCursor = databases.NextCursor
+	}
+	allTargets.TotalCount = len(allTargets.Items)
+	return &allTargets, nil
 }
 
 // ListDatabaseTargetsBy filters databases by the given filters using the database-onboarding new API
@@ -730,7 +744,7 @@ func (s *IdsecSIAWorkspacesDBService) ListDatabaseTargetsBy(databasesFilter *wor
 		return nil, fmt.Errorf("invalid provider engine: %s", databasesFilter.ProviderEngine)
 	}
 	s.Logger.Info("Listing databases by filters [%+v]", databasesFilter)
-	databases, err := s.listDatabaseTargetsWithFilters(databasesFilter.ProviderFamily, databasesFilter.Limit, &databasesFilter.Offset)
+	databases, err := s.listDatabaseTargetsWithFilters(databasesFilter.ProviderFamily, databasesFilter.Limit, databasesFilter.Cursor)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list databases with filters: %w", err)
 	}
@@ -816,7 +830,7 @@ func (s *IdsecSIAWorkspacesDBService) DatabaseTargetsStats() (*workspacesdbmodel
 	return databasesStats, nil
 }
 
-func (s *IdsecSIAWorkspacesDBService) listDatabaseTargetsWithFilters(providerFamily string, limit int, offset *int) (*workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList, error) {
+func (s *IdsecSIAWorkspacesDBService) listDatabaseTargetsWithFilters(providerFamily string, limit int, cursor string) (*workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList, error) {
 	params := make(map[string]string)
 	if providerFamily != "" {
 		params["providerFamily"] = providerFamily
@@ -824,8 +838,8 @@ func (s *IdsecSIAWorkspacesDBService) listDatabaseTargetsWithFilters(providerFam
 	if limit > 0 {
 		params["limit"] = fmt.Sprintf("%d", limit)
 	}
-	if offset != nil {
-		params["offset"] = fmt.Sprintf("%d", *offset)
+	if cursor != "" {
+		params["cursor"] = cursor
 	}
 	response, err := s.client.Get(context.Background(), dbTargetsURL, params)
 	if err != nil {

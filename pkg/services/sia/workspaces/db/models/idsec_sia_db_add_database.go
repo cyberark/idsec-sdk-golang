@@ -47,5 +47,5 @@ type IdsecSIADBAddDatabaseTarget struct {
 	ReadOnlyEndpoint                     string   `json:"read_only_endpoint,omitempty" mapstructure:"read_only_endpoint,omitempty" flag:"read-only-endpoint" desc:"The optional read-only endpoint of the database."`
 	Port                                 int      `json:"port,omitempty" mapstructure:"port,omitempty" flag:"port" desc:"The port of the database, if not given, the default will be used." validate:"omitempty,min=1,max=65535"`
 	SecretID                             string   `json:"secret_id,omitempty" mapstructure:"secret_id,omitempty" flag:"secret-id" desc:"The secret identifier stored in the secret service related to this database."`
-	ConfiguredAuthMethodType             string   `json:"configured_auth_method_type,omitempty" mapstructure:"configured_auth_method_type,omitempty" flag:"configured-auth-method-type" desc:"The target configured auth method type." choices:"ad_ephemeral_user,local_ephemeral_user,rds_iam_authentication,atlas_ephemeral_user"`
+	ConfiguredAuthMethodType             string   `json:"configured_auth_method_type" mapstructure:"configured_auth_method_type,omitempty" flag:"configured-auth-method-type" desc:"The target configured auth method type." choices:"ad_ephemeral_user,local_ephemeral_user,rds_iam_authentication,atlas_ephemeral_user" validate:"required"`
 }
