@@ -3,6 +3,7 @@ package cloudaccess
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	policyStatusActiveRetryCount = 10
+	policyStatusActiveRetryCount = 100
 )
 
 // IdsecPolicyCloudAccessPolicyPage represents a page of Cloud Access policies.
@@ -96,10 +97,11 @@ func (s *IdsecPolicyCloudAccessService) AddPolicy(addPolicy *cloudaccessmodels.I
 			return nil, fmt.Errorf("policy [%s] is in error state: %s", policyResp.PolicyID, policy.Metadata.Status.Status)
 		}
 		if retryCount >= policyStatusActiveRetryCount {
-			s.Logger.Warning("Policy [%s] is not active after 10 retries, "+
+			s.Logger.Warning("Policy [%s] is not active after 100 retries, "+
 				"might indicate an issue, moving on regardless", policyResp.PolicyID)
-			break
+			return nil, fmt.Errorf("policy [%s] is in state after 100 retries: %s", policyResp.PolicyID, policy.Metadata.Status.Status)
 		}
+		time.Sleep(3 * time.Second) // wait 3 seconds before retrying
 		retryCount++
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
@@ -157,10 +159,11 @@ func (s *IdsecPolicyCloudAccessService) UpdatePolicy(updatePolicy *cloudaccessmo
 			return nil, fmt.Errorf("policy [%s] is in error state: %s", updatePolicy.Metadata.PolicyID, policy.Metadata.Status.Status)
 		}
 		if retryCount >= policyStatusActiveRetryCount {
-			s.Logger.Warning("Policy [%s] is not active after 10 retries, "+
+			s.Logger.Warning("Policy [%s] is not active after 100 retries, "+
 				"might indicate an issue, moving on regardless", updatePolicy.Metadata.PolicyID)
-			break
+			return nil, fmt.Errorf("policy [%s] is in state after 100 retries: %s", updatePolicy.Metadata.PolicyID, policy.Metadata.Status.Status)
 		}
+		time.Sleep(3 * time.Second) // wait 3 seconds before retrying
 		retryCount++
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
