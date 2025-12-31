@@ -3,6 +3,7 @@ package azure
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	azureactions "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure/actions"
 )
 
 // ServiceConfig is the configuration for the CCE Azure service.
@@ -12,16 +13,16 @@ var ServiceConfig = services.IdsecServiceConfig{
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
 		actions.IdsecServiceActionTypeTerraformResource: {
-			// azureactions.TerraformActionEntraResource,
-			// azureactions.TerraformActionManagementGroupResource,
-			// azureactions.TerraformActionSubscriptionResource,
+			azureactions.TerraformActionEntraResource,
+			azureactions.TerraformActionManagementGroupResource,
+			azureactions.TerraformActionSubscriptionResource,
 		},
 		actions.IdsecServiceActionTypeTerraformDataSource: {
-			// azureactions.TerraformActionEntraDataSource,
-			// azureactions.TerraformActionManagementGroupDataSource,
-			// azureactions.TerraformActionSubscriptionDataSource,
-			// azureactions.TerraformActionWorkspacesDataSource,
-			// azureactions.TerraformActionIdentityParamsDataSource,
+			azureactions.TerraformActionEntraDataSource,
+			azureactions.TerraformActionManagementGroupDataSource,
+			azureactions.TerraformActionSubscriptionDataSource,
+			azureactions.TerraformActionWorkspacesDataSource,
+			azureactions.TerraformActionIdentityParamsDataSource,
 		},
 	},
 }
