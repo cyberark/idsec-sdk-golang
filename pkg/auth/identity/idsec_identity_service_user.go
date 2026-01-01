@@ -51,7 +51,11 @@ func NewIdsecIdentityServiceUser(username string, token string, appName string, 
 		if identityTenantSubdomain != "" {
 			identityURL, err = ResolveTenantFqdnFromTenantSubdomain(identityTenantSubdomain, awsEnvObject.RootDomain)
 		} else {
-			tenantSuffix := username[strings.Index(username, "@"):]
+			atIndex := strings.Index(username, "@")
+			if atIndex == -1 {
+				return nil, fmt.Errorf("username must be in email format (e.g., user@domain.com) when identityURL and identityTenantSubdomain are not provided")
+			}
+			tenantSuffix := username[atIndex:]
 			identityURL, err = ResolveTenantFqdnFromTenantSuffix(tenantSuffix, awsEnvObject.IdentityEnvURL)
 		}
 	}
