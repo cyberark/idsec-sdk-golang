@@ -127,7 +127,6 @@ var TerraformActionEntraResource = &actions.IdsecServiceTerraformResourceActionD
         ExtraRequiredAttributes: []string{},
         ImmutableAttributes: []string{
             "entra_id",
-            "entra_tenant_name",
         },
         StateSchema: &azuremodels.TfIdsecCCEAzureEntra{},
     },

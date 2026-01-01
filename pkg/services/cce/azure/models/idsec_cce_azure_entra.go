@@ -10,7 +10,6 @@ import (
 // OPENAPI-CORRELATION: AzureProgrammaticGeneralOnboardInput
 type TfIdsecCCEAzureAddEntra struct {
 	EntraID         string                           `json:"entraId" mapstructure:"entra_id" validate:"required,uuid" desc:"Microsoft Entra tenant ID (UUID format)"`
-	EntraTenantName string                           `json:"entraTenantName,omitempty" mapstructure:"entra_tenant_name,omitempty" validate:"required" desc:"Microsoft Entra tenant name"`
 	Services        []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to onboard (DPA, SCA, SecretsHub, CDS) with their resource configurations"`
 	CCEResources    map[string]interface{}           `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE resources configuration"`
 }

@@ -30,7 +30,6 @@ func TestTfAddEntra_Success(t *testing.T) {
 	}`
 
 	// Mock response for GET /api/azure/manual/entra/{id} (retrieve)
-	entraTenantName := "TestTenant"
 	getResponseJSON := `{
 		"id": "entra-123",
 		"onboardingType": "terraform_provider",
@@ -63,7 +62,6 @@ func TestTfAddEntra_Success(t *testing.T) {
 	// Create input
 	input := &azuremodels.TfIdsecCCEAzureAddEntra{
 		EntraID:         "12345678-1234-1234-1234-123456789012",
-		EntraTenantName: entraTenantName,
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{
 				ServiceName: ccemodels.DPA,
