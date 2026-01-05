@@ -148,19 +148,23 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 	if err != nil {
 		return nil, err
 	}
+	if len(listDirectoriesEntities.EntityTypes) == 0 {
+		listDirectoriesEntities.EntityTypes = []string{directoriesmodels.EntityTypeUser, directoriesmodels.EntityTypeGroup, directoriesmodels.EntityTypeRole}
+	}
 	directoriesUuids := make([]string, 0, len(directories))
 	for _, directory := range directories {
 		directoriesUuids = append(directoriesUuids, directory.DirectoryServiceUUID)
 	}
+
 	exclusions := make([]string, 0)
 	if len(listDirectoriesEntities.EntityTypes) >= 0 {
-		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.User) {
+		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.EntityTypeUser) {
 			exclusions = append(exclusions, "user")
 		}
-		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.Group) {
+		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.EntityTypeGroup) {
 			exclusions = append(exclusions, "group")
 		}
-		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.Role) {
+		if !slices.Contains(listDirectoriesEntities.EntityTypes, directoriesmodels.EntityTypeRole) {
 			exclusions = append(exclusions, "roles")
 		}
 	}
@@ -210,7 +214,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 				IdsecIdentityBaseEntity: directoriesmodels.IdsecIdentityBaseEntity{
 					ID:                       user.Row.InternalID,
 					Name:                     user.Row.SystemName,
-					EntityType:               directoriesmodels.User,
+					EntityType:               directoriesmodels.EntityTypeUser,
 					DirectoryServiceType:     user.Row.DirectoryServiceType,
 					DisplayName:              user.Row.DisplayName,
 					ServiceInstanceLocalized: user.Row.ServiceInstanceLocalized,
@@ -228,7 +232,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 				IdsecIdentityBaseEntity: directoriesmodels.IdsecIdentityBaseEntity{
 					ID:                       group.Row.InternalID,
 					Name:                     group.Row.SystemName,
-					EntityType:               directoriesmodels.Group,
+					EntityType:               directoriesmodels.EntityTypeGroup,
 					DirectoryServiceType:     group.Row.DirectoryServiceType,
 					DisplayName:              group.Row.DisplayName,
 					ServiceInstanceLocalized: group.Row.ServiceInstanceLocalized,
@@ -244,7 +248,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 				IdsecIdentityBaseEntity: directoriesmodels.IdsecIdentityBaseEntity{
 					ID:                       role.Row.ID,
 					Name:                     role.Row.Name,
-					EntityType:               directoriesmodels.Role,
+					EntityType:               directoriesmodels.EntityTypeRole,
 					DirectoryServiceType:     identity.Identity,
 					DisplayName:              role.Row.Name,
 					ServiceInstanceLocalized: identity.Identity,

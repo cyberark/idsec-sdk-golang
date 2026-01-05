@@ -2,12 +2,16 @@ package actions
 
 import usersmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/models"
 
-// ActionToSchemaMapIdentityUsers is a map that defines the mapping between Users action names and their corresponding schema types.
-var ActionToSchemaMapIdentityUsers = map[string]interface{}{
+// ActionToSchemaMap is a map that defines the mapping between Users action names and their corresponding schema types.
+var ActionToSchemaMap = map[string]interface{}{
 	"create-user":         &usersmodels.IdsecIdentityCreateUser{},
 	"update-user":         &usersmodels.IdsecIdentityUpdateUser{},
+	"user":                &usersmodels.IdsecIdentityGetUser{},
+	"list-users":          nil,
+	"list-users-by":       &usersmodels.IdsecIdentityUserFilters{},
 	"delete-user":         &usersmodels.IdsecIdentityDeleteUser{},
-	"user-by-name":        &usersmodels.IdsecIdentityUserByName{},
-	"user-id-by-name":     &usersmodels.IdsecIdentityUserIDByName{},
+	"delete-users":        &usersmodels.IdsecIdentityDeleteUsers{},
 	"reset-user-password": &usersmodels.IdsecIdentityResetUserPassword{},
+	"user-info":           nil,
+	"users-stats":         nil,
 }

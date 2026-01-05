@@ -15,6 +15,12 @@ var ServiceConfig = services.IdsecServiceConfig{
 		actions.IdsecServiceActionTypeCLI: {
 			identityusersactions.CLIAction,
 		},
+		actions.IdsecServiceActionTypeTerraformResource: {
+			identityusersactions.TerraformActionUserResource,
+		},
+		actions.IdsecServiceActionTypeTerraformDataSource: {
+			identityusersactions.TerraformActionUserDataSource,
+		},
 	},
 }
 

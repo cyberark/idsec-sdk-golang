@@ -146,46 +146,141 @@ func TestNewDirectoryServiceQuerySpecificRoleRequest(t *testing.T) {
 		{
 			name:     "success_with_role_name",
 			roleName: "System Administrator",
-			expectedResult: &DirectoryServiceQuerySpecificRoleRequest{
-				User:  "{}",
-				Roles: `{"Name":{"_eq":"System Administrator"}}`,
-				Group: "{}",
+			validateFunc: func(t *testing.T, result *DirectoryServiceQuerySpecificRoleRequest) {
+				if result.User != "{}" {
+					t.Errorf("Expected User to be '{}', got '%s'", result.User)
+				}
+				if result.Group != "{}" {
+					t.Errorf("Expected Group to be '{}', got '%s'", result.Group)
+				}
+
+				// Verify that Roles filter contains the _or structure with Name and _ID
+				var rolesFilter map[string]interface{}
+				err := json.Unmarshal([]byte(result.Roles), &rolesFilter)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal roles filter: %v", err)
+				}
+
+				// Check for _or field
+				orFilters, ok := rolesFilter["_or"].([]interface{})
+				if !ok {
+					t.Fatal("Expected _or field in roles filter")
+				}
+
+				if len(orFilters) != 2 {
+					t.Errorf("Expected 2 filters in _or array, got %d", len(orFilters))
+				}
+
+				// Verify Name filter
+				nameFilter, ok := orFilters[0].(map[string]interface{})
+				if !ok {
+					t.Fatal("Expected Name filter to be a map")
+				}
+				if nameEq, ok := nameFilter["Name"].(map[string]interface{}); ok {
+					if nameEq["_eq"] != "System Administrator" {
+						t.Errorf("Expected Name._eq to be 'System Administrator', got '%v'", nameEq["_eq"])
+					}
+				} else {
+					t.Error("Expected Name._eq structure in filter")
+				}
+
+				// Verify _ID filter
+				idFilter, ok := orFilters[1].(map[string]interface{})
+				if !ok {
+					t.Fatal("Expected _ID filter to be a map")
+				}
+				if idEq, ok := idFilter["_ID"].(map[string]interface{}); ok {
+					if idEq["_eq"] != "System Administrator" {
+						t.Errorf("Expected _ID._eq to be 'System Administrator', got '%v'", idEq["_eq"])
+					}
+				} else {
+					t.Error("Expected _ID._eq structure in filter")
+				}
 			},
 		},
 		{
 			name:     "success_role_with_spaces",
 			roleName: "Database Admin",
-			expectedResult: &DirectoryServiceQuerySpecificRoleRequest{
-				User:  "{}",
-				Roles: `{"Name":{"_eq":"Database Admin"}}`,
-				Group: "{}",
+			validateFunc: func(t *testing.T, result *DirectoryServiceQuerySpecificRoleRequest) {
+				var rolesFilter map[string]interface{}
+				err := json.Unmarshal([]byte(result.Roles), &rolesFilter)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal roles filter: %v", err)
+				}
+
+				orFilters := rolesFilter["_or"].([]interface{})
+				nameFilter := orFilters[0].(map[string]interface{})
+				nameEq := nameFilter["Name"].(map[string]interface{})
+
+				if nameEq["_eq"] != "Database Admin" {
+					t.Errorf("Expected role name 'Database Admin', got '%v'", nameEq["_eq"])
+				}
 			},
 		},
 		{
 			name:     "success_role_with_special_characters",
 			roleName: "Admin@Domain.com",
-			expectedResult: &DirectoryServiceQuerySpecificRoleRequest{
-				User:  "{}",
-				Roles: `{"Name":{"_eq":"Admin@Domain.com"}}`,
-				Group: "{}",
+			validateFunc: func(t *testing.T, result *DirectoryServiceQuerySpecificRoleRequest) {
+				var rolesFilter map[string]interface{}
+				err := json.Unmarshal([]byte(result.Roles), &rolesFilter)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal roles filter: %v", err)
+				}
+
+				orFilters := rolesFilter["_or"].([]interface{})
+				nameFilter := orFilters[0].(map[string]interface{})
+				nameEq := nameFilter["Name"].(map[string]interface{})
+
+				if nameEq["_eq"] != "Admin@Domain.com" {
+					t.Errorf("Expected role name 'Admin@Domain.com', got '%v'", nameEq["_eq"])
+				}
 			},
 		},
 		{
 			name:     "edge_case_single_character_role",
 			roleName: "A",
-			expectedResult: &DirectoryServiceQuerySpecificRoleRequest{
-				User:  "{}",
-				Roles: `{"Name":{"_eq":"A"}}`,
-				Group: "{}",
+			validateFunc: func(t *testing.T, result *DirectoryServiceQuerySpecificRoleRequest) {
+				var rolesFilter map[string]interface{}
+				err := json.Unmarshal([]byte(result.Roles), &rolesFilter)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal roles filter: %v", err)
+				}
+
+				orFilters := rolesFilter["_or"].([]interface{})
+				if len(orFilters) != 2 {
+					t.Errorf("Expected 2 filters in _or array, got %d", len(orFilters))
+				}
+
+				nameFilter := orFilters[0].(map[string]interface{})
+				nameEq := nameFilter["Name"].(map[string]interface{})
+				if nameEq["_eq"] != "A" {
+					t.Errorf("Expected role name 'A', got '%v'", nameEq["_eq"])
+				}
+
+				idFilter := orFilters[1].(map[string]interface{})
+				idEq := idFilter["_ID"].(map[string]interface{})
+				if idEq["_eq"] != "A" {
+					t.Errorf("Expected role ID 'A', got '%v'", idEq["_eq"])
+				}
 			},
 		},
 		{
 			name:     "edge_case_unicode_role_name",
 			roleName: "Administrâtör",
-			expectedResult: &DirectoryServiceQuerySpecificRoleRequest{
-				User:  "{}",
-				Roles: `{"Name":{"_eq":"Administrâtör"}}`,
-				Group: "{}",
+			validateFunc: func(t *testing.T, result *DirectoryServiceQuerySpecificRoleRequest) {
+				var rolesFilter map[string]interface{}
+				err := json.Unmarshal([]byte(result.Roles), &rolesFilter)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal roles filter: %v", err)
+				}
+
+				orFilters := rolesFilter["_or"].([]interface{})
+				nameFilter := orFilters[0].(map[string]interface{})
+				nameEq := nameFilter["Name"].(map[string]interface{})
+
+				if nameEq["_eq"] != "Administrâtör" {
+					t.Errorf("Expected role name 'Administrâtör', got '%v'", nameEq["_eq"])
+				}
 			},
 		},
 	}

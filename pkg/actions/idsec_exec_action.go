@@ -136,7 +136,7 @@ func (a *IdsecBaseExecAction) DefineAction(cmd *cobra.Command) {
 	execCmd.PersistentFlags().String("output-path", "", "Output file to write data to")
 	execCmd.PersistentFlags().String("request-file", "", "Request file containing the parameters for the exec action")
 	execCmd.PersistentFlags().Int("retry-count", 1, "Retry count for execution")
-	execCmd.PersistentFlags().Bool("refresh-auth", false, "If a cache exists, will also try to refresh it")
+	execCmd.PersistentFlags().Bool("refresh-auth", true, "If a cache exists, will also try to refresh it")
 	err := (*a.execAction).DefineExecAction(execCmd)
 	if err != nil {
 		args.PrintFailure(fmt.Sprintf("Error defining exec action %v", err))

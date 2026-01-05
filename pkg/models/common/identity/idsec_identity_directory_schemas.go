@@ -166,7 +166,18 @@ func NewDirectoryServiceQuerySpecificRoleRequest(roleName string) *DirectoryServ
 	request.Roles = "{}"
 	request.Group = "{}"
 	if roleName != "" {
-		request.Roles = `{"Name":{"_eq":"` + roleName + `"}}`
+		rolesFilter := map[string]interface{}{
+			"_or": []map[string]interface{}{
+				{"Name": map[string]interface{}{
+					"_eq": roleName,
+				}},
+				{"_ID": map[string]interface{}{
+					"_eq": roleName,
+				}},
+			},
+		}
+		roles, _ := json.Marshal(rolesFilter)
+		request.Roles = string(roles)
 	}
 	return request
 }

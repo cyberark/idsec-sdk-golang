@@ -2,8 +2,8 @@ package models
 
 // IdsecIdentityUpdateRole represents the schema for updating a role.
 type IdsecIdentityUpdateRole struct {
-	RoleName    string `json:"role_name,omitempty" mapstructure:"role_name" flag:"role-name" desc:"Role name to update"`
-	RoleID      string `json:"role_id,omitempty" mapstructure:"role_id" flag:"role-id" desc:"Role id to update"`
-	NewRoleName string `json:"new_role_name,omitempty" mapstructure:"new_role_name" flag:"new-role-name" desc:"New role name to update to"`
-	Description string `json:"description,omitempty" mapstructure:"description" flag:"description" desc:"New description of the role"`
+	RoleID      string   `json:"role_id,omitempty" mapstructure:"role_id" flag:"role-id" desc:"Role id to update"`
+	RoleName    string   `json:"role_name,omitempty" mapstructure:"role_name" flag:"role-name" desc:"Role name to update"`
+	Description string   `json:"description,omitempty" mapstructure:"description" flag:"description" desc:"New description of the role"`
+	AdminRights []string `json:"admin_rights,omitempty" mapstructure:"admin_rights" flag:"admin-rights" desc:"Admin rights to set for the role"`
 }

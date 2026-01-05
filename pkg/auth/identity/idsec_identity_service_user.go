@@ -238,6 +238,11 @@ func (ai *IdsecIdentityServiceUser) SessionToken() string {
 	return ai.sessionToken
 }
 
+// SessionExp returns the current identity session expiration time
+func (ai *IdsecIdentityServiceUser) SessionExp() commonmodels.IdsecRFC3339Time {
+	return ai.sessionExp
+}
+
 // IdentityURL returns the current identity URL
 func (ai *IdsecIdentityServiceUser) IdentityURL() string {
 	return ai.session.BaseURL

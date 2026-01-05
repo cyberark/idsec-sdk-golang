@@ -299,6 +299,12 @@ func (s *IdsecServiceExecAction) setFromString(v reflect.Value, str string) erro
 		// assume comma-separated values
 		parts := strings.Split(str, ",")
 		slice := reflect.MakeSlice(v.Type(), len(parts), len(parts))
+		for i, part := range parts {
+			err := s.setFromString(slice.Index(i), part)
+			if err != nil {
+				return err
+			}
+		}
 		v.Set(slice)
 	default:
 		return fmt.Errorf("unsupported type %s", v.Kind())
@@ -402,10 +408,6 @@ func (s *IdsecServiceExecAction) defineServiceExecAction(
 					}
 					if field.Tag.Get("default") != "" {
 						subCmd.Flag(flag.Name).DefValue = field.Tag.Get("default")
-						err = subCmd.Flag(flag.Name).Value.Set(field.Tag.Get("default"))
-						if err != nil {
-							return nil, err
-						}
 					}
 				}
 			}
@@ -621,6 +623,10 @@ func (s *IdsecServiceExecAction) parseFlag(f *pflag.Flag, cmd *cobra.Command, fl
 			flags[key] = val
 		}
 	case "stringSlice":
+		val, err := cmd.Flags().GetStringSlice(f.Name)
+		if err == nil {
+			flags[key] = val
+		}
 	case "[]string":
 		val, err := cmd.Flags().GetStringSlice(f.Name)
 		if err == nil {
@@ -632,12 +638,20 @@ func (s *IdsecServiceExecAction) parseFlag(f *pflag.Flag, cmd *cobra.Command, fl
 			flags[key] = val
 		}
 	case "intSlice":
+		val, err := cmd.Flags().GetIntSlice(f.Name)
+		if err == nil {
+			flags[key] = val
+		}
 	case "[]int":
 		val, err := cmd.Flags().GetIntSlice(f.Name)
 		if err == nil {
 			flags[key] = val
 		}
 	case "stringToString":
+		val, err := cmd.Flags().GetStringToString(f.Name)
+		if err == nil {
+			flags[key] = val
+		}
 	case "map[string]string":
 		val, err := cmd.Flags().GetStringToString(f.Name)
 		if err == nil {
@@ -816,12 +830,20 @@ func (s *IdsecServiceExecAction) resolveActionArgs(cmd *cobra.Command, execCmd *
 	if err != nil {
 		return nil, err
 	}
-	err = mapstructure.Decode(flags, actionSchema)
+	decoderConfig := &mapstructure.DecoderConfig{
+		ZeroFields: true,
+		Result:     actionSchema,
+		TagName:    "mapstructure",
+	}
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return nil, err
+	}
+	err = decoder.Decode(flags)
 	if err != nil {
 		return nil, err
 	}
 	actionArgs := []reflect.Value{reflect.ValueOf(actionSchema)}
-
 	return actionArgs, nil
 }
 

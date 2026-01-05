@@ -190,7 +190,7 @@ func (a *IdsecISPAuth) performIdentityServiceUserAuthentication(profile *models.
 		Endpoint:   identityAuth.IdentityURL(),
 		TokenType:  auth.JWT,
 		AuthMethod: auth.Identity,
-		ExpiresIn:  commonmodels.IdsecRFC3339Time(time.Now().Add(4 * time.Hour)),
+		ExpiresIn:  identityAuth.SessionExp(),
 		Metadata:   metadata,
 	}, nil
 }

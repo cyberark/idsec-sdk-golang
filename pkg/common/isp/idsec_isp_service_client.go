@@ -305,13 +305,17 @@ func FromISPAuth(ispAuth *auth.IdsecISPAuth, serviceName string, separator strin
 		}
 	}
 	if tenantEnv == "" && ispAuth.Token.Metadata["env"] != "" {
-		tenantEnv = commonmodels.AwsEnv(ispAuth.Token.Metadata["env"].(string))
+		if envStr, ok := ispAuth.Token.Metadata["env"].(string); ok {
+			tenantEnv = commonmodels.AwsEnv(envStr)
+		} else if env, ok := ispAuth.Token.Metadata["env"].(commonmodels.AwsEnv); ok {
+			tenantEnv = env
+		}
+	}
+	if tenantEnv == "" && os.Getenv("DEPLOY_ENV") != "" {
+		tenantEnv = commonmodels.AwsEnv(os.Getenv("DEPLOY_ENV"))
 	}
 	if tenantEnv == "" {
-		tenantEnv = commonmodels.AwsEnv(os.Getenv("DEPLOY_ENV"))
-		if tenantEnv == "" {
-			tenantEnv = commonmodels.Prod
-		}
+		tenantEnv = commonmodels.Prod
 	}
 	cookieJar, _ := cookiejar.New(nil)
 	if cookies, ok := ispAuth.Token.Metadata["cookies"]; ok {

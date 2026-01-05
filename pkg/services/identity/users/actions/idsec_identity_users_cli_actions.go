@@ -8,6 +8,6 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 		ActionName:        "users",
 		ActionDescription: "Identity management of users.",
 		ActionVersion:     1,
-		Schemas:           ActionToSchemaMapIdentityUsers,
+		Schemas:           ActionToSchemaMap,
 	},
 }

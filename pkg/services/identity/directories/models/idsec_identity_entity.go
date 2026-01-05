@@ -4,9 +4,9 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/common/identity"
 
 // Possible entity types
 const (
-	Role  = "ROLE"
-	User  = "USER"
-	Group = "GROUP"
+	EntityTypeRole  = "ROLE"
+	EntityTypeUser  = "USER"
+	EntityTypeGroup = "GROUP"
 )
 
 // IdsecIdentityEntity is an interface that defines the methods for an identity entity.
