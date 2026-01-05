@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
@@ -17,7 +16,6 @@ import (
 
 	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 )
@@ -38,6 +36,10 @@ type IdsecIdentityDirectoriesService struct {
 	ispAuth *auth.IdsecISPAuth
 	client  *isp.IdsecISPServiceClient
 	env     commonmodels.EnvObject
+
+	DoGet              func(ctx context.Context, path string, params interface{}) (*http.Response, error)
+	DoPost             func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoTenantSuffixPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 }
 
 // NewIdsecIdentityDirectoriesService creates a new instance of IdsecIdentityDirectoriesService.
@@ -57,19 +59,6 @@ func NewIdsecIdentityDirectoriesService(authenticators ...auth.IdsecAuth) (*Idse
 	if err != nil {
 		return nil, err
 	}
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(ispAuth.Token.Token, jwt.MapClaims{})
-	if err != nil {
-		return nil, err
-	}
-	claims := parsedToken.Claims.(jwt.MapClaims)
-	identityIss := claims["iss"].(string)
-	identityURL, err := url.Parse(identityIss)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse identity URL: %w", err)
-	}
-	// Directories API for some reason do not work directly with the platform URL
-	// So we use identity URL directly here
-	client.BaseURL = fmt.Sprintf("%s://%s", identityURL.Scheme, identityURL.Host)
 	client.UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
@@ -82,6 +71,27 @@ func NewIdsecIdentityDirectoriesService(authenticators ...auth.IdsecAuth) (*Idse
 	identityDirectoriesService.IdsecBaseService = baseService
 	identityDirectoriesService.env = awsEnvList
 	return identityDirectoriesService, nil
+}
+
+func (s *IdsecIdentityDirectoriesService) getOperation() func(ctx context.Context, path string, params interface{}) (*http.Response, error) {
+	if s.DoGet != nil {
+		return s.DoGet
+	}
+	return s.client.Get
+}
+
+func (s *IdsecIdentityDirectoriesService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	if s.DoPost != nil {
+		return s.DoPost
+	}
+	return s.client.Post
+}
+
+func (s *IdsecIdentityDirectoriesService) postTenantSuffixOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	if s.DoTenantSuffixPost != nil {
+		return s.DoTenantSuffixPost
+	}
+	return s.client.Post
 }
 
 func (s *IdsecIdentityDirectoriesService) refreshIdentityDirectoriesAuth(client *common.IdsecClient) error {
@@ -98,7 +108,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectories(listDirectories *direc
 		listDirectories.Directories = identity.AllDirectoryTypes
 	}
 	s.Logger.Info("Retrieving directory services for directories [%v]", listDirectories)
-	response, err := s.client.Get(context.Background(), getDirectoryServicesURL, nil)
+	response, err := s.getOperation()(context.Background(), getDirectoryServicesURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +191,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 	for _, exclusion := range exclusions {
 		delete(directoryRequestMap, exclusion)
 	}
-	response, err := s.client.Post(context.Background(), directoryServiceQueryURL, directoryRequestMap)
+	response, err := s.postOperation()(context.Background(), directoryServiceQueryURL, directoryRequestMap)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +291,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 // TenantDefaultSuffix retrieves the default tenant suffix for the identity directories service.
 func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) {
 	s.Logger.Info("Discovering default tenant suffix")
-	response, err := s.client.Post(context.Background(), tenantSuffixURL, nil)
+	response, err := s.postTenantSuffixOperation()(context.Background(), tenantSuffixURL, nil)
 	if err != nil {
 		return "", err
 	}

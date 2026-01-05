@@ -49,7 +49,9 @@ type IdsecIdentityRolesService struct {
 	client             *isp.IdsecISPServiceClient
 	directoriesService *directories.IdsecIdentityDirectoriesService
 
-	doPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoPost                      func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoAdminRightsPost           func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoDirectoryServiceQueryPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 }
 
 // NewIdsecIdentityRolesService creates a new instance of IdsecIdentityRolesService.
@@ -83,8 +85,22 @@ func NewIdsecIdentityRolesService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 }
 
 func (s *IdsecIdentityRolesService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-	if s.doPost != nil {
-		return s.doPost
+	if s.DoPost != nil {
+		return s.DoPost
+	}
+	return s.client.Post
+}
+
+func (s *IdsecIdentityRolesService) adminRightsPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	if s.DoAdminRightsPost != nil {
+		return s.DoAdminRightsPost
+	}
+	return s.client.Post
+}
+
+func (s *IdsecIdentityRolesService) directoryServiceQueryPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	if s.DoDirectoryServiceQueryPost != nil {
+		return s.DoDirectoryServiceQueryPost
 	}
 	return s.client.Post
 }
@@ -184,7 +200,7 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 			"Path": adminRight,
 		}
 	}
-	response, err := s.postOperation()(context.Background(), addAdminRightsToRoleURL, requestBody)
+	response, err := s.adminRightsPostOperation()(context.Background(), addAdminRightsToRoleURL, requestBody)
 	if err != nil {
 		return fmt.Errorf("failed to add admin rights to role: %v", err)
 	}
@@ -234,7 +250,7 @@ func (s *IdsecIdentityRolesService) RemoveAdminRightsFromRole(removeAdminRightsF
 			"Path": adminRight,
 		}
 	}
-	response, err := s.postOperation()(context.Background(), removeAdminRightsFromRoleURL, requestBody)
+	response, err := s.adminRightsPostOperation()(context.Background(), removeAdminRightsFromRoleURL, requestBody)
 	if err != nil {
 		return fmt.Errorf("failed to remove admin rights from role: %v", err)
 	}
@@ -472,7 +488,7 @@ func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRo
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode specific role request: %v", err)
 	}
-	response, err := s.postOperation()(context.Background(), directoryServiceQueryURL, specificRoleRequestBody)
+	response, err := s.directoryServiceQueryPostOperation()(context.Background(), directoryServiceQueryURL, specificRoleRequestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query directory services role: %v", err)
 	}
@@ -644,6 +660,7 @@ func (s *IdsecIdentityRolesService) ListRoleMembers(listRoleMembers *rolesmodels
 			for _, r := range results {
 				row := r.(map[string]interface{})["Row"].(map[string]interface{})
 				members = append(members, &rolesmodels.IdsecIdentityRoleMember{
+					RoleID:     listRoleMembers.RoleID,
 					MemberID:   row["Guid"].(string),
 					MemberName: row["Name"].(string),
 					MemberType: strings.ToUpper(row["Type"].(string)),
@@ -688,6 +705,13 @@ func (s *IdsecIdentityRolesService) AddMemberToRole(addUserToRole *rolesmodels.I
 	}
 	switch addUserToRole.MemberType {
 	case directoriesmodels.EntityTypeUser:
+		if !strings.Contains(addUserToRole.MemberName, "@") {
+			tenantSuffix, err := s.directoriesService.TenantDefaultSuffix()
+			if err != nil {
+				return nil, err
+			}
+			addUserToRole.MemberName = fmt.Sprintf("%s@%s", addUserToRole.MemberName, tenantSuffix)
+		}
 		membersMap["Users"] = []string{addUserToRole.MemberName}
 	case directoriesmodels.EntityTypeGroup:
 		membersMap["Groups"] = []string{addUserToRole.MemberName}
@@ -730,6 +754,13 @@ func (s *IdsecIdentityRolesService) RemoveMemberFromRole(removeMemberFromRole *r
 	}
 	switch removeMemberFromRole.MemberType {
 	case directoriesmodels.EntityTypeUser:
+		if !strings.Contains(removeMemberFromRole.MemberName, "@") {
+			tenantSuffix, err := s.directoriesService.TenantDefaultSuffix()
+			if err != nil {
+				return err
+			}
+			removeMemberFromRole.MemberName = fmt.Sprintf("%s@%s", removeMemberFromRole.MemberName, tenantSuffix)
+		}
 		membersMap["Users"] = []string{removeMemberFromRole.MemberName}
 	case directoriesmodels.EntityTypeGroup:
 		membersMap["Groups"] = []string{removeMemberFromRole.MemberName}

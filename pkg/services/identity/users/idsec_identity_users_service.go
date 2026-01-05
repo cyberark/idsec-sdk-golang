@@ -48,7 +48,8 @@ type IdsecIdentityUsersService struct {
 	client             *isp.IdsecISPServiceClient
 	directoriesService *directories.IdsecIdentityDirectoriesService
 
-	doPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoPost             func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoRedrockQueryPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 }
 
 // NewIdsecIdentityUsersService creates a new instance of IdsecIdentityUsersService.
@@ -82,8 +83,15 @@ func NewIdsecIdentityUsersService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 }
 
 func (s *IdsecIdentityUsersService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-	if s.doPost != nil {
-		return s.doPost
+	if s.DoPost != nil {
+		return s.DoPost
+	}
+	return s.client.Post
+}
+
+func (s *IdsecIdentityUsersService) redrockQueryPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	if s.DoRedrockQueryPost != nil {
+		return s.DoRedrockQueryPost
 	}
 	return s.client.Post
 }
@@ -363,7 +371,7 @@ func (s *IdsecIdentityUsersService) User(user *usersmodels.IdsecIdentityGetUser)
 			"Script": fmt.Sprintf("Select ID, Username, DisplayName, Email, MobileNumber, LastLogin from User WHERE Username='%s'", strings.ToLower(user.Username)),
 		}
 	}
-	response, err := s.postOperation()(context.Background(), redrockQueryURL, redrockQuery)
+	response, err := s.redrockQueryPostOperation()(context.Background(), redrockQueryURL, redrockQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +465,7 @@ func (s *IdsecIdentityUsersService) listUsers(pageSize int, limit int, pageNumbe
 				},
 			}
 
-			response, err := s.postOperation()(context.Background(), redrockQueryURL, redrockQuery)
+			response, err := s.redrockQueryPostOperation()(context.Background(), redrockQueryURL, redrockQuery)
 			if err != nil {
 				s.Logger.Error("Failed to list users: %v", err)
 				return
