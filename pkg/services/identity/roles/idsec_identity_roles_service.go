@@ -603,6 +603,7 @@ func (s *IdsecIdentityRolesService) RoleMember(getRoleMember *rolesmodels.IdsecI
 	if getRoleMember.MemberID == "" && getRoleMember.MemberName == "" {
 		return nil, fmt.Errorf("either member ID or member name must be given")
 	}
+	s.Logger.Info("Searching for member id [%s] or name [%s] from role [%s]", getRoleMember.MemberID, getRoleMember.MemberName, getRoleMember.RoleID)
 	roleMembers, err := s.ListRoleMembers(&rolesmodels.IdsecIdentityListRoleMembers{
 		RoleID: getRoleMember.RoleID,
 	})
@@ -613,11 +614,13 @@ func (s *IdsecIdentityRolesService) RoleMember(getRoleMember *rolesmodels.IdsecI
 		if getRoleMember.MemberID != "" && member.MemberID == getRoleMember.MemberID {
 			return member, nil
 		}
-		if getRoleMember.MemberName != "" && member.MemberName == getRoleMember.MemberName {
+		lowerCaseMemberName := strings.ToLower(member.MemberName)
+		lowerCaseSearchName := strings.ToLower(getRoleMember.MemberName)
+		if lowerCaseSearchName != "" && lowerCaseMemberName == lowerCaseSearchName {
 			return member, nil
 		}
 	}
-	return nil, fmt.Errorf("member with ID [%s] not found in role [%s]", getRoleMember.MemberID, getRoleMember.RoleID)
+	return nil, fmt.Errorf("member with ID [%s] or name [%s] not found in role [%s]", getRoleMember.MemberID, getRoleMember.MemberName, getRoleMember.RoleID)
 }
 
 // ListRoleMembers retrieves the members of a role in the identity service.
@@ -659,16 +662,18 @@ func (s *IdsecIdentityRolesService) ListRoleMembers(listRoleMembers *rolesmodels
 		if results, ok := resultMap["Results"].([]interface{}); ok && len(results) > 0 {
 			for _, r := range results {
 				row := r.(map[string]interface{})["Row"].(map[string]interface{})
-				members = append(members, &rolesmodels.IdsecIdentityRoleMember{
+				roleMember := &rolesmodels.IdsecIdentityRoleMember{
 					RoleID:     listRoleMembers.RoleID,
 					MemberID:   row["Guid"].(string),
 					MemberName: row["Name"].(string),
 					MemberType: strings.ToUpper(row["Type"].(string)),
-				})
+				}
+				members = append(members, roleMember)
+				s.Logger.Info("Listed Role Member [%s] of type [%s] with ID [%s]", roleMember.MemberName, roleMember.MemberType, roleMember.MemberID)
 			}
 		}
 	}
-	s.Logger.Info("Listed role members successfully")
+	s.Logger.Info("Listed [%d] role members successfully", len(members))
 	return members, nil
 }
 
