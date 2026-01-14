@@ -46,7 +46,7 @@ type IdsecIdentityUsersService struct {
 	*services.IdsecBaseService
 	ispAuth            *auth.IdsecISPAuth
 	client             *isp.IdsecISPServiceClient
-	directoriesService *directories.IdsecIdentityDirectoriesService
+	DirectoriesService *directories.IdsecIdentityDirectoriesService
 
 	DoPost             func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 	DoRedrockQueryPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -75,7 +75,7 @@ func NewIdsecIdentityUsersService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 	identityUsersService.client = client
 	identityUsersService.ispAuth = ispAuth
 	identityUsersService.IdsecBaseService = baseService
-	identityUsersService.directoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
+	identityUsersService.DirectoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 			createUser.Suffix = parts[1]
 		} else {
 			var err error
-			createUser.Suffix, err = s.directoriesService.TenantDefaultSuffix()
+			createUser.Suffix, err = s.DirectoriesService.TenantDefaultSuffix()
 			if err != nil {
 				return nil, err
 			}
@@ -228,7 +228,7 @@ func (s *IdsecIdentityUsersService) UpdateUser(updateUser *usersmodels.IdsecIden
 	updateMap := make(map[string]interface{})
 	if updateUser.Username != "" {
 		if !strings.Contains(updateUser.Username, "@") {
-			tenantSuffix, err := s.directoriesService.TenantDefaultSuffix()
+			tenantSuffix, err := s.DirectoriesService.TenantDefaultSuffix()
 			if err != nil {
 				return nil, err
 			}

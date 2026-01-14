@@ -14,10 +14,8 @@ var TerraformActionAccountResource = &actions.IdsecServiceTerraformResourceActio
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		ExtraRequiredAttributes: []string{
-			"address",
-		},
-		StateSchema: &accountsmodels.IdsecPCloudAccount{},
+		ExtraRequiredAttributes: []string{},
+		StateSchema:             &accountsmodels.IdsecPCloudAccount{},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,

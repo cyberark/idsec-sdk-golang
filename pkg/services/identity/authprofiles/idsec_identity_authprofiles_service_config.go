@@ -1,35 +1,31 @@
-package roles
+package authprofiles
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	identityrolesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/actions"
+	authprofilesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles/actions"
 )
 
 // ServiceConfig is the configuration for the identity users service.
 var ServiceConfig = services.IdsecServiceConfig{
-	ServiceName:                "identity-roles",
+	ServiceName:                "identity-auth-profiles",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
 		actions.IdsecServiceActionTypeCLI: {
-			identityrolesactions.CLIAction,
+			authprofilesactions.CLIAction,
 		},
 		actions.IdsecServiceActionTypeTerraformResource: {
-			identityrolesactions.TerraformActionRoleResource,
-			identityrolesactions.TerraformActionRoleMemberResource,
-			identityrolesactions.TerraformActionRoleAdminRightsResource,
+			authprofilesactions.TerraformActionAuthProfileResource,
 		},
 		actions.IdsecServiceActionTypeTerraformDataSource: {
-			identityrolesactions.TerraformActionRoleDataSource,
-			identityrolesactions.TerraformActionRoleMemberDataSource,
-			identityrolesactions.TerraformActionRoleAdminRightsDataSource,
+			authprofilesactions.TerraformActionAuthProfileDataSource,
 		},
 	},
 }
 
-// ServiceGenerator is the function that generates a new instance of the IdsecIdentityRolesService.
-var ServiceGenerator = NewIdsecIdentityRolesService
+// ServiceGenerator is the function that generates a new instance of the IdsecIdentityAuthProfilesService.
+var ServiceGenerator = NewIdsecIdentityAuthProfilesService
 
 // Module init, registers the service configuration.
 func init() {

@@ -39,8 +39,8 @@ type IdsecPCloudSafeMemberPermissions struct {
 	CreateFolders                          bool `json:"create_folders" mapstructure:"create_folders" desc:"Create folders permission" default:"false"`
 	DeleteFolders                          bool `json:"delete_folders" mapstructure:"delete_folders" desc:"Delete folders permission" default:"false"`
 	MoveAccountsAndFolders                 bool `json:"move_accounts_and_folders" mapstructure:"move_accounts_and_folders" desc:"Move accounts and folders permission" default:"false"`
-	RequestsAuthorizationLevel1            bool `json:"requests_authorization_level1" mapstructure:"requests_authorization_level1" desc:"Request authorization level 1 permission" default:"false"`
-	RequestsAuthorizationLevel2            bool `json:"requests_authorization_level2" mapstructure:"requests_authorization_level2" desc:"Request authorization level 2 permission" default:"false"`
+	RequestsAuthorizationLevel1            bool `json:"requests_authorization_level_1" mapstructure:"requests_authorization_level_1" desc:"Request authorization level 1 permission" default:"false"`
+	RequestsAuthorizationLevel2            bool `json:"requests_authorization_level_2" mapstructure:"requests_authorization_level_2" desc:"Request authorization level 2 permission" default:"false"`
 }
 
 // IdsecPCloudSafeMember represents a safe member with its details and permissions.

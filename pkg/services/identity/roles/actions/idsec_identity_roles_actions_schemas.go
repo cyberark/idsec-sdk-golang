@@ -9,6 +9,7 @@ var ActionToSchemaMap = map[string]interface{}{
 	"create-role":                   &rolesmodels.IdsecIdentityCreateRole{},
 	"add-admin-rights-to-role":      &rolesmodels.IdsecIdentityAddAdminRightsToRole{},
 	"remove-admin-rights-from-role": &rolesmodels.IdsecIdentityRemoveAdminRightsToRole{},
+	"role-admin-rights":             &rolesmodels.IdsecIdentityGetRoleAdminRights{},
 	"update-role":                   &rolesmodels.IdsecIdentityUpdateRole{},
 	"delete-role":                   &rolesmodels.IdsecIdentityDeleteRole{},
 	"list-roles":                    nil,

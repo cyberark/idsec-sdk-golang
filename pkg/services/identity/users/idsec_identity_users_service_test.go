@@ -252,10 +252,10 @@ func TestCreateUser(t *testing.T) {
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
 				}
-				service.directoriesService.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+				service.DirectoriesService.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil
 				}
-				service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+				service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
 			},
 		},
 		{
@@ -331,7 +331,7 @@ func TestCreateUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -435,7 +435,7 @@ func TestUpdateUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -530,7 +530,7 @@ func TestDeleteUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -606,7 +606,7 @@ func TestDeleteUsers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -725,7 +725,7 @@ func TestUser(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -798,7 +798,7 @@ func TestListUsers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -885,7 +885,7 @@ func TestResetUserPassword(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -947,7 +947,7 @@ func TestUserInfo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -1017,7 +1017,7 @@ func TestUsersStats(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityUsersService: %v", err)
 			}
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)

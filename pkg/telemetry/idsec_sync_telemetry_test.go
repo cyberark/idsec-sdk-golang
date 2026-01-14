@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/collectors"
@@ -820,6 +821,562 @@ func TestIdsecSyncTelemetry_InterfaceCompliance(t *testing.T) {
 
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, telemetry)
+			}
+		})
+	}
+}
+
+func TestIdsecSyncTelemetry_ConcurrentCollectAndEncodeMetrics(t *testing.T) {
+	tests := []struct {
+		name          string
+		collectors    []collectors.IdsecMetricsCollector
+		encoder       encoders.IdsecMetricsEncoder
+		goroutines    int
+		iterations    int
+		expectedError bool
+		validateFunc  func(t *testing.T, results [][]byte, errors []error)
+	}{
+		{
+			name: "success_concurrent_collection_with_static_collectors",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "static1",
+					shortName: "s1",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "s1",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+				&mockCollector{
+					name:      "static2",
+					shortName: "s2",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "s2",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m2", Value: "v2"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("concurrent-static")},
+			goroutines:    10,
+			iterations:    5,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// All results should be identical for static collectors
+				firstResult := results[0]
+				for i, result := range results {
+					if !reflect.DeepEqual(result, firstResult) {
+						t.Errorf("Result %d differs from first result: expected %v, got %v", i, firstResult, result)
+					}
+				}
+			},
+		},
+		{
+			name: "success_concurrent_collection_with_dynamic_collectors",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "dynamic",
+					shortName: "d",
+					isDynamic: true,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "d",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("concurrent-dynamic")},
+			goroutines:    10,
+			iterations:    5,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// All results should be the same encoded data
+				for i, result := range results {
+					if string(result) != "concurrent-dynamic" {
+						t.Errorf("Result %d has unexpected data: got %s", i, string(result))
+					}
+				}
+			},
+		},
+		{
+			name: "success_concurrent_collection_with_mixed_collectors",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "static",
+					shortName: "s",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "s",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+				&mockCollector{
+					name:      "dynamic",
+					shortName: "d",
+					isDynamic: true,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "d",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m2", Value: "v2"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("concurrent-mixed")},
+			goroutines:    20,
+			iterations:    3,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// Verify no errors occurred
+				for i, err := range errors {
+					if err != nil {
+						t.Errorf("Goroutine %d returned error: %v", i, err)
+					}
+				}
+			},
+		},
+		{
+			name: "success_concurrent_collection_handles_race_conditions",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "test",
+					shortName: "t",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "t",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("race-test")},
+			goroutines:    50,
+			iterations:    10,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// Verify all results are consistent
+				if len(results) != 50*10 {
+					t.Errorf("Expected %d results, got %d", 50*10, len(results))
+				}
+				// All should return the same cached result
+				firstResult := results[0]
+				for i, result := range results {
+					if !reflect.DeepEqual(result, firstResult) {
+						t.Errorf("Result %d differs from first result", i)
+					}
+				}
+			},
+		},
+		{
+			name: "success_no_data_race_on_last_collected_metrics_map",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "collector1",
+					shortName: "c1",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "c1",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+				&mockCollector{
+					name:      "collector2",
+					shortName: "c2",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "c2",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m2", Value: "v2"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("map-race-test")},
+			goroutines:    30,
+			iterations:    5,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// Just verify no panics or errors occurred
+				for i, err := range errors {
+					if err != nil {
+						t.Errorf("Goroutine %d returned error: %v", i, err)
+					}
+				}
+			},
+		},
+		{
+			name: "success_concurrent_first_collection",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "test",
+					shortName: "t",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "t",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("first-concurrent")},
+			goroutines:    15,
+			iterations:    1,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// All goroutines racing for first collection should get same result
+				firstResult := results[0]
+				for i, result := range results {
+					if !reflect.DeepEqual(result, firstResult) {
+						t.Errorf("Result %d differs from first result during initial concurrent collection", i)
+					}
+				}
+			},
+		},
+		{
+			name: "success_high_concurrency_stress_test",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "stress",
+					shortName: "s",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "s",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder:       &mockEncoder{encodedData: []byte("stress-test")},
+			goroutines:    100,
+			iterations:    10,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// Verify correct number of results
+				if len(results) != 100*10 {
+					t.Errorf("Expected %d results, got %d", 100*10, len(results))
+				}
+				// Verify no errors
+				for i, err := range errors {
+					if err != nil {
+						t.Errorf("Goroutine %d returned error: %v", i, err)
+					}
+				}
+			},
+		},
+		{
+			name:          "success_concurrent_with_empty_collectors",
+			collectors:    []collectors.IdsecMetricsCollector{},
+			encoder:       &mockEncoder{encodedData: []byte("")},
+			goroutines:    10,
+			iterations:    5,
+			expectedError: false,
+			validateFunc: func(t *testing.T, results [][]byte, errors []error) {
+				// Should handle empty collectors without issues
+				for i, err := range errors {
+					if err != nil {
+						t.Errorf("Goroutine %d returned error: %v", i, err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Note: Not using t.Parallel() here because we're testing concurrency explicitly
+			// and want to control the test execution
+
+			telemetry := &IdsecSyncTelemetry{
+				Collectors:           tt.collectors,
+				Encoder:              tt.encoder,
+				lastCollectedMetrics: make(map[string]*collectors.IdsecMetrics),
+			}
+
+			var wg sync.WaitGroup
+			results := make([][]byte, tt.goroutines*tt.iterations)
+			errors := make([]error, tt.goroutines*tt.iterations)
+			resultIndex := 0
+			var indexMutex sync.Mutex
+
+			for i := 0; i < tt.goroutines; i++ {
+				wg.Add(1)
+				go func(goroutineID int) {
+					defer wg.Done()
+					for j := 0; j < tt.iterations; j++ {
+						result, err := telemetry.CollectAndEncodeMetrics()
+
+						// Store result with mutex to avoid race on result slice
+						indexMutex.Lock()
+						idx := resultIndex
+						resultIndex++
+						results[idx] = result
+						errors[idx] = err
+						indexMutex.Unlock()
+					}
+				}(i)
+			}
+
+			wg.Wait()
+
+			// Validate results
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, results, errors)
+			}
+
+			// General validation: check for expected errors
+			hasError := false
+			for _, err := range errors {
+				if err != nil {
+					hasError = true
+					break
+				}
+			}
+
+			if tt.expectedError && !hasError {
+				t.Error("Expected at least one error, got none")
+			}
+			if !tt.expectedError && hasError {
+				t.Error("Expected no errors, got at least one")
+			}
+		})
+	}
+}
+
+func TestIdsecSyncTelemetry_MutexProtectsLastCollectedMetrics(t *testing.T) {
+	tests := []struct {
+		name         string
+		collectors   []collectors.IdsecMetricsCollector
+		encoder      encoders.IdsecMetricsEncoder
+		validateFunc func(t *testing.T, telemetry *IdsecSyncTelemetry)
+	}{
+		{
+			name: "success_mutex_protects_map_writes",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "test1",
+					shortName: "t1",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "t1",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+				&mockCollector{
+					name:      "test2",
+					shortName: "t2",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "t2",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m2", Value: "v2"}},
+					},
+				},
+			},
+			encoder: &mockEncoder{encodedData: []byte("mutex-test")},
+			validateFunc: func(t *testing.T, telemetry *IdsecSyncTelemetry) {
+				var wg sync.WaitGroup
+				iterations := 50
+
+				for i := 0; i < iterations; i++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						_, err := telemetry.CollectAndEncodeMetrics()
+						if err != nil {
+							t.Errorf("Unexpected error during concurrent collection: %v", err)
+						}
+					}()
+				}
+
+				wg.Wait()
+
+				// Verify map integrity after concurrent access
+				if len(telemetry.lastCollectedMetrics) != 2 {
+					t.Errorf("Expected 2 entries in lastCollectedMetrics, got %d", len(telemetry.lastCollectedMetrics))
+				}
+
+				// Verify collectors are in the map
+				if _, ok := telemetry.lastCollectedMetrics["test1"]; !ok {
+					t.Error("Expected 'test1' collector in lastCollectedMetrics")
+				}
+				if _, ok := telemetry.lastCollectedMetrics["test2"]; !ok {
+					t.Error("Expected 'test2' collector in lastCollectedMetrics")
+				}
+			},
+		},
+		{
+			name: "success_mutex_protects_map_reads",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "static",
+					shortName: "s",
+					isDynamic: false,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "s",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder: &mockEncoder{encodedData: []byte("read-test")},
+			validateFunc: func(t *testing.T, telemetry *IdsecSyncTelemetry) {
+				// First collection to populate cache
+				_, err := telemetry.CollectAndEncodeMetrics()
+				if err != nil {
+					t.Fatalf("Initial collection failed: %v", err)
+				}
+
+				var wg sync.WaitGroup
+				iterations := 100
+				errors := make([]error, iterations)
+
+				for i := 0; i < iterations; i++ {
+					wg.Add(1)
+					go func(idx int) {
+						defer wg.Done()
+						_, err := telemetry.CollectAndEncodeMetrics()
+						errors[idx] = err
+					}(i)
+				}
+
+				wg.Wait()
+
+				// Verify no errors occurred during concurrent reads
+				for i, err := range errors {
+					if err != nil {
+						t.Errorf("Read operation %d failed: %v", i, err)
+					}
+				}
+			},
+		},
+		{
+			name: "success_mutex_prevents_concurrent_map_writes",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{
+					name:      "dynamic",
+					shortName: "d",
+					isDynamic: true,
+					metrics: &collectors.IdsecMetrics{
+						ShortName: "d",
+						Metrics:   []collectors.IdsecMetric{{ShortName: "m1", Value: "v1"}},
+					},
+				},
+			},
+			encoder: &mockEncoder{encodedData: []byte("write-test")},
+			validateFunc: func(t *testing.T, telemetry *IdsecSyncTelemetry) {
+				var wg sync.WaitGroup
+				iterations := 75
+
+				for i := 0; i < iterations; i++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						_, _ = telemetry.CollectAndEncodeMetrics()
+					}()
+				}
+
+				wg.Wait()
+
+				// After all concurrent writes, map should still be valid
+				if telemetry.lastCollectedMetrics == nil {
+					t.Error("lastCollectedMetrics map became nil")
+				}
+
+				// Verify we can still access the map without panic
+				if _, ok := telemetry.lastCollectedMetrics["dynamic"]; !ok {
+					t.Error("Expected 'dynamic' collector in map after concurrent writes")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Not using t.Parallel() for mutex tests to have better control
+
+			telemetry := &IdsecSyncTelemetry{
+				Collectors:           tt.collectors,
+				Encoder:              tt.encoder,
+				lastCollectedMetrics: make(map[string]*collectors.IdsecMetrics),
+			}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, telemetry)
+			}
+		})
+	}
+}
+
+func TestIdsecSyncTelemetry_ConcurrentCollectorByName(t *testing.T) {
+	tests := []struct {
+		name         string
+		collectors   []collectors.IdsecMetricsCollector
+		searchNames  []string
+		goroutines   int
+		validateFunc func(t *testing.T, results []collectors.IdsecMetricsCollector)
+	}{
+		{
+			name: "success_concurrent_collector_lookup",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{name: "test1", shortName: "t1"},
+				&mockCollector{name: "test2", shortName: "t2"},
+				&mockCollector{name: "test3", shortName: "t3"},
+			},
+			searchNames: []string{"test1", "test2", "test3", "nonexistent"},
+			goroutines:  20,
+			validateFunc: func(t *testing.T, results []collectors.IdsecMetricsCollector) {
+				// Verify results are consistent
+				foundCount := 0
+				nilCount := 0
+				for _, result := range results {
+					if result != nil {
+						foundCount++
+					} else {
+						nilCount++
+					}
+				}
+
+				// We expect some found and some nil (for "nonexistent")
+				if foundCount == 0 {
+					t.Error("Expected some collectors to be found")
+				}
+				if nilCount == 0 {
+					t.Error("Expected some nil results for nonexistent collector")
+				}
+			},
+		},
+		{
+			name: "success_concurrent_same_name_lookup",
+			collectors: []collectors.IdsecMetricsCollector{
+				&mockCollector{name: "target", shortName: "t"},
+			},
+			searchNames: []string{"target"},
+			goroutines:  50,
+			validateFunc: func(t *testing.T, results []collectors.IdsecMetricsCollector) {
+				// All results should be non-nil and point to same collector
+				for i, result := range results {
+					if result == nil {
+						t.Errorf("Result %d is nil, expected non-nil collector", i)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			telemetry := &IdsecSyncTelemetry{
+				Collectors:           tt.collectors,
+				lastCollectedMetrics: make(map[string]*collectors.IdsecMetrics),
+			}
+
+			var wg sync.WaitGroup
+			results := make([]collectors.IdsecMetricsCollector, tt.goroutines)
+
+			for i := 0; i < tt.goroutines; i++ {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					searchName := tt.searchNames[idx%len(tt.searchNames)]
+					results[idx] = telemetry.CollectorByName(searchName)
+				}(i)
+			}
+
+			wg.Wait()
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, results)
 			}
 		})
 	}

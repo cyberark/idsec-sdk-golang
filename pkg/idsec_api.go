@@ -59,7 +59,9 @@ import (
 	aws "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	azure "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
 	cmgr "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr"
+	authprofiles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles"
 	directories "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
+	policies "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
 	roles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
 	users "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
@@ -283,6 +285,19 @@ func (api *IdsecAPI) Cmgr() (*cmgr.IdsecCmgrService, error) {
 	return service, nil
 }
 
+func (api *IdsecAPI) IdentityAuthprofiles() (*authprofiles.IdsecIdentityAuthProfilesService, error) {
+	if serviceIfs, ok := api.services[authprofiles.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*authprofiles.IdsecIdentityAuthProfilesService), nil
+	}
+	service, err := authprofiles.ServiceGenerator(api.loadServiceAuthenticators(authprofiles.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[authprofiles.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) IdentityDirectories() (*directories.IdsecIdentityDirectoriesService, error) {
 	if serviceIfs, ok := api.services[directories.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*directories.IdsecIdentityDirectoriesService), nil
@@ -293,6 +308,19 @@ func (api *IdsecAPI) IdentityDirectories() (*directories.IdsecIdentityDirectorie
 	}
 	var baseService services.IdsecService = service
 	api.services[directories.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) IdentityPolicies() (*policies.IdsecIdentityPoliciesService, error) {
+	if serviceIfs, ok := api.services[policies.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*policies.IdsecIdentityPoliciesService), nil
+	}
+	service, err := policies.ServiceGenerator(api.loadServiceAuthenticators(policies.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[policies.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

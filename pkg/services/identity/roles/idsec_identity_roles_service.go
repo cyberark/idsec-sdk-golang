@@ -47,7 +47,7 @@ type IdsecIdentityRolesService struct {
 	*services.IdsecBaseService
 	ispAuth            *auth.IdsecISPAuth
 	client             *isp.IdsecISPServiceClient
-	directoriesService *directories.IdsecIdentityDirectoriesService
+	DirectoriesService *directories.IdsecIdentityDirectoriesService
 
 	DoPost                      func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 	DoAdminRightsPost           func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -77,7 +77,7 @@ func NewIdsecIdentityRolesService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 	identityRolesService.client = client
 	identityRolesService.ispAuth = ispAuth
 	identityRolesService.IdsecBaseService = baseService
-	identityRolesService.directoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
+	identityRolesService.DirectoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 	}
 	s.Logger.Info("Role created with id [%s]", roleID)
 	if len(createRole.AdminRights) > 0 {
-		err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
+		_, err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
 			RoleID:      roleDetails.RoleID,
 			AdminRights: createRole.AdminRights,
 		})
@@ -176,11 +176,11 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 }
 
 // AddAdminRightsToRole adds admin rights to a role in the identity service.
-func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *rolesmodels.IdsecIdentityAddAdminRightsToRole) error {
+func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *rolesmodels.IdsecIdentityAddAdminRightsToRole) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
 	s.Logger.Info("Adding admin rights [%v] to role [%s]", addAdminRightsToRole.AdminRights, addAdminRightsToRole.RoleName)
 
 	if addAdminRightsToRole.RoleID == "" && addAdminRightsToRole.RoleName == "" {
-		return fmt.Errorf("either role ID or role name must be given")
+		return nil, fmt.Errorf("either role ID or role name must be given")
 	}
 	var roleID string
 	if addAdminRightsToRole.RoleID != "" {
@@ -189,7 +189,7 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 		var err error
 		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: addAdminRightsToRole.RoleName})
 		if err != nil {
-			return fmt.Errorf("failed to retrieve role ID by name: %v", err)
+			return nil, fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
 		roleID = role.RoleID
 	}
@@ -202,7 +202,7 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 	}
 	response, err := s.adminRightsPostOperation()(context.Background(), addAdminRightsToRoleURL, requestBody)
 	if err != nil {
-		return fmt.Errorf("failed to add admin rights to role: %v", err)
+		return nil, fmt.Errorf("failed to add admin rights to role: %v", err)
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -211,18 +211,21 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to add admin rights to role - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to add admin rights to role - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	var result map[string]interface{}
 	err = json.NewDecoder(response.Body).Decode(&result)
 	if err != nil {
-		return fmt.Errorf("failed to decode response: %v", err)
+		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 	if res, ok := result["success"].(bool); !ok || !res {
-		return fmt.Errorf("failed to add admin rights to role - [%v]", result)
+		return nil, fmt.Errorf("failed to add admin rights to role - [%v]", result)
 	}
 	s.Logger.Info("Admin rights added to role successfully")
-	return nil
+	return &rolesmodels.IdsecIdentityRoleAdminRights{
+		RoleID:      roleID,
+		AdminRights: addAdminRightsToRole.AdminRights,
+	}, nil
 }
 
 // RemoveAdminRightsFromRole removes admin rights from a role in the identity service.
@@ -273,6 +276,22 @@ func (s *IdsecIdentityRolesService) RemoveAdminRightsFromRole(removeAdminRightsF
 	}
 	s.Logger.Info("Admin rights removed from role successfully")
 	return nil
+}
+
+// RoleAdminRights retrieves a role's admin rights in the identity service.
+func (s *IdsecIdentityRolesService) RoleAdminRights(getRoleAdminRights *rolesmodels.IdsecIdentityGetRoleAdminRights) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
+	role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{
+		RoleID:   getRoleAdminRights.RoleID,
+		RoleName: getRoleAdminRights.RoleName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve role: %v", err)
+	}
+	return &rolesmodels.IdsecIdentityRoleAdminRights{
+		RoleID:      role.RoleID,
+		RoleName:    role.RoleName,
+		AdminRights: role.AdminRights,
+	}, nil
 }
 
 // UpdateRole updates an existing role in the identity service.
@@ -328,7 +347,7 @@ func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIden
 		if err != nil {
 			return nil, fmt.Errorf("failed to remove admin rights from role: %v", err)
 		}
-		err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
+		_, err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
 			RoleID:      updateRole.RoleID,
 			AdminRights: updateRole.AdminRights,
 		})
@@ -394,7 +413,7 @@ func (s *IdsecIdentityRolesService) listRolesBy(search string, pageSize int, lim
 
 	go func() {
 		defer close(output)
-		foundEntitiesChan, err := s.directoriesService.ListDirectoriesEntities(
+		foundEntitiesChan, err := s.DirectoriesService.ListDirectoriesEntities(
 			&directoriesmodels.IdsecIdentityListDirectoriesEntities{
 				Directories:  []string{identity.Identity},
 				EntityTypes:  []string{directoriesmodels.EntityTypeRole},
@@ -470,7 +489,7 @@ func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRo
 		searchRoleItem = getRole.RoleID
 	}
 	s.Logger.Info("Retrieving role ID for name [%s]", searchRoleItem)
-	foundDirectories, err := s.directoriesService.ListDirectories(&directoriesmodels.IdsecIdentityListDirectories{
+	foundDirectories, err := s.DirectoriesService.ListDirectories(&directoriesmodels.IdsecIdentityListDirectories{
 		Directories: []string{identity.Identity},
 	})
 	if err != nil {
@@ -711,7 +730,7 @@ func (s *IdsecIdentityRolesService) AddMemberToRole(addUserToRole *rolesmodels.I
 	switch addUserToRole.MemberType {
 	case directoriesmodels.EntityTypeUser:
 		if !strings.Contains(addUserToRole.MemberName, "@") {
-			tenantSuffix, err := s.directoriesService.TenantDefaultSuffix()
+			tenantSuffix, err := s.DirectoriesService.TenantDefaultSuffix()
 			if err != nil {
 				return nil, err
 			}
@@ -760,7 +779,7 @@ func (s *IdsecIdentityRolesService) RemoveMemberFromRole(removeMemberFromRole *r
 	switch removeMemberFromRole.MemberType {
 	case directoriesmodels.EntityTypeUser:
 		if !strings.Contains(removeMemberFromRole.MemberName, "@") {
-			tenantSuffix, err := s.directoriesService.TenantDefaultSuffix()
+			tenantSuffix, err := s.DirectoriesService.TenantDefaultSuffix()
 			if err != nil {
 				return err
 			}

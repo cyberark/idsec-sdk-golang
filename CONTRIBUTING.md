@@ -76,7 +76,6 @@ func TestExample(t *testing.T) {
 - Use descriptive test names that clearly indicate what is being tested
 
 #### Running Tests
-
 ```bash
 # Run all unit tests with coverage reporting
 make unit-test-all
@@ -166,59 +165,6 @@ func FunctionName(param1 string, param2 int, param3 *int) (ResultType, error) {
 - Include examples that can be copy-pasted and run
 - Keep documentation up-to-date with code changes
 
-### CLI command guidelines
-
-To maintain a consistent and predictable user experience across the IDSec SDK, all CLI commands must adhere to the following structural and naming conventions.
-
-#### 1. General Structure
-The command hierarchy is strictly defined as **Service** → **Resource** → **Action**.
-
-**Syntax:**
-```bash
-idsec <service> <resource> <action> [flags/parameters]
-```
-
-**Definitions:**
-* **Service:** The high-level product or domain (e.g., `pcloud`, `cmgr`).
-* **Resource:** The specific entity being manipulated (e.g., `safes`, `networks`, `pools`). Plural nouns are preferred for resources.
-* **Action:** The operation to perform on the resource (e.g., `create`, `list`, `delete`).
-
-#### 2. Resource & Action Separation (Avoid "Stuttering")
-Do not repeat the resource name inside the action name. The context is provided by the resource command that precedes it.
-
-* **Bad:** `idsec pcloud safes create-safe` (Redundant)
-* **Good:** `idsec pcloud safes create` (Clean)
-
-#### 3. Standard Actions & Verbs
-To prevent confusion (e.g., users guessing between "remove", "delete", or "destroy"), use the following standard verbs for common CRUD operations.
-
-| Intent | Canonical Verb | Accepted Aliases | Description |
-| :--- | :--- | :--- | :--- |
-| **Create** | `create` | `add` | Creates a new resource. |
-| **Read Many** | `list` | `ls` | Returns a list of resources. Should support filtering. |
-| **Read One** | `get` | `read` | Returns details of a specific resource. Usually requires an ID or name. |
-| **Update** | `update` | `edit` | Modifies an existing resource. |
-| **Delete** | `delete` | `rm` | Permanently removes a resource. |
-
-#### 4. Examples
-
-**Creating a Safe:**
-```bash
-# Correct
-idsec pcloud safes create --safe-name="MySafe"
-
-# Incorrect (Redundant naming)
-idsec pcloud safes create-safe --safe-name="MySafe"
-```
-
-**Listing connector pools:**
-```bash
-# Correct
-idsec cmgr pools list
-
-# Incorrect (Wrong hierarchy)
-idsec cmgr list-pools
-```
 
 ## Releases
 

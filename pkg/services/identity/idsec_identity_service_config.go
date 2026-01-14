@@ -3,7 +3,9 @@ package identity
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	identityauthprofilesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles/actions"
 	identitydirectoriesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/actions"
+	identitypoliciesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies/actions"
 	identityrolesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/actions"
 	identityusersactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/actions"
 )
@@ -20,6 +22,8 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 		identitydirectoriesactions.CLIAction,
 		identityrolesactions.CLIAction,
 		identityusersactions.CLIAction,
+		identityauthprofilesactions.CLIAction,
+		identitypoliciesactions.CLIAction,
 	},
 }
 

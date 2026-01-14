@@ -5,7 +5,7 @@ type IdsecPCloudAddAccount struct {
 	// Using inheritance on those for easier translation for CLI params
 	IdsecPCloudAccountSecretManagement     `mapstructure:",squash"`
 	IdsecPCloudAccountRemoteMachinesAccess `mapstructure:",squash"`
-	Secret                                 string                 `json:"secret" mapstructure:"secret" desc:"The secret of the account" flag:"secret" validate:"required"`
+	Secret                                 string                 `json:"secret" mapstructure:"secret" desc:"The secret of the account" flag:"secret"`
 	Name                                   string                 `json:"name" mapstructure:"name,omitempty" desc:"Name of the account" flag:"name"`
 	SafeName                               string                 `json:"safe_name" mapstructure:"safe_name" desc:"Safe name to store the account in" flag:"safe-name" validate:"required"`
 	PlatformID                             string                 `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"Platform id to relate the account to" flag:"platform-id"`

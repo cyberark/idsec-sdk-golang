@@ -55,6 +55,30 @@ var TerraformActionRoleMemberResource = &actions.IdsecServiceTerraformResourceAc
 	},
 }
 
+// TerraformActionRoleAdminRightsResource is a struct that defines the RoleAdminRights action for the Idsec service for Terraform.
+var TerraformActionRoleAdminRightsResource = &actions.IdsecServiceTerraformResourceActionDefinition{
+	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+			ActionName:        "identity-role-admin-rights",
+			ActionDescription: "The Identity service role admin rights resource that is used to manage role admin rights.",
+			ActionVersion:     1,
+			Schemas:           ActionToSchemaMap,
+		},
+		StateSchema: &rolesmodels.IdsecIdentityRoleAdminRights{},
+	},
+	SupportedOperations: []actions.IdsecServiceActionOperation{
+		actions.CreateOperation,
+		actions.ReadOperation,
+		actions.DeleteOperation,
+		actions.StateOperation,
+	},
+	ActionsMappings: map[actions.IdsecServiceActionOperation]string{
+		actions.CreateOperation: "add-admin-rights-to-role",
+		actions.ReadOperation:   "role-admin-rights",
+		actions.DeleteOperation: "remove-admin-rights-from-role",
+	},
+}
+
 // TerraformActionRoleDataSource is a struct that defines the Role action for the Idsec service for Terraform.
 var TerraformActionRoleDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
@@ -81,4 +105,18 @@ var TerraformActionRoleMemberDataSource = &actions.IdsecServiceTerraformDataSour
 		StateSchema: &rolesmodels.IdsecIdentityRoleMember{},
 	},
 	DataSourceAction: "role-member",
+}
+
+// TerraformActionRoleAdminRightsDataSource is a struct that defines the RoleAdminRights action for the Idsec service for Terraform.
+var TerraformActionRoleAdminRightsDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
+	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+			ActionName:        "identity-role-admin-rights",
+			ActionDescription: "The Identity service role admin rights data source. It reads the role admin rights information and metadata and is based on the role name.",
+			ActionVersion:     1,
+			Schemas:           ActionToSchemaMap,
+		},
+		StateSchema: &rolesmodels.IdsecIdentityRoleAdminRights{},
+	},
+	DataSourceAction: "role-admin-rights",
 }

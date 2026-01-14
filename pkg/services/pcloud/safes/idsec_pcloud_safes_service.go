@@ -480,6 +480,9 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Safe%20Member.htm
 func (s *IdsecPCloudSafesService) AddSafeMember(addSafeMember *safesmodels.IdsecPCloudAddSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Adding safe member [%s] [%s]", addSafeMember.SafeID, addSafeMember.MemberName)
+	if addSafeMember.PermissionSet == "" && addSafeMember.Permissions == nil {
+		addSafeMember.PermissionSet = safesmodels.ReadOnly
+	}
 	if addSafeMember.PermissionSet == safesmodels.Custom && addSafeMember.Permissions == nil {
 		return nil, fmt.Errorf("permission set is custom but permissions are not set")
 	}
@@ -584,9 +587,6 @@ func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloud
 	if len(updateSafeJSON) == 0 {
 		return s.Safe(&safesmodels.IdsecPCloudGetSafe{SafeID: updateSafe.SafeID})
 	}
-	if _, ok := updateSafeJSON["numberOfDaysRetention"]; !ok {
-		updateSafeJSON["numberOfDaysRetention"] = 0
-	}
 	response, err := s.client.Put(context.Background(), fmt.Sprintf(safeURL, updateSafe.SafeID), updateSafeJSON)
 	if err != nil {
 		return nil, err
@@ -620,14 +620,13 @@ func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloud
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Update%20Safe%20Member.htm
 func (s *IdsecPCloudSafesService) UpdateSafeMember(updateSafeMember *safesmodels.IdsecPCloudUpdateSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Updating safe member [%s] [%s]", updateSafeMember.SafeID, updateSafeMember.MemberName)
-	if updateSafeMember.PermissionSet == safesmodels.Custom && updateSafeMember.Permissions == nil {
-		return nil, fmt.Errorf("permission set is custom but permissions are not set")
-	}
-	if updateSafeMember.PermissionSet != safesmodels.Custom {
-		if permissions, ok := SafeMembersPermissionsSets[updateSafeMember.PermissionSet]; ok {
-			updateSafeMember.Permissions = &permissions
-		} else {
-			return nil, fmt.Errorf("invalid permission set: %s", updateSafeMember.PermissionSet)
+	if updateSafeMember.PermissionSet != "" || updateSafeMember.Permissions != nil {
+		if updateSafeMember.PermissionSet != safesmodels.Custom {
+			if permissions, ok := SafeMembersPermissionsSets[updateSafeMember.PermissionSet]; ok {
+				updateSafeMember.Permissions = &permissions
+			} else {
+				return nil, fmt.Errorf("invalid permission set: %s", updateSafeMember.PermissionSet)
+			}
 		}
 	}
 	updateSafeMemberJSON, err := common.SerializeJSONCamel(updateSafeMember)

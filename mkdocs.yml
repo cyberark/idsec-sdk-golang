@@ -23,6 +23,7 @@ nav:
       - Onboard pCloud account: howto/onboard_pcloud_account.md
       - Edit SIA Settings: howto/edit_sia_settings.md
       - Add SIA Certificate: howto/add_sia_certificate.md
+      - Create Identity Policy: howto/create_identity_policy.md
       - Simple commands workflow: howto/simple_commands_workflow.md
       - Simple SDK workflow: howto/simple_sdk_workflow.md
       - Policy:

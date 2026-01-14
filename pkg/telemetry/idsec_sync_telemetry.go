@@ -1,16 +1,19 @@
 package telemetry
 
 import (
+	"sync"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/collectors"
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/encoders"
 )
 
 // IdsecSyncTelemetry represents telemetry data for IDSEC SDK applications.
 type IdsecSyncTelemetry struct {
-	Collectors           []collectors.IdsecMetricsCollector
-	Encoder              encoders.IdsecMetricsEncoder
-	lastCollectedMetrics map[string]*collectors.IdsecMetrics
-	lastCollectedEncoded []byte
+	Collectors               []collectors.IdsecMetricsCollector
+	Encoder                  encoders.IdsecMetricsEncoder
+	lastCollectedMetrics     map[string]*collectors.IdsecMetrics
+	lastCollectedMetricsLock sync.Mutex
+	lastCollectedEncoded     []byte
 }
 
 // NewIdsecSyncTelemetry creates a new instance of IdsecTelemetry with the specified collectors and encoder.
@@ -62,7 +65,10 @@ func (a *IdsecSyncTelemetry) CollectAndEncodeMetrics() ([]byte, error) {
 	}
 	// Collect metrics from each collector
 	// If the collector is static and we have already collected metrics from it, reuse them
+	// Note that we need to lock access to lastCollectedMetrics map to avoid multiple goroutines collecting metrics at the same time
 	var allMetrics []*collectors.IdsecMetrics
+	a.lastCollectedMetricsLock.Lock()
+	defer a.lastCollectedMetricsLock.Unlock()
 	for _, collector := range a.Collectors {
 		if !collector.IsDynamicMetrics() {
 			_, ok := a.lastCollectedMetrics[collector.CollectorName()]

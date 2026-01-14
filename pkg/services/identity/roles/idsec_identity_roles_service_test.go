@@ -387,8 +387,8 @@ func TestCreateRole(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create IdsecIdentityRolesService: %v", err)
 			}
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -506,15 +506,15 @@ func TestAddAdminRightsToRole(t *testing.T) {
 			}
 			service.DoAdminRightsPost = MockPostFunc(tt.mockAdminRightsPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
 			}
 
-			err = service.AddAdminRightsToRole(tt.addAdminRights)
+			_, err = service.AddAdminRightsToRole(tt.addAdminRights)
 
 			if tt.expectedError {
 				if err == nil {
@@ -590,9 +590,9 @@ func TestRemoveAdminRightsFromRole(t *testing.T) {
 			}
 			service.DoAdminRightsPost = MockPostFunc(tt.mockAdminRightsPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -670,9 +670,9 @@ func TestUpdateRole(t *testing.T) {
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoAdminRightsPost = MockPostFunc(tt.mockAdminRightsPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -764,9 +764,9 @@ func TestDeleteRole(t *testing.T) {
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoAdminRightsPost = MockPostFunc(tt.mockAdminRightsPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			err = service.DeleteRole(tt.deleteRole)
 
@@ -847,9 +847,9 @@ func TestListRoleMembers(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleQueryResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			result, err := service.ListRoleMembers(tt.listRoleMembers)
 
@@ -904,7 +904,7 @@ func TestAddMemberToRole(t *testing.T) {
 					// ListRoleMembers call after adding - return the member that was just added
 					return MockHTTPResponse(http.StatusOK, RoleMembersWithDevelopersResponseJSON), nil
 				}
-				service.directoriesService.DoTenantSuffixPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+				service.DirectoriesService.DoTenantSuffixPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil
 				}
 			},
@@ -932,9 +932,9 @@ func TestAddMemberToRole(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleMembersResponseJSON), nil)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
-			service.directoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DirectoriesService.DoPost = MockPostFunc(MockHTTPResponse(http.StatusOK, RoleMembersResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(service)
@@ -1017,7 +1017,7 @@ func TestRemoveMemberFromRole(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			err = service.RemoveMemberFromRole(tt.removeMember)
 
@@ -1111,7 +1111,7 @@ func TestRoleMember(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			result, err := service.RoleMember(tt.getRoleMember)
 
@@ -1196,7 +1196,7 @@ func TestRoleMembersStats(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
-			service.directoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
+			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
 			result, err := service.RoleMembersStats(tt.getRoleMembersStats)
 
