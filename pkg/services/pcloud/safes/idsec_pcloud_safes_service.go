@@ -444,8 +444,14 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 		addSafeJSON["managingCPM"] = ""
 	}
 	addSafeJSON["olacEnabled"] = addSafe.OlacEnabled
+	// Only one of the retention values needs to be set, default to 0 days if neither is set
 	if _, ok := addSafeJSON["numberOfDaysRetention"]; !ok {
-		addSafeJSON["numberOfDaysRetention"] = 0
+		if _, ok := addSafeJSON["numberOfVersionsRetention"]; !ok {
+			addSafeJSON["numberOfDaysRetention"] = 0
+		}
+	} else {
+		// If both retention values are set, remove the versions one as only one can be set
+		delete(addSafeJSON, "numberOfVersionsRetention")
 	}
 	response, err := s.client.Post(context.Background(), safesURL, addSafeJSON)
 	if err != nil {
@@ -586,6 +592,10 @@ func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloud
 	delete(updateSafeJSON, "safeId")
 	if len(updateSafeJSON) == 0 {
 		return s.Safe(&safesmodels.IdsecPCloudGetSafe{SafeID: updateSafe.SafeID})
+	}
+	if _, ok := updateSafeJSON["numberOfDaysRetention"]; ok {
+		// If both retention values are set, remove the versions one as only one can be set
+		delete(updateSafeJSON, "numberOfVersionsRetention")
 	}
 	response, err := s.client.Put(context.Background(), fmt.Sprintf(safeURL, updateSafe.SafeID), updateSafeJSON)
 	if err != nil {
