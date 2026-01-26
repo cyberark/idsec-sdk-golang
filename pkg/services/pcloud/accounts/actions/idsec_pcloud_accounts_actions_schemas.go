@@ -2,7 +2,7 @@ package actions
 
 import accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 
-// ActionToSchemaMap is a map that defines the mapping between Idsec PCloud action names and their corresponding schema types.
+// ActionToSchemaMap is a map that defines the mapping between Idsec Privilege Cloud action names and their corresponding schema types.
 var ActionToSchemaMap = map[string]interface{}{
 	"add-account":                         &accountsmodels.IdsecPCloudAddAccount{},
 	"update-account":                      &accountsmodels.IdsecPCloudUpdateAccount{},

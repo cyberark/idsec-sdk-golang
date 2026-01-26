@@ -5,12 +5,12 @@ import (
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
 )
 
-// TerraformActionSafeResource is a struct that defines the pCloud safe resource action for the Idsec service for Terraform.
+// TerraformActionSafeResource is a struct that defines the Privilege Cloud safe resource action for the Idsec service for Terraform.
 var TerraformActionSafeResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-safe",
-			ActionDescription: "pCloud safe resource, manages pCloud safes information and metadata.",
+			ActionDescription: "Privilege Cloud Safe resource, manages Privilege Cloud Safes information and metadata.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -36,7 +36,7 @@ var TerraformActionSafeMemberResource = &actions.IdsecServiceTerraformResourceAc
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-safe-member",
-			ActionDescription: "pCloud safe member resource, manages pCloud safe members and their relevant permissions.",
+			ActionDescription: "Privilege Cloud safe member resource, manages Privilege Cloud Safe members and their relevant permissions.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -62,7 +62,7 @@ var TerraformActionSafeDataSource = &actions.IdsecServiceTerraformDataSourceActi
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-safe",
-			ActionDescription: "PCloud Safe data source, reads safe information and metadata, based on the id of the safe.",
+			ActionDescription: "Privilege Cloud Safe data source, reads safe information and metadata, based on the Safe ID.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -79,7 +79,7 @@ var TerraformActionSafeMemberDataSource = &actions.IdsecServiceTerraformDataSour
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-safe-member",
-			ActionDescription: "PCloud Safe Member data source, reads safe member information and metadata, based on the id of the safe and the member name.",
+			ActionDescription: "Privilege Cloud Safe Member data source, reads Safe member information and metadata, based on the Safe ID and the member name.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

@@ -145,6 +145,25 @@ func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
 					if userName, ok := accountMap["user_name"]; ok {
 						accountsJSON[i].(map[string]interface{})["username"] = userName
 					}
+					if secretManagement, ok := accountMap["secret_management"]; ok {
+						if manualManagementReason, ok := secretManagement.(map[string]interface{})["manual_management_reason"]; ok {
+							accountsJSON[i].(map[string]interface{})["manual_management_reason"] = manualManagementReason
+						}
+						if automaticManagementEnabled, ok := secretManagement.(map[string]interface{})["automatic_management_enabled"]; ok {
+							accountsJSON[i].(map[string]interface{})["automatic_management_enabled"] = automaticManagementEnabled
+						}
+						if lastModifiedTime, ok := secretManagement.(map[string]interface{})["last_modified_time"]; ok {
+							accountsJSON[i].(map[string]interface{})["last_modified_time"] = lastModifiedTime
+						}
+					}
+					if remoteMachinesAccess, ok := accountMap["remote_machines_access"]; ok {
+						if accessRestrictedToRemoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["access_restricted_to_remote_machines"]; ok {
+							accountsJSON[i].(map[string]interface{})["access_restricted_to_remote_machines"] = accessRestrictedToRemoteMachines
+						}
+						if remoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["remote_machines"]; ok {
+							accountsJSON[i].(map[string]interface{})["remote_machines"] = strings.Split(remoteMachines.(string), ";")
+						}
+					}
 				}
 			}
 			var accounts []*accountsmodels.IdsecPCloudAccount
@@ -366,6 +385,45 @@ func (s *IdsecPCloudAccountsService) ReconcileAccountCredentials(reconcileAccoun
 	return nil
 }
 
+func (s *IdsecPCloudAccountsService) parseAccountResponse(responseBody io.ReadCloser) (*accountsmodels.IdsecPCloudAccount, error) {
+	accountJSON, err := common.DeserializeJSONSnake(responseBody)
+	if err != nil {
+		return nil, err
+	}
+	accountJSONMap := accountJSON.(map[string]interface{})
+	if accountID, ok := accountJSONMap["id"]; ok {
+		accountJSONMap["account_id"] = accountID
+	}
+	if userName, ok := accountJSONMap["user_name"]; ok {
+		accountJSONMap["username"] = userName
+	}
+	if secretManagement, ok := accountJSONMap["secret_management"]; ok {
+		if manualManagementReason, ok := secretManagement.(map[string]interface{})["manual_management_reason"]; ok {
+			accountJSONMap["manual_management_reason"] = manualManagementReason
+		}
+		if automaticManagementEnabled, ok := secretManagement.(map[string]interface{})["automatic_management_enabled"]; ok {
+			accountJSONMap["automatic_management_enabled"] = automaticManagementEnabled
+		}
+		if lastModifiedTime, ok := secretManagement.(map[string]interface{})["last_modified_time"]; ok {
+			accountJSONMap["last_modified_time"] = lastModifiedTime
+		}
+	}
+	if remoteMachinesAccess, ok := accountJSONMap["remote_machines_access"]; ok {
+		if accessRestrictedToRemoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["access_restricted_to_remote_machines"]; ok {
+			accountJSONMap["access_restricted_to_remote_machines"] = accessRestrictedToRemoteMachines
+		}
+		if remoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["remote_machines"]; ok {
+			accountJSONMap["remote_machines"] = strings.Split(remoteMachines.(string), ";")
+		}
+	}
+	var account accountsmodels.IdsecPCloudAccount
+	err = mapstructure.Decode(accountJSONMap, &account)
+	if err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
 // Account retrieves an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Get%20Account%20Details.htm?
 func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCloudGetAccount) (*accountsmodels.IdsecPCloudAccount, error) {
@@ -383,23 +441,7 @@ func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCl
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to retrieve account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountJSON, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	accountJSONMap := accountJSON.(map[string]interface{})
-	if accountID, ok := accountJSONMap["id"]; ok {
-		accountJSONMap["account_id"] = accountID
-	}
-	if userName, ok := accountJSONMap["user_name"]; ok {
-		accountJSONMap["username"] = userName
-	}
-	var account accountsmodels.IdsecPCloudAccount
-	err = mapstructure.Decode(accountJSONMap, &account)
-	if err != nil {
-		return nil, err
-	}
-	return &account, nil
+	return s.parseAccountResponse(response.Body)
 }
 
 // AccountCredentials retrieves the credentials of an IdsecPCloudAccount by its ID.
@@ -471,7 +513,7 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 	}
 	if addAccount.RemoteMachines != nil {
 		addAccountJSON["remoteMachinesAccess"] = map[string]interface{}{
-			"remoteMachines": addAccount.RemoteMachines,
+			"remoteMachines": strings.Join(addAccount.RemoteMachines, ";"),
 		}
 		if addAccount.AccessRestrictedToRemoteMachines {
 			addAccountJSON["remoteMachinesAccess"].(map[string]interface{})["accessRestrictedToRemoteMachines"] = addAccount.AccessRestrictedToRemoteMachines
@@ -490,24 +532,7 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to add account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	accountJSON, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	accountJSONMap := accountJSON.(map[string]interface{})
-	if accountID, ok := accountJSONMap["id"]; ok {
-		accountJSONMap["account_id"] = accountID
-	}
-	if userName, ok := accountJSONMap["user_name"]; ok {
-		accountJSONMap["username"] = userName
-	}
-	var account accountsmodels.IdsecPCloudAccount
-	err = mapstructure.Decode(accountJSONMap, &account)
-	if err != nil {
-		return nil, err
-	}
-
-	return &account, nil
+	return s.parseAccountResponse(response.Body)
 }
 
 // UpdateAccount updates an existing IdsecPCloudAccount.
@@ -528,22 +553,18 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 	delete(updateAccountJSON, "idsecPcloudAccountRemoteMachinesAccess")
 	delete(updateAccountJSON, "idsecPcloudAccountSecretManagement")
 	if updateAccount.AutomaticManagementEnabled {
-		updateAccountJSON["secretManagement"] = map[string]interface{}{
-			"automaticManagementEnabled": updateAccount.AutomaticManagementEnabled,
-		}
+		updateAccountJSON["secretManagement/automaticManagementEnabled"] = updateAccount.AutomaticManagementEnabled
 		if updateAccount.ManualManagementReason != "" {
-			updateAccountJSON["secretManagement"].(map[string]interface{})["manualManagementReason"] = updateAccount.ManualManagementReason
+			updateAccountJSON["secretManagement/manualManagementReason"] = updateAccount.ManualManagementReason
 		}
 		if updateAccount.LastModifiedTime != 0 {
-			updateAccountJSON["secretManagement"].(map[string]interface{})["lastModifiedTime"] = updateAccount.LastModifiedTime
+			updateAccountJSON["secretManagement/lastModifiedTime"] = updateAccount.LastModifiedTime
 		}
 	}
 	if updateAccount.RemoteMachines != nil {
-		updateAccountJSON["remoteMachinesAccess"] = map[string]interface{}{
-			"remoteMachines": updateAccount.RemoteMachines,
-		}
+		updateAccountJSON["remoteMachinesAccess/remoteMachines"] = strings.Join(updateAccount.RemoteMachines, ";")
 		if updateAccount.AccessRestrictedToRemoteMachines {
-			updateAccountJSON["remoteMachinesAccess"].(map[string]interface{})["accessRestrictedToRemoteMachines"] = updateAccount.AccessRestrictedToRemoteMachines
+			updateAccountJSON["remoteMachinesAccess/accessRestrictedToRemoteMachines"] = updateAccount.AccessRestrictedToRemoteMachines
 		}
 	}
 	var operations []map[string]interface{}
@@ -555,7 +576,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 		}
 		operations = append(operations, operation)
 	}
-	var account accountsmodels.IdsecPCloudAccount
+	var account *accountsmodels.IdsecPCloudAccount
 	if len(operations) == 0 {
 		pcloudAccount, err := s.Account(&accountsmodels.IdsecPCloudGetAccount{
 			AccountID: updateAccount.AccountID,
@@ -563,7 +584,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 		if err != nil {
 			return nil, err
 		}
-		account = *pcloudAccount
+		account = pcloudAccount
 	} else {
 		response, err := s.client.Patch(context.Background(), fmt.Sprintf(accountURL, updateAccount.AccountID), operations)
 		if err != nil {
@@ -578,18 +599,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 		if response.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("failed to update account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 		}
-		accountJSON, err := common.DeserializeJSONSnake(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		accountJSONMap := accountJSON.(map[string]interface{})
-		if accountID, ok := accountJSONMap["id"]; ok {
-			accountJSONMap["account_id"] = accountID
-		}
-		if userName, ok := accountJSONMap["user_name"]; ok {
-			accountJSONMap["username"] = userName
-		}
-		err = mapstructure.Decode(accountJSONMap, &account)
+		account, err = s.parseAccountResponse(response.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -603,7 +613,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 			return nil, err
 		}
 	}
-	return &account, nil
+	return account, nil
 }
 
 // DeleteAccount deletes an existing account.

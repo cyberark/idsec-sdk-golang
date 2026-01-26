@@ -2,7 +2,7 @@ package actions
 
 import platformsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms/models"
 
-// ActionToSchemaMap is a map that defines the mapping between Idsec PCloud action names and their corresponding schema types.
+// ActionToSchemaMap is a map that defines the mapping between Idsec Privilege Cloud action names and their corresponding schema types.
 var ActionToSchemaMap = map[string]interface{}{
 	"list-platforms":             nil,
 	"list-platforms-by":          &platformsmodels.IdsecPCloudPlatformsFilter{},

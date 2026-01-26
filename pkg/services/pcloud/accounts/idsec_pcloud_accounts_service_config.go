@@ -20,6 +20,7 @@ var ServiceConfig = services.IdsecServiceConfig{
 		},
 		actions.IdsecServiceActionTypeTerraformDataSource: {
 			pcloudaccountsactions.TerraformActionAccountDataSource,
+			pcloudaccountsactions.TerraformActionAccountCredentialsDataSource,
 		},
 	},
 }

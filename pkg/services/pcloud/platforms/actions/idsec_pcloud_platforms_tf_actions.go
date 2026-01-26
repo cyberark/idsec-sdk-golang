@@ -5,12 +5,12 @@ import (
 	platformsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms/models"
 )
 
-// TerraformActionTargetPlatformResource is a struct that defines the pCloud target platform resource action for the Idsec service for Terraform.
+// TerraformActionTargetPlatformResource is a struct that defines the Privilege Cloud target platform resource action for the Idsec service for Terraform.
 var TerraformActionTargetPlatformResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-target-platform",
-			ActionDescription: "pCloud target platform resource, manages pCloud target platform import.",
+			ActionDescription: "Privilege Cloud target platform resource, manages the import of Privilege Cloud target platforms.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -29,12 +29,12 @@ var TerraformActionTargetPlatformResource = &actions.IdsecServiceTerraformResour
 	},
 }
 
-// TerraformActionTargetPlatformDataSource is a struct that defines the pCloud target platform data source action for the Idsec service for Terraform.
+// TerraformActionTargetPlatformDataSource is a struct that defines the Privilege Cloud target platform data source action for the Idsec service for Terraform.
 var TerraformActionTargetPlatformDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-target-platform",
-			ActionDescription: "PCloud Target Platform data source, reads target platform information and metadata, based on the id of the platform.",
+			ActionDescription: "Privilege Cloud target platform data source, reads target platform information and metadata, based on the platform ID.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},

@@ -6,7 +6,7 @@ import "github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 		ActionName:        "safes",
-		ActionDescription: "PCloud Safes Management.",
+		ActionDescription: "Privilege Cloud Safes management.",
 		ActionVersion:     1,
 		Schemas:           ActionToSchemaMap,
 	},

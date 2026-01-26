@@ -5,12 +5,12 @@ import (
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 )
 
-// TerraformActionAccountResource is a struct that defines the pCloud account resource action for the Idsec service for Terraform.
+// TerraformActionAccountResource is a struct that defines the Privilege Cloud account resource action for the Idsec service for Terraform.
 var TerraformActionAccountResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-account",
-			ActionDescription: "pCloud account resource, manages pCloud accounts information / metadata and credentials.",
+			ActionDescription: "Manage Privilege Cloud account information, metadata, and credentials",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -32,12 +32,12 @@ var TerraformActionAccountResource = &actions.IdsecServiceTerraformResourceActio
 	},
 }
 
-// TerraformActionAccountDataSource is a struct that defines the pCloud account data source action for the Idsec service for Terraform.
+// TerraformActionAccountDataSource is a struct that defines the Privilege Cloud account data source action for the Idsec service for Terraform.
 var TerraformActionAccountDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
 			ActionName:        "pcloud-account",
-			ActionDescription: "PCloud Account data source, reads account information and metadata, based on the id of the account.",
+			ActionDescription: "Privilege Cloud account data source, reads account information and metadata, based on the account ID.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
@@ -47,4 +47,21 @@ var TerraformActionAccountDataSource = &actions.IdsecServiceTerraformDataSourceA
 		StateSchema: &accountsmodels.IdsecPCloudAccount{},
 	},
 	DataSourceAction: "account",
+}
+
+// TerraformActionAccountCredentialsDataSource is a struct that defines the Privilege Cloud account credentials data source action for the Idsec service for Terraform.
+var TerraformActionAccountCredentialsDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
+	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+			ActionName:        "pcloud-account-credentials",
+			ActionDescription: "Privilege Cloud account credentials data source, reads account credentials from vault, based on the account ID.",
+			ActionVersion:     1,
+			Schemas:           ActionToSchemaMap,
+		},
+		ExtraRequiredAttributes: []string{
+			"account_id",
+		},
+		StateSchema: &accountsmodels.IdsecPCloudAccountCredentials{},
+	},
+	DataSourceAction: "account-credentials",
 }
