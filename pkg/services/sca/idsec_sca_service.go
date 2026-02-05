@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"

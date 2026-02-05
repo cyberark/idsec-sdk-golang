@@ -13,6 +13,6 @@ type IdsecCmgrDeletePoolSingleIdentifier struct {
 
 // IdsecCmgrDeletePoolBulkIdentifier is a struct representing the filter for deleting multiple identifiers from a pool in the Idsec CMGR service.
 type IdsecCmgrDeletePoolBulkIdentifier struct {
-	PoolID      string                        `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"The ID of the pool from which to delete the identifiers."`
+	PoolID      string                          `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"The ID of the pool from which to delete the identifiers."`
 	Identifiers []IdsecCmgrDeletePoolIdentifier `json:"identifiers" mapstructure:"identifiers" flag:"identifiers" desc:"The identifiers to delete."`
 }

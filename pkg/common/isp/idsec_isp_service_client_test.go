@@ -212,6 +212,7 @@ func TestNewIdsecISPServiceClient(t *testing.T) {
 				tt.basePath,
 				cookieJar,
 				nil, // refreshConnectionCallback
+				nil, // retryStrategy
 			)
 
 			if tt.expectedError {

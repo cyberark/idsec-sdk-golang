@@ -9,5 +9,5 @@ type IdsecSIADBTag struct {
 // IdsecSIADBTagList represents a list of tags associated with a database in a workspace.
 type IdsecSIADBTagList struct {
 	Tags  []IdsecSIADBTag `json:"tags" mapstructure:"tags" flag:"tags" desc:"The list of tags."`
-	Count int           `json:"count" mapstructure:"count" flag:"count" desc:"The number of listed tags."`
+	Count int             `json:"count" mapstructure:"count" flag:"count" desc:"The number of listed tags."`
 }

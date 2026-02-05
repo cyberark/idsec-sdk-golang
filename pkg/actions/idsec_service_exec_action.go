@@ -653,10 +653,24 @@ func (s *IdsecServiceExecAction) parseFlag(f *pflag.Flag, cmd *cobra.Command, fl
 			flags[key] = val
 		}
 	case "map[string]string":
-		val, err := cmd.Flags().GetStringToString(f.Name)
-		if err == nil {
-			flags[key] = val
+		// pflag actually parses it as a string in the format "map[key1:value1 key2:value2]"
+		// And GetStringToString does not support it
+		// Weird behavior, but we parse it ourselves
+		value := cmd.Flag(f.Name).Value.String()
+		value = strings.TrimSuffix(strings.TrimPrefix(value, "map["), "]")
+		if len(value) == 0 {
+			return nil
 		}
+		pairs := strings.Split(value, " ")
+		out := make(map[string]string, len(pairs))
+		for _, pair := range pairs {
+			kv := strings.SplitN(pair, ":", 2)
+			if len(kv) != 2 {
+				return fmt.Errorf("%s must be formatted as key:value", pair)
+			}
+			out[kv[0]] = kv[1]
+		}
+		flags[key] = out
 	default:
 		flags[key] = f.Value.String()
 	}

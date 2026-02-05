@@ -102,6 +102,9 @@ func (a *IdsecBaseAction) CommonActionsConfiguration(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("trusted-cert", "", "Certificate to use for HTTPS calls")
 	cmd.PersistentFlags().Bool("suppress-version-check", false, "Whether to suppress version check")
 	cmd.PersistentFlags().Bool("disable-telemetry", false, "Disables telemetry data collection")
+	cmd.PersistentFlags().String("proxy-address", "", "Proxy address to use for HTTP/HTTPS calls, if not given will resolve from environment variables")
+	cmd.PersistentFlags().String("proxy-username", "", "Username for proxy authentication")
+	cmd.PersistentFlags().String("proxy-password", "", "Password for proxy authentication")
 }
 
 // CommonActionsExecution executes common actions based on the command line flags.
@@ -184,6 +187,15 @@ func (a *IdsecBaseAction) CommonActionsExecution(cmd *cobra.Command, execArgs []
 				args.PrintWarning("Newer version of Idsec SDK is available, consider upgrading to the latest version\nYou may do so using `idsec upgrade` command")
 			}
 		}
+	}
+	if proxyAddress, err := cmd.Flags().GetString("proxy-address"); err == nil && proxyAddress != "" {
+		config.SetProxyAddress(proxyAddress)
+	}
+	if proxyUsername, err := cmd.Flags().GetString("proxy-username"); err == nil && proxyUsername != "" {
+		config.SetProxyUsername(proxyUsername)
+	}
+	if proxyPassword, err := cmd.Flags().GetString("proxy-password"); err == nil && proxyPassword != "" {
+		config.SetProxyPassword(proxyPassword)
 	}
 }
 

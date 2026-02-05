@@ -15,6 +15,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
 	platformsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms/models"
 )
 
@@ -57,7 +58,7 @@ func NewIdsecPCloudPlatformsService(authenticators ...auth.IdsecAuth) (*IdsecPCl
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "privilegecloud", ".", "passwordvault", pcloudPlatformsService.refreshPCloudPlatformsAuth)
+	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudPlatformsService.refreshPCloudPlatformsAuth, commonpcloud.DefaultPCloudRetryStrategy())
 	if err != nil {
 		return nil, err
 	}

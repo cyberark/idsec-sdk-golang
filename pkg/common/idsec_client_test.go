@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"crypto/tls"
+
 	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/collectors"
@@ -627,6 +629,40 @@ func TestNewIdsecClient(t *testing.T) {
 			validateFunc: func(t *testing.T, client *IdsecClient) {
 				if _, exists := client.headers["User-Agent"]; !exists {
 					t.Error("Expected User-Agent header to be set")
+				}
+			},
+		},
+		{
+			name:            "success_configures_transport_and_tls_defaults",
+			baseURL:         "example.com",
+			token:           "",
+			tokenType:       "",
+			authHeaderName:  "Authorization",
+			cookieJar:       nil,
+			refreshCallback: nil,
+			owningService:   "",
+			enableTelemetry: false,
+			validateFunc: func(t *testing.T, client *IdsecClient) {
+				transport, ok := client.client.Transport.(*http.Transport)
+				if !ok || transport == nil {
+					t.Error("Expected http.Transport to be configured")
+					return
+				}
+				if transport.Proxy == nil {
+					t.Error("Expected proxy function to be configured")
+				}
+				if transport.TLSClientConfig == nil {
+					t.Error("Expected TLSClientConfig to be configured")
+					return
+				}
+				if transport.TLSClientConfig.RootCAs == nil {
+					t.Error("Expected RootCAs to be non-nil")
+				}
+				if transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+					t.Errorf("Expected MinVersion TLS1.2, got %v", transport.TLSClientConfig.MinVersion)
+				}
+				if transport.TLSClientConfig.InsecureSkipVerify != !config.IsVerifyingCertificates() {
+					t.Errorf("Expected InsecureSkipVerify to match config, got %v", transport.TLSClientConfig.InsecureSkipVerify)
 				}
 			},
 		},

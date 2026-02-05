@@ -15,6 +15,6 @@ type IdsecCmgrAddPoolSingleIdentifier struct {
 
 // IdsecCmgrAddPoolBulkIdentifier is a struct representing the filter for adding multiple identifiers to a pool in the Idsec CMGR service.
 type IdsecCmgrAddPoolBulkIdentifier struct {
-	PoolID      string                     `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"The ID of the pool to which the identifiers will be added."`
+	PoolID      string                       `json:"pool_id" mapstructure:"pool_id" flag:"pool-id" desc:"The ID of the pool to which the identifiers will be added."`
 	Identifiers []IdsecCmgrAddPoolIdentifier `json:"identifiers" mapstructure:"identifiers" flag:"identifiers" desc:"The identifiers to add."`
 }

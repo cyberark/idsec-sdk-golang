@@ -52,6 +52,7 @@ nav:
   - Config:
       - Environment: config/environment.md
       - Telemetry: config/telemetry.md
+      - Proxy: config/proxy.md
 theme:
   name: material
   custom_dir: docs/overrides

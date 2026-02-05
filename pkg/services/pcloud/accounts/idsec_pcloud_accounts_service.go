@@ -10,6 +10,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
+	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
 
 	"io"
 	"net/http"
@@ -60,7 +61,7 @@ func NewIdsecPCloudAccountsService(authenticators ...auth.IdsecAuth) (*IdsecPClo
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "privilegecloud", ".", "passwordvault", pcloudAccountsService.refreshPCloudAccountsAuth)
+	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudAccountsService.refreshPCloudAccountsAuth, commonpcloud.DefaultPCloudRetryStrategy())
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +428,30 @@ func (s *IdsecPCloudAccountsService) parseAccountResponse(responseBody io.ReadCl
 // Account retrieves an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Get%20Account%20Details.htm?
 func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCloudGetAccount) (*accountsmodels.IdsecPCloudAccount, error) {
-	s.Logger.Info("Retrieving account [%s]", getAccount.AccountID)
+	s.Logger.Info("Retrieving account [%s] - [%s]", getAccount.AccountID, getAccount.AccountName)
+	if getAccount.AccountID == "" && getAccount.AccountName == "" {
+		return nil, fmt.Errorf("either account ID or account name must be provided")
+	}
+	if getAccount.AccountID == "" && getAccount.AccountName != "" {
+		accountsPages, err := s.ListAccountsBy(&accountsmodels.IdsecPCloudAccountsFilter{
+			Search: getAccount.AccountName,
+			Limit:  1,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for accountsPage := range accountsPages {
+			for _, account := range accountsPage.Items {
+				if account.Name == getAccount.AccountName {
+					getAccount.AccountID = account.AccountID
+					break
+				}
+			}
+		}
+		if getAccount.AccountID == "" {
+			return nil, fmt.Errorf("account with name [%s] not found", getAccount.AccountName)
+		}
+	}
 	response, err := s.client.Get(context.Background(), fmt.Sprintf(accountURL, getAccount.AccountID), nil)
 	if err != nil {
 		return nil, err
@@ -487,6 +511,15 @@ func (s *IdsecPCloudAccountsService) AccountCredentials(getAccount *accountsmode
 // AddAccount adds a new IdsecPCloudAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Account%20v10.htm?
 func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.IdsecPCloudAddAccount) (*accountsmodels.IdsecPCloudAccount, error) {
+	if addAccount.Name == "" {
+		addAccount.Name = fmt.Sprintf("%s_%s", addAccount.SafeName, addAccount.PlatformID)
+		if addAccount.Address != "" {
+			addAccount.Name = fmt.Sprintf("%s_%s", addAccount.Name, addAccount.Address)
+		}
+		if addAccount.Username != "" {
+			addAccount.Name = fmt.Sprintf("%s_%s", addAccount.Name, addAccount.Username)
+		}
+	}
 	s.Logger.Info("Adding account [%s]", addAccount.Name)
 	addAccountJSON, err := common.SerializeJSONCamel(addAccount)
 	if err != nil {
@@ -529,6 +562,29 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 			common.GlobalLogger.Warning("Error closing response body")
 		}
 	}(response.Body)
+	if response.StatusCode == http.StatusConflict {
+		s.Logger.Info("Account [%s] already exists, retrieving existing account", addAccount.Name)
+		account, err := s.Account(&accountsmodels.IdsecPCloudGetAccount{
+			AccountName: addAccount.Name,
+		})
+		if err != nil {
+			// For some reason, the account creation returned conflict but the account is not found when retrieving it
+			// So we try again with a post to create
+			s.Logger.Info("Account [%s] not found after conflict, retrying account creation", addAccount.Name)
+			response, err = s.client.Post(context.Background(), accountsURL, addAccountJSON)
+			if err != nil {
+				return nil, err
+			}
+			defer func(Body io.ReadCloser) {
+				err := Body.Close()
+				if err != nil {
+					common.GlobalLogger.Warning("Error closing response body")
+				}
+			}(response.Body)
+		} else {
+			return account, nil
+		}
+	}
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to add account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}

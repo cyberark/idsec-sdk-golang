@@ -9,6 +9,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
 
 	"io"
@@ -112,7 +113,7 @@ func NewIdsecPCloudSafesService(authenticators ...auth.IdsecAuth) (*IdsecPCloudS
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "privilegecloud", ".", "passwordvault", pcloudSafesService.refreshPCloudSafesAuth)
+	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudSafesService.refreshPCloudSafesAuth, commonpcloud.DefaultPCloudRetryStrategy())
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +360,30 @@ func (s *IdsecPCloudSafesService) ListSafeMembersBy(safeMembersFilters *safesmod
 // Safe retrieves a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20Get%20Safes%20Details.htm
 func (s *IdsecPCloudSafesService) Safe(getSafe *safesmodels.IdsecPCloudGetSafe) (*safesmodels.IdsecPCloudSafe, error) {
-	s.Logger.Info("Retrieving safe [%s]", getSafe.SafeID)
+	s.Logger.Info("Retrieving safe [%s] - [%s]", getSafe.SafeID, getSafe.SafeName)
+	if getSafe.SafeID == "" && getSafe.SafeName == "" {
+		return nil, fmt.Errorf("either safe ID or safe name must be provided")
+	}
+	if getSafe.SafeID == "" && getSafe.SafeName != "" {
+		safesPages, err := s.ListSafesBy(&safesmodels.IdsecPCloudSafesFilters{
+			Search: getSafe.SafeName,
+			Limit:  1,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for safesPage := range safesPages {
+			for _, safe := range safesPage.Items {
+				if safe.SafeName == getSafe.SafeName {
+					getSafe.SafeID = safe.SafeID
+					break
+				}
+			}
+		}
+		if getSafe.SafeID == "" {
+			return nil, fmt.Errorf("safe with name '%s' not found", getSafe.SafeName)
+		}
+	}
 	response, err := s.client.Get(context.Background(), fmt.Sprintf(safeURL, getSafe.SafeID), nil)
 	if err != nil {
 		return nil, err
@@ -463,6 +487,29 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 			common.GlobalLogger.Warning("Error closing response body")
 		}
 	}(response.Body)
+	if response.StatusCode == http.StatusConflict {
+		s.Logger.Info("Safe [%s] already exists, retrieving existing safe", addSafe.SafeName)
+		safe, err := s.Safe(&safesmodels.IdsecPCloudGetSafe{
+			SafeName: addSafe.SafeName,
+		})
+		if err != nil {
+			// For some reason, the safe creation returned conflict but the safe is not found when retrieving it
+			// So we try again with a post to create
+			s.Logger.Info("Safe [%s] not found after conflict, retrying safe creation", addSafe.SafeName)
+			response, err = s.client.Post(context.Background(), safesURL, addSafeJSON)
+			if err != nil {
+				return nil, err
+			}
+			defer func(Body io.ReadCloser) {
+				err := Body.Close()
+				if err != nil {
+					common.GlobalLogger.Warning("Error closing response body")
+				}
+			}(response.Body)
+		} else {
+			return safe, nil
+		}
+	}
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to add safe - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}

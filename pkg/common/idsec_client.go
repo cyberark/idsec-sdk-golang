@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +25,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"path/filepath"
 
 	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
@@ -87,6 +90,8 @@ type IdsecClient struct {
 	telemetry                 telemetry.IdsecTelemetry
 	owningService             string
 	logger                    *IdsecLogger
+	retryCallback             func(*IdsecClient, *http.Request, *http.Response) bool
+	retryCount                int
 }
 
 // MarshalCookies serializes a cookie jar into a JSON byte array.
@@ -281,10 +286,50 @@ func NewIdsecClient(
 	} else {
 		telemetryInstance = telemetry.NewLimitedIdsecSyncTelemetry()
 	}
-	httpClient := &http.Client{}
+
+	// Support HTTP/HTTPS proxies via standard env vars (HTTP_PROXY/HTTPS_PROXY/NO_PROXY, etc.).
+	// This uses Go's default ProxyFromEnvironment behavior with extra overlay of idsec.
+	rootCAs, _ := x509.SystemCertPool()
+	if rootCAs == nil {
+		rootCAs = x509.NewCertPool()
+	}
+	if caCert := config.TrustedCertificate(); caCert != "" {
+		rootCAs.AppendCertsFromPEM([]byte(caCert))
+	}
+	if extraCACertsPath := config.ExtraTrustedCACertsBundlePath(); extraCACertsPath != "" {
+		rootDir := filepath.Dir(extraCACertsPath)
+		fileName := filepath.Base(extraCACertsPath)
+
+		root, err := os.OpenRoot(rootDir)
+		if err == nil {
+			defer func() { _ = root.Close() }()
+
+			file, err := root.Open(fileName)
+			if err == nil {
+				defer func() { _ = file.Close() }()
+
+				caCertsData, err := io.ReadAll(file)
+				if err == nil {
+					rootCAs.AppendCertsFromPEM(caCertsData)
+				}
+			}
+		}
+	}
+	transport := &http.Transport{
+		Proxy: config.ConfigureProxy,
+		TLSClientConfig: &tls.Config{
+			RootCAs:            rootCAs,
+			InsecureSkipVerify: !config.IsVerifyingCertificates(), // #nosec G402
+			MinVersion:         tls.VersionTLS12,
+		},
+	}
+	httpClient := &http.Client{
+		Transport: transport,
+	}
 	if cookieJar != nil {
 		httpClient.Jar = cookieJar
 	}
+
 	client := &IdsecClient{
 		BaseURL:                   baseURL,
 		authHeaderName:            authHeaderName,
@@ -295,6 +340,8 @@ func NewIdsecClient(
 		owningService:             owningService,
 		telemetry:                 telemetryInstance,
 		logger:                    GetLogger("IdsecClient", Unknown),
+		retryCallback:             nil,
+		retryCount:                1,
 	}
 	client.UpdateToken(token, tokenType)
 	client.headers["User-Agent"] = config.UserAgent()
@@ -611,7 +658,7 @@ func (ac *IdsecClient) fillMetadataTelemetry(route string, refreshRetryCountLoca
 // - TLS certificate verification based on global settings
 // - Request/response timing logging
 // - Token refresh retry logic on 401 Unauthorized responses
-func (ac *IdsecClient) doRequest(ctx context.Context, method string, route string, body interface{}, params interface{}, refreshRetryCountLocal int) (*http.Response, error) {
+func (ac *IdsecClient) doRequest(ctx context.Context, method string, route string, body interface{}, params interface{}, refreshRetryCountLocal int, retryCountLocal int) (*http.Response, error) {
 	var err error
 	fullURL := ac.BaseURL
 	if route != "" {
@@ -683,12 +730,7 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 		}
 		req.URL.RawQuery = urlParams.Encode()
 	}
-	ac.client.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: !config.IsVerifyingCertificates(), // #nosec G402
-			MinVersion:         tls.VersionTLS12,
-		},
-	}
+
 	ac.logger.Info("Running request '%s %s'", method, fullURL)
 	startTime := time.Now()
 	defer func() {
@@ -704,7 +746,12 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 		if err != nil {
 			return nil, err
 		}
-		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal-1)
+		ac.logger.Info("Retrying request '%s %s' after refreshing authentication", method, fullURL)
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal-1, retryCountLocal)
+	}
+	if resp.StatusCode >= http.StatusInternalServerError && ac.retryCallback != nil && retryCountLocal > 0 && ac.retryCallback(ac, req, resp) {
+		ac.logger.Info("Retrying request '%s %s' due to server error %d", method, fullURL, resp.StatusCode)
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal, retryCountLocal-1)
 	}
 	return resp, nil
 }
@@ -732,7 +779,7 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 //	}
 //	defer response.Body.Close()
 func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodGet, route, nil, params, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodGet, route, nil, params, refreshRetryCount, ac.retryCount)
 }
 
 // Post performs an HTTP POST request to the specified route.
@@ -757,7 +804,7 @@ func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}
 //	}
 //	defer response.Body.Close()
 func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount, ac.retryCount)
 }
 
 // Put performs an HTTP PUT request to the specified route.
@@ -778,7 +825,7 @@ func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{})
 //	updatedUser := map[string]string{"name": "John Doe", "email": "john.doe@example.com"}
 //	response, err := client.Put(ctx, "/users/123", updatedUser)
 func (ac *IdsecClient) Put(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPut, route, body, nil, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodPut, route, body, nil, refreshRetryCount, ac.retryCount)
 }
 
 // Delete performs an HTTP DELETE request to the specified route.
@@ -800,7 +847,7 @@ func (ac *IdsecClient) Put(ctx context.Context, route string, body interface{}) 
 //	deleteOptions := map[string]bool{"force": true}
 //	response, err := client.Delete(ctx, "/users/123", deleteOptions)
 func (ac *IdsecClient) Delete(ctx context.Context, route string, body interface{}, params interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodDelete, route, body, params, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodDelete, route, body, params, refreshRetryCount, ac.retryCount)
 }
 
 // Patch performs an HTTP PATCH request to the specified route.
@@ -821,7 +868,7 @@ func (ac *IdsecClient) Delete(ctx context.Context, route string, body interface{
 //	partialUpdate := map[string]string{"email": "newemail@example.com"}
 //	response, err := client.Patch(ctx, "/users/123", partialUpdate)
 func (ac *IdsecClient) Patch(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPatch, route, body, nil, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodPatch, route, body, nil, refreshRetryCount, ac.retryCount)
 }
 
 // Options performs an HTTP OPTIONS request to the specified route.
@@ -841,7 +888,7 @@ func (ac *IdsecClient) Patch(ctx context.Context, route string, body interface{}
 //	response, err := client.Options(ctx, "/users")
 //	// Check response headers for allowed methods, CORS info, etc.
 func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodOptions, route, nil, nil, refreshRetryCount)
+	return ac.doRequest(ctx, http.MethodOptions, route, nil, nil, refreshRetryCount, ac.retryCount)
 }
 
 // UpdateToken updates the authentication token and token type for the client.
@@ -907,4 +954,36 @@ func (ac *IdsecClient) GetToken() string {
 //	fmt.Printf("Using %s authentication\n", tokenType)
 func (ac *IdsecClient) GetTokenType() string {
 	return ac.tokenType
+}
+
+// SetRetry configures the retry behavior for HTTP requests.
+//
+// This method allows setting a custom retry callback function and the
+// maximum number of retry attempts for HTTP requests. The retry callback
+// is invoked after each request to determine whether a retry should be
+// attempted based on the request and response.
+// retry is only attempted if the status code is above 500
+// 401 Unauthorized responses are automatically retried if a refresh callback is configured, and do not count against the retry count set by this method.
+//
+// Note: Consider using IdsecClientRetryStrategy implementations for more
+// structured retry behavior instead of directly setting callbacks.
+//
+// Parameters:
+//   - retryCallback: Function that determines whether to retry a request
+//     It receives the client, request, and response as parameters
+//   - retryCount: Maximum number of retry attempts
+//
+// Example:
+//
+//	client.SetRetry(func(c *IdsecClient, req *http.Request, resp *http.Response) bool {
+//	    // Retry on 500 Internal Server Error
+//	    return resp.StatusCode == http.StatusInternalServerError
+//	}, 3)
+//
+//	// Or use a retry strategy:
+//	strategy := &RetryAllErrorsStrategy{MaxRetries: 3}
+//	strategy.ConfigureClient(client)
+func (ac *IdsecClient) SetRetry(retryCallback func(*IdsecClient, *http.Request, *http.Response) bool, retryCount int) {
+	ac.retryCallback = retryCallback
+	ac.retryCount = retryCount
 }

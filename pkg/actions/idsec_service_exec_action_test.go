@@ -438,6 +438,172 @@ func TestIdsecServiceExecAction_parseFlag(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "success_parses_map_string_string_single_pair",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("labels", map[string]string{}, "labels flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("labels")
+				// Simulate pflag's format for map[string]string
+				_ = flag.Value.Set("key1=value1")
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: false,
+			validateFunc: func(t *testing.T, flags map[string]interface{}) {
+				mapVal, ok := flags["labels"].(map[string]string)
+				if !ok {
+					t.Errorf("Expected map[string]string, got %T", flags["labels"])
+					return
+				}
+				if len(mapVal) != 1 {
+					t.Errorf("Expected 1 entry, got %d", len(mapVal))
+					return
+				}
+				if mapVal["key1"] != "value1" {
+					t.Errorf("Expected value1, got %v", mapVal["key1"])
+				}
+			},
+		},
+		{
+			name: "success_parses_map_string_string_multiple_pairs",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("labels", map[string]string{}, "labels flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("labels")
+				_ = flag.Value.Set("key1=value1")
+				_ = flag.Value.Set("key2=value2")
+				_ = flag.Value.Set("key3=value3")
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: false,
+			validateFunc: func(t *testing.T, flags map[string]interface{}) {
+				mapVal, ok := flags["labels"].(map[string]string)
+				if !ok {
+					t.Errorf("Expected map[string]string, got %T", flags["labels"])
+					return
+				}
+				if len(mapVal) != 3 {
+					t.Errorf("Expected 3 entries, got %d", len(mapVal))
+					return
+				}
+				if mapVal["key1"] != "value1" || mapVal["key2"] != "value2" || mapVal["key3"] != "value3" {
+					t.Errorf("Map values incorrect: %v", mapVal)
+				}
+			},
+		},
+		{
+			name: "success_parses_map_string_string_empty_map",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("labels", map[string]string{}, "labels flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("labels")
+				// Empty map - don't set any values
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: false,
+			validateFunc: func(t *testing.T, flags map[string]interface{}) {
+				// Empty map should not be added to flags or should be empty
+				if val, exists := flags["labels"]; exists {
+					mapVal, ok := val.(map[string]string)
+					if ok && len(mapVal) != 0 {
+						t.Errorf("Expected empty map, got %v", mapVal)
+					}
+				}
+			},
+		},
+		{
+			name: "error_map_string_string_invalid_format_no_colon",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("labels", map[string]string{}, "labels flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("labels")
+				// Manually set the string representation to invalid format
+				flag.Value = &testutils.MockFlagValue{Val: "map[invalid_format]"}
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: true,
+		},
+		{
+			name: "success_parses_map_string_string_with_special_chars",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("metadata", map[string]string{}, "metadata flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("metadata")
+				_ = flag.Value.Set("env=production")
+				_ = flag.Value.Set("version=1.0.0")
+				_ = flag.Value.Set("region=us-east-1")
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: false,
+			validateFunc: func(t *testing.T, flags map[string]interface{}) {
+				mapVal, ok := flags["metadata"].(map[string]string)
+				if !ok {
+					t.Errorf("Expected map[string]string, got %T", flags["metadata"])
+					return
+				}
+				if mapVal["env"] != "production" {
+					t.Errorf("Expected production, got %v", mapVal["env"])
+				}
+				if mapVal["version"] != "1.0.0" {
+					t.Errorf("Expected 1.0.0, got %v", mapVal["version"])
+				}
+				if mapVal["region"] != "us-east-1" {
+					t.Errorf("Expected us-east-1, got %v", mapVal["region"])
+				}
+			},
+		},
+		{
+			name: "success_parses_map_string_string_with_colon_in_value",
+			setupCmd: func() *cobra.Command {
+				cmd := &cobra.Command{}
+				cmd.Flags().StringToString("config", map[string]string{}, "config flag")
+				return cmd
+			},
+			setupFlag: func(cmd *cobra.Command) *pflag.Flag {
+				flag := cmd.Flags().Lookup("config")
+				// Value contains colon - should only split on first colon
+				_ = flag.Value.Set("url=https://example.com:8080")
+				flag.Changed = true
+				return flag
+			},
+			schema:        testutils.CreateTestSchema(),
+			expectedError: false,
+			validateFunc: func(t *testing.T, flags map[string]interface{}) {
+				mapVal, ok := flags["config"].(map[string]string)
+				if !ok {
+					t.Errorf("Expected map[string]string, got %T", flags["config"])
+					return
+				}
+				if mapVal["url"] != "https://example.com:8080" {
+					t.Errorf("Expected https://example.com:8080, got %v", mapVal["url"])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

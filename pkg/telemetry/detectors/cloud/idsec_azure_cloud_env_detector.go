@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/detectors"
 )
@@ -26,7 +27,12 @@ type IdsecAzureCloudEnvDetector struct {
 
 func NewIdsecAzureCloudDetector() detectors.IdsecEnvDetector {
 	return &IdsecAzureCloudEnvDetector{
-		httpClient:          &http.Client{Timeout: 200 * time.Millisecond},
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				Proxy: config.ConfigureProxy,
+			},
+			Timeout: 200 * time.Millisecond,
+		},
 		azureMetadataIpAddr: defaultAzureMetadataIpAddr,
 	}
 }

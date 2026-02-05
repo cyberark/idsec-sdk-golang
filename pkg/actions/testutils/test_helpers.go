@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/profiles"
@@ -292,3 +293,26 @@ func SetEnvVar(key, value string) func() {
 		}
 	}
 }
+
+// MockFlagValue is a mock implementation of pflag.Value for testing
+type MockFlagValue struct {
+	Val string
+}
+
+// String returns the string representation of the flag value
+func (m *MockFlagValue) String() string {
+	return m.Val
+}
+
+// Set sets the flag value
+func (m *MockFlagValue) Set(s string) error {
+	m.Val = s
+	return nil
+}
+
+// Type returns the type of the flag
+func (m *MockFlagValue) Type() string {
+	return "map[string]string"
+}
+
+var _ pflag.Value = (*MockFlagValue)(nil)

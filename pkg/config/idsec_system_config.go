@@ -50,9 +50,13 @@ var (
 	isCertificateVerification = true
 	isAllowingOutput          = false
 	trustedCert               = ""
+	trustedCaCertsBundlePath  = ""
 	currentTool               = IdsecToolSDK
 	currentCorrelationID      = ""
 	isCollectionTelemetry     = true
+	proxyAddress              = ""
+	proxyUsername             = ""
+	proxyPassword             = ""
 )
 
 const (
@@ -73,6 +77,22 @@ const (
 
 	// IdsecLogLevelEnvVar sets the logging verbosity level.
 	IdsecLogLevelEnvVar = "IDSEC_LOG_LEVEL"
+
+	// IdsecExtraTrustedCAPathEnvVar sets the path to an extra trusted CA certificates bundle.
+	IdsecExtraTrustedCACertsBundlePathEnvVar = "IDSEC_EXTRA_TRUSTED_CA_CERTS_BUNDLE_PATH"
+
+	// IdsecProxyAddressEnvVar is the environment variable name for setting the proxy address.
+	// When this environment variable is set, it will be used as the proxy address for network connections
+	// if no proxy address is explicitly set in the SDK configuration.
+	// Note that if a proxy address is set in the SDK configuration, it will take precedence over this environment variable.
+	// If nothing is set, the default environment variable settings will be used (HTTP_PROXY, HTTPS_PROXY, NO_PROXY).
+	IdsecProxyAddressEnvVar = "IDSEC_PROXY_ADDRESS"
+
+	// IdsecProxyUsernameEnvVar is the environment variable name for setting the proxy username.
+	IdsecProxyUsernameEnvVar = "IDSEC_PROXY_USERNAME"
+
+	// IdsecProxyPasswordEnvVar is the environment variable name for setting the proxy password.
+	IdsecProxyPasswordEnvVar = "IDSEC_PROXY_PASSWORD" // #nosec G101
 )
 
 // DisableColor disables colored output in the console.
@@ -364,6 +384,156 @@ func SetTrustedCertificate(cert string) {
 //	}
 func TrustedCertificate() string {
 	return trustedCert
+}
+
+// SetExtraTrustedCACertsBundlePath sets the path to an extra trusted CA certificates bundle.
+//
+// SetExtraTrustedCACertsBundlePath stores the provided file path in the global
+// trustedCaCertsBundlePath variable. This path can be used to load additional
+// trusted CA certificates for SSL/TLS verification.
+//
+// Parameters:
+//   - path: The file path to the extra trusted CA certificates bundle
+//
+// Example:
+//
+//	path := "/path/to/extra_ca_certs.pem"
+//	SetExtraTrustedCACertsBundlePath(path)
+func SetExtraTrustedCACertsBundlePath(path string) {
+	trustedCaCertsBundlePath = path
+}
+
+// ExtraTrustedCACertsBundlePath returns the path to an extra trusted CA certificates bundle.
+//
+// ExtraTrustedCACertsBundlePath retrieves the currently stored file path for
+// the extra trusted CA certificates bundle that was previously set using
+// SetExtraTrustedCACertsBundlePath. If no path has been set, it checks the
+// IdsecExtraTrustedCACertsBundlePathEnvVar environment variable.
+//
+// Returns the file path to the extra trusted CA certificates bundle.
+//
+// Example:
+//
+//	path := ExtraTrustedCACertsBundlePath()
+//	if path != "" {
+//	    // Load extra trusted CA certificates from the specified path
+//	}
+func ExtraTrustedCACertsBundlePath() string {
+	if trustedCaCertsBundlePath != "" {
+		return trustedCaCertsBundlePath
+	}
+	return os.Getenv(IdsecExtraTrustedCACertsBundlePathEnvVar)
+}
+
+// SetProxyAddress sets the proxy address for network connections.
+// SetProxyAddress stores the provided address string in the global
+// proxyAddress variable. This address can be used for configuring proxy
+// settings for network connections.
+//
+// Parameters:
+//   - address: The proxy address string to be stored
+//
+// Example:
+//
+//	address := "http://proxy.example.com:8080"
+//	SetProxyAddress(address)
+func SetProxyAddress(address string) {
+	proxyAddress = address
+}
+
+// ProxyAddress returns the proxy address for network connections.
+//
+// ProxyAddress retrieves the currently stored proxy address string
+// that was previously set using SetProxyAddress. Returns an empty string
+// if no address has been set.
+//
+// Returns the proxy address string, or empty string if none is set.
+//
+// Example:
+//
+//	address := ProxyAddress()
+//	if address != "" {
+//	    // Use the proxy address for network connections
+//	}
+func ProxyAddress() string {
+	if proxyAddress != "" {
+		return proxyAddress
+	}
+	return os.Getenv(IdsecProxyAddressEnvVar)
+}
+
+// SetProxyUsername sets the proxy username for network connections.
+// SetProxyUsername stores the provided username string in the global
+// proxyUsername variable. This username can be used for configuring proxy
+// authentication for network connections.
+//
+// Parameters:
+//   - username: The proxy username string to be stored
+//
+// Example:
+//
+//	username := "proxyuser"
+//	SetProxyUsername(username)
+func SetProxyUsername(username string) {
+	proxyUsername = username
+}
+
+// ProxyUsername returns the proxy username for network connections.
+//
+// ProxyUsername retrieves the currently stored proxy username string
+// that was previously set using SetProxyUsername. Returns an empty string
+// if no username has been set.
+//
+// Returns the proxy username string, or empty string if none is set.
+//
+// Example:
+//
+//	username := ProxyUsername()
+//	if username != "" {
+//	    // Use the proxy username for network connections
+//	}
+func ProxyUsername() string {
+	if proxyUsername != "" {
+		return proxyUsername
+	}
+	return os.Getenv(IdsecProxyUsernameEnvVar)
+}
+
+// SetProxyPassword sets the proxy password for network connections.
+// SetProxyPassword stores the provided password string in the global
+// proxyPassword variable. This password can be used for configuring proxy
+// authentication for network connections.
+//
+// Parameters:
+//   - password: The proxy password string to be stored
+//
+// Example:
+//
+//	password := "proxypassword"
+//	SetProxyPassword(password)
+func SetProxyPassword(password string) {
+	proxyPassword = password
+}
+
+// ProxyPassword returns the proxy password for network connections.
+//
+// ProxyPassword retrieves the currently stored proxy password string
+// that was previously set using SetProxyPassword. Returns an empty string
+// if no password has been set.
+//
+// Returns the proxy password string, or empty string if none is set.
+//
+// Example:
+//
+//	password := ProxyPassword()
+//	if password != "" {
+//	    // Use the proxy password for network connections
+//	}
+func ProxyPassword() string {
+	if proxyPassword != "" {
+		return proxyPassword
+	}
+	return os.Getenv(IdsecProxyPasswordEnvVar)
 }
 
 // DisableTelemetryCollection disables telemetry data collection.
