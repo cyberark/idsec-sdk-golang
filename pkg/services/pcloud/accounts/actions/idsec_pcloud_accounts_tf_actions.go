@@ -15,7 +15,13 @@ var TerraformActionAccountResource = &actions.IdsecServiceTerraformResourceActio
 			Schemas:           ActionToSchemaMap,
 		},
 		ExtraRequiredAttributes: []string{},
-		StateSchema:             &accountsmodels.IdsecPCloudAccount{},
+		ComputedAttributes: []string{
+			"status",
+			"created_time",
+			"category_modification_time",
+			"secret_management.last_modified_time",
+		},
+		StateSchema: &accountsmodels.IdsecPCloudAccount{},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,

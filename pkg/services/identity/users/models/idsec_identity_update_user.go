@@ -12,4 +12,6 @@ type IdsecIdentityUpdateUser struct {
 	ForcePasswordChangeNext *bool  `json:"force_password_change_next,omitempty" mapstructure:"force_password_change_next" flag:"force-password-change-next" desc:"Whether to force the user to change their password on next login"`
 	SendEmailInvite         *bool  `json:"send_email_invite,omitempty" mapstructure:"send_email_invite" flag:"send-email-invite" desc:"Whether to send an email invite to the user upon creation"`
 	SendSmsInvite           *bool  `json:"send_sms_invite,omitempty" mapstructure:"send_sms_invite" flag:"send-sms-invite" desc:"Whether to send an SMS invite to the user upon creation"`
+	IsServiceUser           *bool  `json:"is_service_user,omitempty" mapstructure:"is_service_user" flag:"is-service-user" desc:"Whether the user is a service user"`
+	IsOauthClient           *bool  `json:"is_oauth_client,omitempty" mapstructure:"is_oauth_client" flag:"is-oauth-client" desc:"Whether the user is an OAuth client"`
 }

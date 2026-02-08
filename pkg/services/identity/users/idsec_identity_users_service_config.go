@@ -17,9 +17,13 @@ var ServiceConfig = services.IdsecServiceConfig{
 		},
 		actions.IdsecServiceActionTypeTerraformResource: {
 			identityusersactions.TerraformActionUserResource,
+			identityusersactions.TerraformActionUserAttributesSchemaResource,
+			identityusersactions.TerraformActionUserAttributesResource,
 		},
 		actions.IdsecServiceActionTypeTerraformDataSource: {
 			identityusersactions.TerraformActionUserDataSource,
+			identityusersactions.TerraformActionUserAttributesSchemaDataSource,
+			identityusersactions.TerraformActionUserAttributesDataSource,
 		},
 	},
 }

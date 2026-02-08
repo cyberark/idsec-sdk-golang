@@ -63,6 +63,7 @@ type IdsecServiceBaseTerraformActionDefinition struct {
 	ExtraRequiredAttributes          []string    `mapstructure:"extra_required_attributes,omitempty" json:"extra_required_attributes,omitempty" desc:"Used to set attributes as required in the schema if not configured as validate required tag"`
 	ComputedAsSetAttributes          []string    `mapstructure:"computed_as_set_attributes,omitempty" json:"computed_as_set_attributes,omitempty" desc:"Used to define list attributes as set attributes in the schema for non ordering unique collections"`
 	ImmutableAttributes              []string    `mapstructure:"immutable_attributes,omitempty" json:"immutable_attributes,omitempty" desc:"Used to set attributes as immutable in the schema, blocking changes after creation"`
+	ComputedAttributes               []string    `mapstructure:"computed_attributes,omitempty" json:"computed_attributes,omitempty" desc:"Used to set attributes as computed-only (read-only) in the schema, preventing user input"`
 }
 
 // IdsecServiceTerraformResourceActionDefinition is a struct that defines the structure of a resource action in the Idsec Terraform provider.
