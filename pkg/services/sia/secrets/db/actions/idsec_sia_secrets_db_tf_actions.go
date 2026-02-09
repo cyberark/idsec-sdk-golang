@@ -10,7 +10,7 @@ import (
 var TerraformActionDBStrongAccountResource = &actions.IdsecServiceTerraformResourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-			ActionName:        "sia-strong-accounts",
+			ActionName:        "sia-db-strong-accounts",
 			ActionDescription: "The SIA strong accounts resource, manages strong account information and metadata.",
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
@@ -41,7 +41,7 @@ var TerraformActionDBStrongAccountResource = &actions.IdsecServiceTerraformResou
 var TerraformActionDBStrongAccountDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
 	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
 		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-			ActionName:        "sia-strong-accounts",
+			ActionName:        "sia-db-strong-accounts",
 			ActionDescription: "The SIA strong accounts data source, reads strong account information and metadata, based on the ID of the account.",
 			ActionVersion:     1,
 			Schemas:           StrongAccountActionToSchemaMap,
