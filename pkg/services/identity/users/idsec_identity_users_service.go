@@ -167,8 +167,8 @@ func (s *IdsecIdentityUsersService) setUserState(userID string, state string) er
 
 // CreateUser creates a new user in the identity service.
 func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIdentityCreateUser) (*usersmodels.IdsecIdentityUser, error) {
-	if createUser.Username == "" || createUser.Email == "" {
-		return nil, fmt.Errorf("username and email are required")
+	if createUser.Username == "" {
+		return nil, fmt.Errorf("username is required")
 	}
 	if createUser.DisplayName == "" {
 		parts := strings.Split(createUser.Username, "@")
