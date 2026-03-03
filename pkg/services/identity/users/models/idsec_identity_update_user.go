@@ -14,4 +14,6 @@ type IdsecIdentityUpdateUser struct {
 	SendSmsInvite           *bool  `json:"send_sms_invite,omitempty" mapstructure:"send_sms_invite" flag:"send-sms-invite" desc:"Whether to send an SMS invite to the user upon creation"`
 	IsServiceUser           *bool  `json:"is_service_user,omitempty" mapstructure:"is_service_user" flag:"is-service-user" desc:"Whether the user is a service user"`
 	IsOauthClient           *bool  `json:"is_oauth_client,omitempty" mapstructure:"is_oauth_client" flag:"is-oauth-client" desc:"Whether the user is an OAuth client"`
+	PasswordNeverExpire     *bool  `json:"password_never_expire,omitempty" mapstructure:"password_never_expire" flag:"password-never-expire" desc:"Whether the user's password never expires"`
+	State                   string `json:"state,omitempty" mapstructure:"state" flag:"state" desc:"State of the user to update to, can be None, Locked, Disabled, or Expired" choices:"None,Locked,Disabled,Expired"`
 }

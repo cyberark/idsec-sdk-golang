@@ -26,6 +26,7 @@ const (
 	createRoleURL                = "Roles/StoreRole"
 	updateRoleURL                = "Roles/UpdateRole"
 	roleMembersURL               = "Roles/GetRoleMembers"
+	setDynamicRoleScriptURL      = "Roles/SetDynamicRoleScript"
 	addAdminRightsToRoleURL      = "SaasManage/AssignSuperRights"
 	removeAdminRightsFromRoleURL = "SaasManage/UnAssignSuperRights"
 	removeUserFromRoleURL        = "SaasManage/RemoveUsersAndGroupsFromRole"
@@ -113,6 +114,36 @@ func (s *IdsecIdentityRolesService) refreshIdentityRolesAuth(client *common.Idse
 	return nil
 }
 
+func (s *IdsecIdentityRolesService) setRoleDynamicScript(roleID string, script string) error {
+	s.Logger.Info("Setting dynamic role script for role [%s]", roleID)
+	requestBody := map[string]interface{}{
+		"ID":     roleID,
+		"Script": script,
+	}
+	response, err := s.postOperation()(context.Background(), setDynamicRoleScriptURL, requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to set dynamic role script: %v", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set dynamic role script - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return fmt.Errorf("failed to decode response: %v", err)
+	}
+	if res, ok := result["success"].(bool); !ok || !res {
+		return fmt.Errorf("failed to set dynamic role script - [%v]", result)
+	}
+	return nil
+}
+
 // CreateRole creates a new role in the identity service.
 func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIdentityCreateRole) (*rolesmodels.IdsecIdentityRole, error) {
 	s.Logger.Info("Trying to create role [%s]", createRole.RoleName)
@@ -128,6 +159,14 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 	}
 	if createRole.Description != "" {
 		createRoleRequest["Description"] = createRole.Description
+	}
+	if createRole.RoleType != "" {
+		if createRole.RoleType == "Script" && createRole.DynamicRoleScript == "" {
+			return nil, fmt.Errorf("dynamic_role_script must be provided when RoleType is Script")
+		}
+		createRoleRequest["RoleType"] = createRole.RoleType
+	} else {
+		createRoleRequest["RoleType"] = "PrincipalList"
 	}
 	response, err := s.postOperation()(context.Background(), createRoleURL, createRoleRequest)
 	if err != nil {
@@ -160,8 +199,15 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 	roleDetails := &rolesmodels.IdsecIdentityRole{
 		RoleName: createRole.RoleName,
 		RoleID:   roleID,
+		RoleType: createRole.RoleType,
 	}
 	s.Logger.Info("Role created with id [%s]", roleID)
+	if createRole.RoleType == "Script" {
+		err = s.setRoleDynamicScript(roleID, createRole.DynamicRoleScript)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set dynamic role script: %v", err)
+		}
+	}
 	if len(createRole.AdminRights) > 0 {
 		_, err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
 			RoleID:      roleDetails.RoleID,
@@ -222,10 +268,11 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 		return nil, fmt.Errorf("failed to add admin rights to role - [%v]", result)
 	}
 	s.Logger.Info("Admin rights added to role successfully")
-	return &rolesmodels.IdsecIdentityRoleAdminRights{
+	roleAdminRights := &rolesmodels.IdsecIdentityRoleAdminRights{
 		RoleID:      roleID,
 		AdminRights: addAdminRightsToRole.AdminRights,
-	}, nil
+	}
+	return roleAdminRights, nil
 }
 
 // RemoveAdminRightsFromRole removes admin rights from a role in the identity service.
@@ -287,11 +334,12 @@ func (s *IdsecIdentityRolesService) RoleAdminRights(getRoleAdminRights *rolesmod
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve role: %v", err)
 	}
-	return &rolesmodels.IdsecIdentityRoleAdminRights{
+	roleAdminRights := &rolesmodels.IdsecIdentityRoleAdminRights{
 		RoleID:      role.RoleID,
 		RoleName:    role.RoleName,
 		AdminRights: role.AdminRights,
-	}, nil
+	}
+	return roleAdminRights, nil
 }
 
 // UpdateRole updates an existing role in the identity service.
@@ -338,6 +386,12 @@ func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIden
 	role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleID: updateRole.RoleID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve updated role: %v", err)
+	}
+	if role.RoleType == "Script" && updateRole.DynamicRoleScript != "" {
+		err = s.setRoleDynamicScript(role.RoleID, updateRole.DynamicRoleScript)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set dynamic role script: %v", err)
+		}
 	}
 	if len(updateRole.AdminRights) > 0 {
 		err = s.RemoveAdminRightsFromRole(&rolesmodels.IdsecIdentityRemoveAdminRightsToRole{
@@ -541,6 +595,7 @@ func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRo
 		RoleID:      allRoles[0].Row.ID,
 		RoleName:    allRoles[0].Row.Name,
 		Description: allRoles[0].Row.Description,
+		RoleType:    allRoles[0].Row.RoleType,
 		AdminRights: func() []string {
 			var adminRights []string
 			for _, right := range allRoles[0].Row.AdminRights {
@@ -560,6 +615,7 @@ func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRole
 	}
 
 	roleMembersCountByType := make(map[string]int)
+	rolesCountByType := make(map[string]int)
 	rolesCount := 0
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -595,6 +651,10 @@ func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRole
 				for _, member := range roleMembers {
 					roleMembersCountByType[member.MemberType]++
 				}
+				if _, ok := rolesCountByType[r.RoleType]; !ok {
+					rolesCountByType[r.RoleType] = 0
+				}
+				rolesCountByType[r.RoleType]++
 				mu.Unlock()
 			}(role)
 		}
@@ -609,6 +669,7 @@ func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRole
 	stats := &rolesmodels.IdsecIdentityRolesStats{
 		RolesCount:             rolesCount,
 		RoleMembersCountByType: roleMembersCountByType,
+		RolesCountByType:       rolesCountByType,
 	}
 	s.Logger.Info("Retrieved identity roles statistics successfully")
 	return stats, nil

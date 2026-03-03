@@ -17,9 +17,11 @@ var ServiceConfig = services.IdsecServiceConfig{
 		},
 		actions.IdsecServiceActionTypeTerraformResource: {
 			policiesactions.TerraformActionPolicyResource,
+			policiesactions.TerraformActionPolicyOrderResource,
 		},
 		actions.IdsecServiceActionTypeTerraformDataSource: {
 			policiesactions.TerraformActionPolicyDataSource,
+			policiesactions.TerraformActionPolicyOrderDataSource,
 		},
 	},
 }

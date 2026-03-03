@@ -110,7 +110,8 @@ const (
 		"success": true,
 		"Result": {
 			"InEverybodyRole": true,
-			"OauthClient": false
+			"OauthClient": false,
+			"State": "None"
 		}
 	}`
 
@@ -118,7 +119,8 @@ const (
 		"success": true,
 		"Result": {
 			"InEverybodyRole": false,
-			"OauthClient": false
+			"OauthClient": false,
+			"State": "None"
 		}
 	}`
 
@@ -126,7 +128,8 @@ const (
 		"success": true,
 		"Result": {
 			"InEverybodyRole": false,
-			"OauthClient": true
+			"OauthClient": true,
+			"State": "None"
 		}
 	}`
 
@@ -286,8 +289,19 @@ func TestCreate(t *testing.T) {
 			},
 			expectedError: false,
 			setupMock: func(service *IdsecIdentityUsersService) {
+				callCount := 0
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					callCount++
+					if callCount == 1 {
+						return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					}
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsResponseJSON), nil
+				}
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
 				}
 			},
 		},
@@ -306,8 +320,19 @@ func TestCreate(t *testing.T) {
 			},
 			expectedError: false,
 			setupMock: func(service *IdsecIdentityUsersService) {
+				callCount := 0
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					callCount++
+					if callCount == 1 {
+						return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					}
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsResponseJSON), nil
+				}
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
 				}
 			},
 		},
@@ -326,8 +351,19 @@ func TestCreate(t *testing.T) {
 			},
 			expectedError: false,
 			setupMock: func(service *IdsecIdentityUsersService) {
+				callCount := 0
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					callCount++
+					if callCount == 1 {
+						return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					}
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsResponseJSON), nil
+				}
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
 				}
 				service.DirectoriesService.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil
@@ -348,16 +384,27 @@ func TestCreate(t *testing.T) {
 			mockPostError:    nil,
 			expectedUser: &usersmodels.IdsecIdentityUser{
 				UserID:          "user-123",
-				Username:        "service.user@example.com",
-				DisplayName:     "Service User",
-				Email:           "service.user@example.com",
+				Username:        "john.doe@example.com",
+				DisplayName:     "John Doe",
+				Email:           "john.doe@example.com",
 				InEverybodyRole: boolPtr(false),
 				IsServiceUser:   boolPtr(true),
 			},
 			expectedError: false,
 			setupMock: func(service *IdsecIdentityUsersService) {
+				callCount := 0
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					callCount++
+					if callCount == 1 {
+						return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					}
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsServiceUserResponseJSON), nil
+				}
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
 				}
 			},
 		},
@@ -374,17 +421,28 @@ func TestCreate(t *testing.T) {
 			mockPostError:    nil,
 			expectedUser: &usersmodels.IdsecIdentityUser{
 				UserID:          "user-123",
-				Username:        "oauth.client@example.com",
-				DisplayName:     "OAuth Client",
-				Email:           "oauth.client@example.com",
+				Username:        "john.doe@example.com",
+				DisplayName:     "John Doe",
+				Email:           "john.doe@example.com",
 				InEverybodyRole: boolPtr(false),
 				IsServiceUser:   boolPtr(true),
 				IsOauthClient:   boolPtr(true),
 			},
 			expectedError: false,
 			setupMock: func(service *IdsecIdentityUsersService) {
+				callCount := 0
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
-					return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					callCount++
+					if callCount == 1 {
+						return MockHTTPResponse(http.StatusOK, CreateUserResponseJSON), nil
+					}
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsOauthClientResponseJSON), nil
+				}
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
 				}
 			},
 		},

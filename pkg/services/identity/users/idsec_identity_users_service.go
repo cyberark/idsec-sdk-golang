@@ -26,6 +26,7 @@ const (
 	createUserURL        = "CDirectoryService/CreateUser"
 	deleteUserURL        = "CDirectoryService/DeleteUser"
 	updateUserURL        = "CDirectoryService/ChangeUser"
+	setUserStateURL      = "CDirectoryService/SetUserState"
 	removeUsersURL       = "UserMgmt/RemoveUsers"
 	resetUserPasswordURL = "UserMgmt/ResetUserPassword" // #nosec G101
 	userMgmtAttrsURL     = "UserMgmt/GetUserAttributes"
@@ -135,6 +136,35 @@ func (s *IdsecIdentityUsersService) parseTimestamp(rawTimestamp string) (*time.T
 	return lastLogin, nil
 }
 
+func (s *IdsecIdentityUsersService) setUserState(userID string, state string) error {
+	requestBody := map[string]interface{}{
+		"ID":    userID,
+		"state": state,
+	}
+	response, err := s.postOperation()(context.Background(), setUserStateURL, requestBody)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set user state - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return err
+	}
+	if res, ok := result["success"].(bool); !ok || !res {
+		return fmt.Errorf("failed to set user state - [%v]", result)
+	}
+	return nil
+}
+
 // CreateUser creates a new user in the identity service.
 func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIdentityCreateUser) (*usersmodels.IdsecIdentityUser, error) {
 	if createUser.Username == "" || createUser.Email == "" {
@@ -186,6 +216,10 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 		defaultSendSmsInvite := false
 		createUser.SendSmsInvite = &defaultSendSmsInvite
 	}
+	if createUser.PasswordNeverExpire == nil {
+		defaultPasswordNeverExpire := false
+		createUser.PasswordNeverExpire = &defaultPasswordNeverExpire
+	}
 	// Service user true overrides everybody role to false
 	if createUser.IsServiceUser != nil {
 		inEverybodyRole := !*createUser.IsServiceUser
@@ -213,6 +247,7 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 		"InEverybodyRole":         fmt.Sprintf("%v", *createUser.InEverybodyRole),
 		"InSysAdminRole":          fmt.Sprintf("%v", *createUser.InSysAdminRole),
 		"ForcePasswordChangeNext": fmt.Sprintf("%v", *createUser.ForcePasswordChangeNext),
+		"PasswordNeverExpire":     fmt.Sprintf("%v", *createUser.PasswordNeverExpire),
 		"SendEmailInvite":         fmt.Sprintf("%v", *createUser.SendEmailInvite),
 		"SendSmsInvite":           fmt.Sprintf("%v", *createUser.SendSmsInvite),
 		"ServiceUser":             *createUser.IsServiceUser,
@@ -244,20 +279,19 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 	}
 	userID := result["Result"].(string)
 	s.Logger.Info("User created successfully with id [%s]", userID)
-	return &usersmodels.IdsecIdentityUser{
-		UserID:          userID,
-		Username:        createUser.Username,
-		Password:        &createUser.Password,
-		DisplayName:     createUser.DisplayName,
-		Email:           createUser.Email,
-		MobileNumber:    createUser.MobileNumber,
-		Suffix:          createUser.Suffix,
-		InEverybodyRole: createUser.InEverybodyRole,
-		LastLogin:       nil,
-		IsServiceUser:   createUser.IsServiceUser,
-		IsOauthClient:   createUser.IsOauthClient,
-		UserAttributes:  map[string]string{},
-	}, nil
+	if createUser.State != "" && createUser.State != "None" {
+		err = s.setUserState(userID, createUser.State)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set user state after creation - [%v]", err)
+		}
+		s.Logger.Info("User state set to [%s] successfully", createUser.State)
+	}
+	user, err := s.User(&usersmodels.IdsecIdentityGetUser{UserID: userID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve created user details - [%v]", err)
+	}
+	user.Password = &createUser.Password
+	return user, nil
 }
 
 // UpdateUser updates an existing user in the identity service.
@@ -298,6 +332,9 @@ func (s *IdsecIdentityUsersService) UpdateUser(updateUser *usersmodels.IdsecIden
 	if updateUser.SendSmsInvite != nil {
 		updateMap["SendSmsInvite"] = fmt.Sprintf("%v", *updateUser.SendSmsInvite)
 	}
+	if updateUser.PasswordNeverExpire != nil {
+		updateMap["PasswordNeverExpire"] = fmt.Sprintf("%v", *updateUser.PasswordNeverExpire)
+	}
 	if updateUser.IsServiceUser != nil {
 		updateMap["ServiceUser"] = *updateUser.IsServiceUser
 		if *updateUser.IsServiceUser {
@@ -334,6 +371,13 @@ func (s *IdsecIdentityUsersService) UpdateUser(updateUser *usersmodels.IdsecIden
 		return nil, fmt.Errorf("failed to update user - [%v]", result)
 	}
 	s.Logger.Info("User updated successfully")
+	if updateUser.State != "" {
+		err = s.setUserState(updateUser.UserID, updateUser.State)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set user state after update - [%v]", err)
+		}
+		s.Logger.Info("User state updated to [%s] successfully", updateUser.State)
+	}
 	return s.User(&usersmodels.IdsecIdentityGetUser{UserID: updateUser.UserID})
 }
 
@@ -560,6 +604,7 @@ func (s *IdsecIdentityUsersService) User(user *usersmodels.IdsecIdentityGetUser)
 		InEverybodyRole: &isEverybodyRole,
 		IsServiceUser:   &isServiceUser,
 		IsOauthClient:   &isOauthClient,
+		State:           mgmtRes.attributes["State"].(string),
 		UserAttributes:  customRes.attributes.Attributes,
 	}, nil
 }

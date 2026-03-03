@@ -4,4 +4,5 @@ package models
 type IdsecIdentityRolesStats struct {
 	RolesCount             int            `json:"roles_count" mapstructure:"roles_count" desc:"Total number of roles"`
 	RoleMembersCountByType map[string]int `json:"role_members_count_by_type" mapstructure:"role_members_count_by_type" desc:"Number of role members by type (e.g., USER, GROUP)"`
+	RolesCountByType       map[string]int `json:"roles_count_by_type" mapstructure:"roles_count_by_type" desc:"Number of roles by type (e.g., PrincipalList, Script, Everybody)"`
 }

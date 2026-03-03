@@ -14,7 +14,8 @@ var TerraformActionRoleResource = &actions.IdsecServiceTerraformResourceActionDe
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &rolesmodels.IdsecIdentityRole{},
+		StateSchema:             &rolesmodels.IdsecIdentityRole{},
+		ComputedAsSetAttributes: []string{"admin_rights"},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,
@@ -64,7 +65,8 @@ var TerraformActionRoleAdminRightsResource = &actions.IdsecServiceTerraformResou
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &rolesmodels.IdsecIdentityRoleAdminRights{},
+		StateSchema:             &rolesmodels.IdsecIdentityRoleAdminRights{},
+		ComputedAsSetAttributes: []string{"admin_rights"},
 	},
 	SupportedOperations: []actions.IdsecServiceActionOperation{
 		actions.CreateOperation,
@@ -88,7 +90,8 @@ var TerraformActionRoleDataSource = &actions.IdsecServiceTerraformDataSourceActi
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &rolesmodels.IdsecIdentityRole{},
+		StateSchema:             &rolesmodels.IdsecIdentityRole{},
+		ComputedAsSetAttributes: []string{"admin_rights"},
 	},
 	DataSourceAction: "role",
 }
@@ -116,7 +119,8 @@ var TerraformActionRoleAdminRightsDataSource = &actions.IdsecServiceTerraformDat
 			ActionVersion:     1,
 			Schemas:           ActionToSchemaMap,
 		},
-		StateSchema: &rolesmodels.IdsecIdentityRoleAdminRights{},
+		StateSchema:             &rolesmodels.IdsecIdentityRoleAdminRights{},
+		ComputedAsSetAttributes: []string{"admin_rights"},
 	},
 	DataSourceAction: "role-admin-rights",
 }

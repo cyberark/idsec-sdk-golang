@@ -225,6 +225,7 @@ type RoleRow struct {
 	AdminRights []RoleAdminRight `json:"AdministrativeRights,omitempty" mapstructure:"AdministrativeRights"`
 	IsHidden    bool             `json:"IsHidden,omitempty" mapstructure:"IsHidden"`
 	Description string           `json:"Description,omitempty" mapstructure:"Description"`
+	RoleType    string           `json:"RoleType,omitempty" mapstructure:"RoleType"`
 }
 
 // RoleResult represents a single role result from directory queries.

@@ -4,7 +4,7 @@ package models
 type IdsecIdentityCreateUser struct {
 	Username                string `json:"username" mapstructure:"username" flag:"username" desc:"Name of the user to create" validate:"required"`
 	DisplayName             string `json:"display_name,omitempty" mapstructure:"display_name" flag:"display-name" desc:"Display name of the user"`
-	Email                   string `json:"email" mapstructure:"email" flag:"email" desc:"Email of the user" validate:"required,email"`
+	Email                   string `json:"email" mapstructure:"email" flag:"email" desc:"Email of the user" validate:"email"`
 	MobileNumber            string `json:"mobile_number,omitempty" mapstructure:"mobile_number" flag:"mobile-number" desc:"Mobile number of the user"`
 	Suffix                  string `json:"suffix,omitempty" mapstructure:"suffix" flag:"suffix" desc:"Suffix to use for the username, will use the default tenant one if not given"`
 	Password                string `json:"password" mapstructure:"password" flag:"password" desc:"Password of the user"`
@@ -15,4 +15,6 @@ type IdsecIdentityCreateUser struct {
 	SendSmsInvite           *bool  `json:"send_sms_invite,omitempty" mapstructure:"send_sms_invite" flag:"send-sms-invite" desc:"Whether to send an SMS invite to the user upon creation"`
 	IsServiceUser           *bool  `json:"is_service_user,omitempty" mapstructure:"is_service_user" flag:"is-service-user" desc:"Whether the user is a service user"`
 	IsOauthClient           *bool  `json:"is_oauth_client,omitempty" mapstructure:"is_oauth_client" flag:"is-oauth-client" desc:"Whether the user is an OAuth client"`
+	PasswordNeverExpire     *bool  `json:"password_never_expire,omitempty" mapstructure:"password_never_expire" flag:"password-never-expire" desc:"Whether the user's password never expires"`
+	State                   string `json:"state,omitempty" mapstructure:"state" flag:"state" desc:"State of the user to create, can be None, Locked, Disabled, or Expired" choices:"None,Locked,Disabled,Expired" default:"None"`
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -26,6 +27,7 @@ const (
 	deletePolicyURL      = "Policy/DeletePolicyBlock"
 	listPoliciesLinksURL = "Policy/GetNicePlinks"
 	getPolicyURL         = "Policy/GetPolicyBlock"
+	setPlinksOrderURL    = "Policy/setPlinksv2"
 )
 
 var defaultPolicySettings = map[string]interface{}{
@@ -46,6 +48,11 @@ var defaultPolicySettings = map[string]interface{}{
 	"/Core/Authentication/ContinueFailedSessions":          "true",
 	"/Core/Authentication/SkipMechsInFalseAdvance":         "true",
 	"/Core/Authentication/AllowLoginMfaCache":              "false",
+}
+
+var ignoredMessageIDs = []string{
+	"_I18N_AdminLockoutPolicyChange",
+	"_I18N_AdminLockoutPlinksChange",
 }
 
 // IdsecIdentityPoliciesService is the service for managing identity policies.
@@ -109,12 +116,12 @@ func (s *IdsecIdentityPoliciesService) refreshIdentityPoliciesAuth(client *commo
 	return nil
 }
 
-func (s *IdsecIdentityPoliciesService) listPolicyLinks() ([]map[string]interface{}, error) {
+func (s *IdsecIdentityPoliciesService) listPolicyLinks() ([]map[string]interface{}, string, error) {
 	s.Logger.Debug("Listing identity policy links")
 	response, err := s.postOperation()(context.Background(), listPoliciesLinksURL, map[string]interface{}{})
 	if err != nil {
 		s.Logger.Error("Error listing identity policy links: %s", err.Error())
-		return nil, err
+		return nil, "", err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -123,43 +130,49 @@ func (s *IdsecIdentityPoliciesService) listPolicyLinks() ([]map[string]interface
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list identity policy links - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, "", fmt.Errorf("failed to list identity policy links - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	var result map[string]interface{}
 	err = json.NewDecoder(response.Body).Decode(&result)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if res, ok := result["success"].(bool); !ok || !res {
-		return nil, fmt.Errorf("failed to list identity policy links - [%v]", result)
+		return nil, "", fmt.Errorf("failed to list identity policy links - [%v]", result)
 	}
 	if _, ok := result["Result"].(map[string]interface{}); !ok {
-		return nil, fmt.Errorf("failed to retrieve identity policy links - [%v]", result)
+		return nil, "", fmt.Errorf("failed to retrieve identity policy links - [%v]", result)
 	}
 	if _, ok := result["Result"].(map[string]interface{})["Results"].([]interface{}); !ok {
-		return nil, fmt.Errorf("failed to retrieve identity policy links - [%v]", result)
+		return nil, "", fmt.Errorf("failed to retrieve identity policy links - [%v]", result)
 	}
 	policyLinksData := result["Result"].(map[string]interface{})["Results"].([]interface{})
 	var policyLinks []map[string]interface{}
 	for _, policyLinkData := range policyLinksData {
 		policyLinkMap, ok := policyLinkData.(map[string]interface{})
 		if !ok {
-			return nil, fmt.Errorf("failed to parse identity policy link data - [%v]", policyLinkData)
+			return nil, "", fmt.Errorf("failed to parse identity policy link data - [%v]", policyLinkData)
 		}
 		policyLinkMapRow, ok := policyLinkMap["Row"].(map[string]interface{})
 		if !ok {
-			return nil, fmt.Errorf("failed to parse identity policy link row data - [%v]", policyLinkMap)
+			return nil, "", fmt.Errorf("failed to parse identity policy link row data - [%v]", policyLinkMap)
 		}
 		policyLinks = append(policyLinks, policyLinkMapRow)
 	}
-	return policyLinks, nil
+	revStamp, ok := result["Result"].(map[string]interface{})["RevStamp"]
+	if !ok {
+		return policyLinks, "", nil
+	}
+	return policyLinks, revStamp.(string), nil
 }
 
 // CreatePolicy creates a new identity policy.
 func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.IdsecIdentityCreatePolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Creating a new identity policy")
 	if createPolicy.AuthProfileName == "" {
-		return nil, fmt.Errorf("auth profile name must be supplied")
+		if createPolicy.Settings == nil || createPolicy.Settings["/Core/Authentication/AuthenticationRulesDefaultProfileId"] == nil {
+			return nil, fmt.Errorf("auth profile name must be supplied")
+		}
 	}
 	isActive := true
 	if createPolicy.PolicyStatus != "" {
@@ -186,7 +199,7 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 
 	// Resolve policy links in parallel
 	go func() {
-		links, err := s.listPolicyLinks()
+		links, _, err := s.listPolicyLinks()
 		policyLinksChan <- policyLinksResult{links: links, err: err}
 	}()
 
@@ -258,7 +271,43 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 			newPolicyLink["LinkType"] = "Global"
 		}
 	}
-	policyLinks = append([]map[string]interface{}{newPolicyLink}, policyLinks...)
+	inserted := false
+	if createPolicy.BeforePolicy != "" {
+		for i, policyLink := range policyLinks {
+			policySet, ok := policyLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+			}
+			policySet = policySet[len("/Policy/"):]
+			if policySet == createPolicy.BeforePolicy {
+				// Insert new policy link before the matched policy
+				policyLinks = append(policyLinks[:i], append([]map[string]interface{}{newPolicyLink}, policyLinks[i:]...)...)
+				inserted = true
+				break
+			}
+		}
+	} else if createPolicy.AfterPolicy != "" {
+		for i, policyLink := range policyLinks {
+			policySet, ok := policyLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+			}
+			policySet = policySet[len("/Policy/"):]
+			if policySet == createPolicy.AfterPolicy {
+				// Insert new policy link after the matched policy
+				if i == len(policyLinks)-1 {
+					policyLinks = append(policyLinks, newPolicyLink)
+				} else {
+					policyLinks = append(policyLinks[:i+1], append([]map[string]interface{}{newPolicyLink}, policyLinks[i+1:]...)...)
+				}
+				inserted = true
+				break
+			}
+		}
+	}
+	if !inserted {
+		policyLinks = append([]map[string]interface{}{newPolicyLink}, policyLinks...)
+	}
 	policySettings := map[string]interface{}{}
 	if !createPolicy.DoNotUseDefaults {
 		policySettings = maps.Clone(defaultPolicySettings)
@@ -299,6 +348,18 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 		return nil, err
 	}
 	if res, ok := result["success"].(bool); !ok || !res {
+		if messageID, ok := result["MessageID"].(string); ok {
+			if slices.Contains(ignoredMessageIDs, messageID) {
+				if message, ok := result["Message"].(string); ok {
+					s.Logger.Warning("Received ignored MessageID [%s] with message [%s] when creating identity policy, attempting to retrieve policy details", messageID, message)
+				} else {
+					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
+				}
+				return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+					PolicyName: createPolicy.PolicyName,
+				})
+			}
+		}
 		return nil, fmt.Errorf("failed to create identity policy - [%v]", result)
 	}
 	return s.Policy(&policymodels.IdsecIdentityGetPolicy{
@@ -348,7 +409,7 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 
 	// Fetch policy links in parallel
 	go func() {
-		links, err := s.listPolicyLinks()
+		links, _, err := s.listPolicyLinks()
 		policyLinksChan <- policyLinksResult{links: links, err: err}
 	}()
 
@@ -469,6 +530,81 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 			}
 		}
 	}
+
+	// Update policy order if BeforePolicy or AfterPolicy is provided
+	if updatePolicy.BeforePolicy != "" || updatePolicy.AfterPolicy != "" {
+		// Remove existing policy link
+		var updatedLinks []map[string]interface{}
+		for _, policyLink := range policyLinks {
+			policySet, ok := policyLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+			}
+			policySet = policySet[len("/Policy/"):]
+			if policySet != updatePolicy.PolicyName {
+				updatedLinks = append(updatedLinks, policyLink)
+			}
+		}
+
+		// Re-insert policy link at new position
+		newPolicyLink := map[string]interface{}{
+			"Description":     existingPolicy.Description,
+			"PolicySet":       fmt.Sprintf("/Policy/%s", existingPolicy.PolicyName),
+			"Priority":        1,
+			"Filters":         []interface{}{},
+			"Allowedpolicies": []interface{}{},
+		}
+		if !isActive {
+			newPolicyLink["LinkType"] = "Inactive"
+		} else {
+			if len(roleIDsRes.ids) > 0 {
+				newPolicyLink["LinkType"] = "Role"
+				newPolicyLink["Params"] = roleIDsRes.ids
+			} else {
+				newPolicyLink["LinkType"] = "Global"
+			}
+		}
+
+		inserted := false
+		if updatePolicy.BeforePolicy != "" {
+			for i, policyLink := range updatedLinks {
+				policySet, ok := policyLink["PolicySet"].(string)
+				if !ok {
+					return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+				}
+				policySet = policySet[len("/Policy/"):]
+				if policySet == updatePolicy.BeforePolicy {
+					// Insert new policy link before the matched policy
+					updatedLinks = append(updatedLinks[:i], append([]map[string]interface{}{newPolicyLink}, updatedLinks[i:]...)...)
+					inserted = true
+					break
+				}
+			}
+		} else if updatePolicy.AfterPolicy != "" {
+			for i, policyLink := range updatedLinks {
+				policySet, ok := policyLink["PolicySet"].(string)
+				if !ok {
+					return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+				}
+				policySet = policySet[len("/Policy/"):]
+				if policySet == updatePolicy.AfterPolicy {
+					// Insert new policy link after the matched policy
+					if i == len(updatedLinks)-1 {
+						updatedLinks = append(updatedLinks, newPolicyLink)
+					} else {
+						updatedLinks = append(updatedLinks[:i+1], append([]map[string]interface{}{newPolicyLink}, updatedLinks[i+1:]...)...)
+					}
+					inserted = true
+					break
+				}
+			}
+		}
+		if !inserted {
+			updatedLinks = append([]map[string]interface{}{newPolicyLink}, updatedLinks...)
+		}
+		policyLinks = updatedLinks
+	}
+
 	policyBlock := map[string]interface{}{
 		"plinks": policyLinks,
 		"policy": map[string]interface{}{
@@ -500,9 +636,54 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 		return nil, err
 	}
 	if res, ok := result["success"].(bool); !ok || !res {
+		if messageID, ok := result["MessageID"].(string); ok {
+			if slices.Contains(ignoredMessageIDs, messageID) {
+				if message, ok := result["Message"].(string); ok {
+					s.Logger.Warning("Received ignored MessageID [%s] with message [%s] when creating identity policy, attempting to retrieve policy details", messageID, message)
+				} else {
+					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
+				}
+				return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+					PolicyName: updatePolicy.PolicyName,
+				})
+			}
+		}
 		return nil, fmt.Errorf("failed to update identity policy - [%v]", result)
 	}
-	return existingPolicy, nil
+	if updatePolicy.BeforePolicy != "" || updatePolicy.AfterPolicy != "" {
+		policyNames := make([]string, len(policyLinks))
+		for i, policyLink := range policyLinks {
+			policySet, ok := policyLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+			}
+			policyNames[i] = policySet[len("/Policy/"):]
+		}
+		_, err := s.SetPoliciesOrder(&policymodels.IdsecIdentitySetPoliciesOrder{
+			PoliciesOrder: policyNames,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to set identity policy order after update - [%v]", err)
+		}
+	}
+	return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+		PolicyName: updatePolicy.PolicyName,
+	})
+}
+
+// UpdateDefaultPolicy updates the default identity policy. This is a convenience method that calls UpdatePolicy with the policy name set to "Default Policy".
+func (s *IdsecIdentityPoliciesService) UpdateDefaultPolicy(updatePolicy *policymodels.IdsecIdentityUpdateDefaultPolicy) (*policymodels.IdsecIdentityPolicy, error) {
+	s.Logger.Debug("Updating default identity policy")
+	return s.UpdatePolicy(&policymodels.IdsecIdentityUpdatePolicy{
+		PolicyName:      "Default Policy",
+		PolicyStatus:    updatePolicy.PolicyStatus,
+		Description:     updatePolicy.Description,
+		RoleNames:       updatePolicy.RoleNames,
+		AuthProfileName: updatePolicy.AuthProfileName,
+		Settings:        updatePolicy.Settings,
+		BeforePolicy:    updatePolicy.BeforePolicy,
+		AfterPolicy:     updatePolicy.AfterPolicy,
+	})
 }
 
 // DeletePolicy deletes an identity policy.
@@ -534,6 +715,16 @@ func (s *IdsecIdentityPoliciesService) DeletePolicy(deletePolicy *policymodels.I
 		return err
 	}
 	if res, ok := result["success"].(bool); !ok || !res {
+		if messageID, ok := result["MessageID"].(string); ok {
+			if slices.Contains(ignoredMessageIDs, messageID) {
+				if message, ok := result["Message"].(string); ok {
+					s.Logger.Warning("Received ignored MessageID [%s] with message [%s] when creating identity policy, attempting to retrieve policy details", messageID, message)
+				} else {
+					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
+				}
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to delete identity policy - [%v]", result)
 	}
 	return nil
@@ -563,7 +754,7 @@ func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdent
 
 	// Fetch policy links in parallel
 	go func() {
-		links, err := s.listPolicyLinks()
+		links, _, err := s.listPolicyLinks()
 		policyLinksChan <- policyLinksResult{links: links, err: err}
 	}()
 
@@ -759,7 +950,7 @@ func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdent
 
 // ListPolicies lists all identity policies with optional filtering.
 func (s *IdsecIdentityPoliciesService) ListPolicies() ([]*policymodels.IdsecIdentityPolicyInfo, error) {
-	policyLinks, err := s.listPolicyLinks()
+	policyLinks, _, err := s.listPolicyLinks()
 	if err != nil {
 		return nil, err
 	}
@@ -819,6 +1010,115 @@ func (s *IdsecIdentityPoliciesService) ListPoliciesBy(filters *policymodels.Idse
 		}
 	}
 	return filteredPolicies, nil
+}
+
+// SetPoliciesOrder sets the order of identity policies based on the provided order of policy names. Policies that are not included in the provided order will be appended at the end in their existing order. The method ensures that the provided order is valid and corresponds to existing policies. If the operation is successful, the new order will be reflected in subsequent list operations.
+func (s *IdsecIdentityPoliciesService) SetPoliciesOrder(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
+	s.Logger.Debug("Setting identity policies order")
+	if len(policiesOrder.PoliciesOrder) == 0 {
+		return nil, fmt.Errorf("no policies provided for setting order")
+	}
+	policyLinks, revStamp, err := s.listPolicyLinks()
+	if err != nil {
+		return nil, err
+	}
+	// Reorder policy links based on provided order
+	var updatedLinks []map[string]interface{}
+	for _, policyName := range policiesOrder.PoliciesOrder {
+		for _, policyLink := range policyLinks {
+			policySet, ok := policyLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+			}
+			policySet = policySet[len("/Policy/"):]
+			if policySet == policyName {
+				updatedLinks = append(updatedLinks, policyLink)
+				break
+			}
+		}
+	}
+	// Any other policies will be inserted at the end in existing order
+	for _, policyLink := range policyLinks {
+		policySet, ok := policyLink["PolicySet"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+		}
+		policySet = policySet[len("/Policy/"):]
+		found := false
+		for _, updatedLink := range updatedLinks {
+			updatedPolicySet, ok := updatedLink["PolicySet"].(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse policy set from updated policy link - [%v]", updatedLink)
+			}
+			updatedPolicySet = updatedPolicySet[len("/Policy/"):]
+			if updatedPolicySet == policySet {
+				found = true
+				break
+			}
+		}
+		if !found {
+			updatedLinks = append(updatedLinks, policyLink)
+		}
+	}
+	if len(updatedLinks) != len(policyLinks) {
+		return nil, fmt.Errorf("provided policies order does not match existing policies")
+	}
+	policyBlock := map[string]interface{}{
+		"Plinks":   updatedLinks,
+		"RevStamp": revStamp,
+	}
+	response, err := s.postOperation()(context.Background(), setPlinksOrderURL, policyBlock)
+	if err != nil {
+		s.Logger.Error("Error setting identity policies order: %s", err.Error())
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to set identity policies order - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	if res, ok := result["success"].(bool); !ok || !res {
+		if messageID, ok := result["MessageID"].(string); ok {
+			if slices.Contains(ignoredMessageIDs, messageID) {
+				if message, ok := result["Message"].(string); ok {
+					s.Logger.Warning("Received ignored MessageID [%s] with message [%s] when creating identity policy, attempting to retrieve policy details", messageID, message)
+				} else {
+					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
+				}
+				return s.PoliciesOrder()
+			}
+		}
+		return nil, fmt.Errorf("failed to set identity policies order - [%v]", result)
+	}
+	return s.PoliciesOrder()
+}
+
+// PoliciesOrder retrieves the current order of identity policies. The order is determined based on the policy links and their priority. The method returns a list of policy names in the order they are applied, which can be used for display purposes or to verify the current configuration.
+func (s *IdsecIdentityPoliciesService) PoliciesOrder() (*policymodels.IdsecIdentityPoliciesOrder, error) {
+	s.Logger.Debug("Getting identity policies order")
+	policyLinks, _, err := s.listPolicyLinks()
+	if err != nil {
+		return nil, err
+	}
+	order := &policymodels.IdsecIdentityPoliciesOrder{}
+	for _, policyLink := range policyLinks {
+		policySet, ok := policyLink["PolicySet"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse policy set from policy link - [%v]", policyLink)
+		}
+		policySet = policySet[len("/Policy/"):]
+		order.PoliciesOrder = append(order.PoliciesOrder, policySet)
+	}
+	return order, nil
 }
 
 // PoliciesStats retrieves statistics related to identity policies.
