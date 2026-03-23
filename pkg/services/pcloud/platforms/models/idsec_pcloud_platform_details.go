@@ -4,7 +4,7 @@ package models
 //
 // This API endpoint returns a different structure than the List Platforms API.
 type IdsecPCloudPlatformDetails struct {
-	PlatformID string                 `json:"platform_id" mapstructure:"Unique string ID of the platform" desc:"Platform ID" flag:"platform-id"`
+	PlatformID string                 `json:"platform_id" mapstructure:"platform_id" desc:"Unique string ID of the platform" flag:"platform-id"`
 	Active     bool                   `json:"active" mapstructure:"active" desc:"Whether the platform is active" flag:"active"`
 	Details    map[string]interface{} `json:"details" mapstructure:"details" desc:"Platform configuration details" flag:"details"`
 }

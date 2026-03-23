@@ -7,4 +7,5 @@ var ActionToSchemaMap = map[string]interface{}{
 	"list-directories":          &directoriesmodels.IdsecIdentityListDirectories{},
 	"list-directories-entities": &directoriesmodels.IdsecIdentityListDirectoriesEntities{},
 	"tenant-default-suffix":     nil,
+	"tenant-suffixes":           nil,
 }

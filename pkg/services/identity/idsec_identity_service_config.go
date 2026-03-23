@@ -8,6 +8,7 @@ import (
 	identitypoliciesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies/actions"
 	identityrolesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/actions"
 	identityusersactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/actions"
+	identitywebappsactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps/actions"
 )
 
 // CLIAction is a struct that defines the identity action for the Idsec service CLI.
@@ -24,6 +25,7 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 		identityusersactions.CLIAction,
 		identityauthprofilesactions.CLIAction,
 		identitypoliciesactions.CLIAction,
+		identitywebappsactions.CLIAction,
 	},
 }
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"unicode"
 
 	"github.com/iancoleman/strcase"
 	"golang.org/x/text/cases"
@@ -37,7 +38,21 @@ func resolveFieldsSquashed(schema reflect.Type) []reflect.StructField {
 	return fields
 }
 
-func findFieldByName(schema reflect.Type, name string) *reflect.StructField {
+// FindFieldByName finds a struct field by name using various naming conventions.
+//
+// This function searches for a field in the given schema type by checking multiple
+// naming conventions including struct tags (mapstructure, json, flag) and field names.
+// It handles squashed struct fields and performs case-insensitive matching.
+//
+// Parameters:
+//   - schema: The reflect.Type to search for the field
+//   - name: The field name to search for (supports snake_case, kebab-case, etc.)
+//
+// Returns a pointer to the reflect.StructField if found, nil otherwise.
+//
+// Note: This function is exported for internal SDK use (e.g., validation tests)
+// but is not intended for external consumption.
+func FindFieldByName(schema reflect.Type, name string) *reflect.StructField {
 	caser := cases.Title(language.English)
 	flagNameTitled := strings.ReplaceAll(strings.ReplaceAll(caser.String(name), "-", ""), "_", "")
 	if schema.Kind() == reflect.Pointer {
@@ -58,6 +73,58 @@ func findFieldByName(schema reflect.Type, name string) *reflect.StructField {
 		}
 	}
 	return nil
+}
+
+// ConvertKeyToPascalCase converts a string key to PascalCase format.
+//
+// This function handles various input formats including snake_case, kebab-case,
+// camelCase, and space-separated strings. It splits the input on delimiters
+// (underscore, hyphen, space) and word boundaries, then capitalizes the first
+// letter of each word and lowercases the rest.
+//
+// Parameters:
+//   - key: The string to convert to PascalCase format
+//
+// Returns the PascalCase version of the input key. Returns empty string if input is empty.
+//
+// Example:
+//
+//	ConvertKeyToPascalCase("add-policy")      // returns "AddPolicy"
+//	ConvertKeyToPascalCase("list_policies")   // returns "ListPolicies"
+//	ConvertKeyToPascalCase("get user info")   // returns "GetUserInfo"
+func ConvertKeyToPascalCase(key string) string {
+	if key == "" {
+		return key
+	}
+	var words []string
+	var current []rune
+	flush := func() {
+		if len(current) > 0 {
+			words = append(words, string(current))
+			current = nil
+		}
+	}
+	runes := []rune(key)
+	for i, r := range runes {
+		if r == '_' || r == '-' || unicode.IsSpace(r) {
+			flush()
+			continue
+		}
+		if i > 0 && unicode.IsUpper(r) && len(current) > 0 && unicode.IsLower(current[len(current)-1]) {
+			flush()
+		}
+		current = append(current, r)
+	}
+	flush()
+	for i, w := range words {
+		r := []rune(w)
+		r[0] = unicode.ToUpper(r[0])
+		for j := 1; j < len(r); j++ {
+			r[j] = unicode.ToLower(r[j])
+		}
+		words[i] = string(r)
+	}
+	return strings.Join(words, "")
 }
 
 // SerializeResponseToJSON takes an io.ReadCloser response and serializes it to a JSON string.
@@ -121,7 +188,7 @@ func ConvertToSnakeCase(data interface{}, schema *reflect.Type) interface{} {
 			snakeKey := strcase.ToSnake(key)
 			var innerFieldType *reflect.Type
 			if schema != nil {
-				innerField := findFieldByName(*schema, key)
+				innerField := FindFieldByName(*schema, key)
 				if innerField != nil {
 					if innerField.Type.Kind() == reflect.Map && innerField.Type.Key().Kind() == reflect.String && innerField.Type.Elem().Kind() == reflect.Struct {
 						snakeKey = key
@@ -182,7 +249,7 @@ func ConvertToCamelCase(data interface{}, schema *reflect.Type) interface{} {
 			camelKey := strcase.ToLowerCamel(key)
 			var innerFieldType *reflect.Type
 			if schema != nil {
-				innerField := findFieldByName(*schema, key)
+				innerField := FindFieldByName(*schema, key)
 				if innerField != nil {
 					if innerField.Type.Kind() == reflect.Map && innerField.Type.Key().Kind() == reflect.String && innerField.Type.Elem().Kind() == reflect.Struct {
 						camelKey = key
@@ -209,6 +276,67 @@ func ConvertToCamelCase(data interface{}, schema *reflect.Type) interface{} {
 	case []interface{}:
 		for i, item := range v {
 			v[i] = ConvertToCamelCase(item, schema)
+		}
+		return v
+	default:
+		return v
+	}
+}
+
+// ConvertToPascalCase converts a map with any key format to PascalCase keys.
+//
+// ConvertToPascalCase recursively processes data structures, converting all string keys
+// to PascalCase format. It supports nested maps, slices, and arbitrary data types. When
+// a schema is provided, it uses struct field information to determine whether specific
+// fields should be converted or preserved as-is (e.g., for map fields with string keys
+// that should not be converted).
+//
+// Parameters:
+//   - data: The data structure to convert (supports maps, slices, and primitive types)
+//   - schema: Optional reflect.Type pointer for schema-aware conversion (nil for simple conversion)
+//
+// Returns the converted data structure with PascalCase keys.
+//
+// Example:
+//
+//	input := map[string]interface{}{"first_name": "John", "last_name": "Doe"}
+//	result := ConvertToPascalCase(input, nil)
+//	// result: map[string]interface{}{"FirstName": "John", "LastName": "Doe"}s
+func ConvertToPascalCase(data interface{}, schema *reflect.Type) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		camelMap := make(map[string]interface{})
+		for key, value := range v {
+			pascalKey := ConvertKeyToPascalCase(key)
+			var innerFieldType *reflect.Type
+			if schema != nil {
+				innerField := FindFieldByName(*schema, key)
+				if innerField != nil {
+					if innerField.Type.Kind() == reflect.Map && innerField.Type.Key().Kind() == reflect.String && innerField.Type.Elem().Kind() == reflect.Struct {
+						pascalKey = key
+					}
+					if innerField.Type.Kind() == reflect.Slice || innerField.Type.Kind() == reflect.Array || innerField.Type.Kind() == reflect.Map {
+						elem := innerField.Type.Elem()
+						innerFieldType = &elem
+					} else {
+						innerFieldType = &innerField.Type
+					}
+				} else {
+					actualSchema := *schema
+					if actualSchema.Kind() == reflect.Ptr {
+						actualSchema = actualSchema.Elem()
+					}
+					if actualSchema.Kind() == reflect.Struct {
+						pascalKey = key
+					}
+				}
+			}
+			camelMap[pascalKey] = ConvertToPascalCase(value, innerFieldType)
+		}
+		return camelMap
+	case []interface{}:
+		for i, item := range v {
+			v[i] = ConvertToPascalCase(item, schema)
 		}
 		return v
 	default:
@@ -376,6 +504,138 @@ func SerializeJSONCamelSchema(item interface{}, schema *reflect.Type) (map[strin
 		return nil, err
 	}
 	return ConvertToCamelCase(result, schema).(map[string]interface{}), nil
+}
+
+// SerializeJSONPascal takes an interface and serializes it into a map with PascalCase keys.
+//
+// SerializeJSONPascal converts the provided data structure to JSON, then parses it
+// back into a map with all keys converted to PascalCase format. This function is
+// useful for preparing data for APIs or systems that expect PascalCase key naming
+// conventions.
+//
+// Parameters:
+//   - item: The data structure to serialize (must be JSON-serializable)
+//
+// Returns a map with PascalCase keys and any error encountered during JSON
+// marshaling or unmarshaling.
+//
+// Example:
+//
+//	input := struct{ FirstName string }{FirstName: "John"}
+//	result, err := SerializeJSONPascal(input)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// result: map[string]interface{}{"FirstName": "John"}
+func SerializeJSONPascal(item interface{}) (map[string]interface{}, error) {
+	resultBytes, err := json.Marshal(item)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(resultBytes, &result)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertToPascalCase(result, nil).(map[string]interface{}), nil
+}
+
+// SerializeJSONPascalSchema takes an interface and serializes it into a map with PascalCase keys.
+//
+// SerializeJSONPascalSchema converts the provided data structure to JSON, then parses it
+// back into a map with all keys converted to PascalCase format using schema-aware
+// conversion. The schema parameter allows for more intelligent key conversion by
+// considering struct field types and tags, which helps preserve certain fields
+// (like maps with string keys) that should not be converted.
+//
+// Parameters:
+//   - item: The data structure to serialize (must be JSON-serializable)
+//   - schema: Pointer to reflect.Type for schema-aware conversion (can be nil)
+//
+// Returns a map with PascalCase keys and any error encountered during JSON
+// marshaling or unmarshaling.
+//
+// Example:
+//
+//	var schemaType reflect.Type = reflect.TypeOf(MyStruct{})
+//	input := struct{ FirstName string }{FirstName: "John"}
+//	result, err := SerializeJSONPascalSchema(input, &schemaType)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// result: map[string]interface{}{"FirstName": "John"}
+func SerializeJSONPascalSchema(item interface{}, schema *reflect.Type) (map[string]interface{}, error) {
+	resultBytes, err := json.Marshal(item)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(resultBytes, &result)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertToPascalCase(result, schema).(map[string]interface{}), nil
+}
+
+// DeserializeJSONPascal takes an io.ReadCloser response and deserializes it into a map with PascalCase keys.
+//
+// DeserializeJSONPascal reads JSON data from the provided io.ReadCloser, parses it,
+// and converts all keys from the original format to PascalCase. This function is
+// useful for normalizing JSON responses that may have keys in snake_case, camelCase,
+// or other formats to a consistent PascalCase format.
+//
+// Parameters:
+//   - response: The io.ReadCloser containing JSON data to deserialize
+//
+// Returns the deserialized data with PascalCase keys and any error encountered
+// during JSON decoding.
+//
+// Example:
+//
+//	data, err := DeserializeJSONPascal(httpResponse.Body)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// data contains the JSON with PascalCase keys
+func DeserializeJSONPascal(response io.ReadCloser) (interface{}, error) {
+	var result interface{}
+	err := json.NewDecoder(response).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertToPascalCase(result, nil), nil
+}
+
+// DeserializeJSONPascalSchema takes an io.ReadCloser response and deserializes it into a map with PascalCase keys.
+//
+// DeserializeJSONPascalSchema reads JSON data from the provided io.ReadCloser, parses it,
+// and converts all keys from the original format to PascalCase using schema-aware
+// conversion. The schema parameter allows for more intelligent key conversion by
+// considering struct field types and tags, which helps preserve certain fields
+// (like maps with string keys) that should not be converted.
+//
+// Parameters:
+//   - response: The io.ReadCloser containing JSON data to deserialize
+//   - schema: Pointer to reflect.Type for schema-aware conversion (can be nil)
+//
+// Returns the deserialized data with PascalCase keys and any error encountered
+// during JSON decoding.
+//
+// Example:
+//
+//	var schemaType reflect.Type = reflect.TypeOf(MyStruct{})
+//	data, err := DeserializeJSONPascalSchema(httpResponse.Body, &schemaType)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// data contains the JSON with schema-aware PascalCase keys
+func DeserializeJSONPascalSchema(response io.ReadCloser, schema *reflect.Type) (interface{}, error) {
+	var result interface{}
+	err := json.NewDecoder(response).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	return ConvertToPascalCase(result, schema), nil
 }
 
 // Ptr is a generic helper function that returns a pointer to the given value.

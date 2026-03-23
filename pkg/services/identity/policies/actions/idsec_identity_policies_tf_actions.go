@@ -49,6 +49,7 @@ var TerraformActionPolicyOrderResource = &actions.IdsecServiceTerraformResourceA
 		actions.CreateOperation,
 		actions.ReadOperation,
 		actions.UpdateOperation,
+		actions.StateOperation,
 	},
 	ActionsMappings: map[actions.IdsecServiceActionOperation]string{
 		actions.CreateOperation: "set-policies-order",

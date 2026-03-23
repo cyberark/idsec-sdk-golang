@@ -12,6 +12,7 @@ import (
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/common/identity"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	identitycommon "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/common"
 	directoriesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/models"
 
 	"io"
@@ -66,6 +67,13 @@ func NewIdsecIdentityDirectoriesService(authenticators ...auth.IdsecAuth) (*Idse
 	if !isExist {
 		return nil, fmt.Errorf("%s env is not supported", awsEnvList.AwsEnv)
 	}
+	// Update identity URL accordingly
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
+	}
+	client.BaseURL = baseURL
+
 	identityDirectoriesService.client = client
 	identityDirectoriesService.ispAuth = ispAuth
 	identityDirectoriesService.IdsecBaseService = baseService
@@ -152,6 +160,15 @@ func (s *IdsecIdentityDirectoriesService) ListDirectories(listDirectories *direc
 // ListDirectoriesEntities retrieves the entities for the specified directories.
 func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectoriesEntities *directoriesmodels.IdsecIdentityListDirectoriesEntities) (<-chan *IdsecIdentityEntitiesPage, error) {
 	s.Logger.Info("Listing directories entities")
+	if listDirectoriesEntities.PageSize <= 0 {
+		listDirectoriesEntities.PageSize = directoriesmodels.DefaultListDirectoriesEntitiesPageSize
+	}
+	if listDirectoriesEntities.Limit <= 0 {
+		listDirectoriesEntities.Limit = directoriesmodels.DefaultListDirectoriesEntitiesLimit
+	}
+	if listDirectoriesEntities.MaxPageCount == 0 {
+		listDirectoriesEntities.MaxPageCount = directoriesmodels.DefaultListDirectoriesEntitiesMaxPageCount
+	}
 	directories, err := s.ListDirectories(&directoriesmodels.IdsecIdentityListDirectories{
 		Directories: listDirectoriesEntities.Directories,
 	})
@@ -229,8 +246,10 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 					DisplayName:              user.Row.DisplayName,
 					ServiceInstanceLocalized: user.Row.ServiceInstanceLocalized,
 				},
-				Email:       user.Row.Email,
-				Description: user.Row.Description,
+				Email:                user.Row.Email,
+				Description:          user.Row.Description,
+				DirectoryServiceUuid: user.Row.DirectoryServiceUuid,
+				ExternalUuid:         user.Row.ExternalUuid,
 			}
 			var userEntityIfs directoriesmodels.IdsecIdentityEntity = userEntity
 			entities = append(entities, &userEntityIfs)
@@ -247,6 +266,8 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 					DisplayName:              group.Row.DisplayName,
 					ServiceInstanceLocalized: group.Row.ServiceInstanceLocalized,
 				},
+				DirectoryServiceUuid: group.Row.DirectoryServiceUuid,
+				ExternalUuid:         group.Row.ExternalUuid,
 			}
 			var groupEntityIfs directoriesmodels.IdsecIdentityEntity = groupEntity
 			entities = append(entities, &groupEntityIfs)
@@ -288,12 +309,10 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 	return output, nil
 }
 
-// TenantDefaultSuffix retrieves the default tenant suffix for the identity directories service.
-func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) {
-	s.Logger.Info("Discovering default tenant suffix")
+func (s *IdsecIdentityDirectoriesService) tenantSuffixes() ([]string, error) {
 	response, err := s.postTenantSuffixOperation()(context.Background(), tenantSuffixURL, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -302,17 +321,17 @@ func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) 
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get tenant default suffix - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to get tenant default suffix - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	var result map[string]interface{}
 	err = json.NewDecoder(response.Body).Decode(&result)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	tenantSuffixesResult := identity.GetTenantSuffixResult{}
 	err = mapstructure.Decode(result, &tenantSuffixesResult)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var tenantSuffixesList []string
 	for _, res := range tenantSuffixesResult.Result["Results"].([]interface{}) {
@@ -322,8 +341,12 @@ func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) 
 		}
 	}
 	if len(tenantSuffixesList) == 0 {
-		return "", fmt.Errorf("no tenant suffix has been found")
+		return nil, fmt.Errorf("no tenant suffix has been found")
 	}
+	return tenantSuffixesList, nil
+}
+
+func (s *IdsecIdentityDirectoriesService) resolveDefaultSuffix(tenantSuffixesList []string) string {
 	var filteredUrls []string
 	for _, suffix := range tenantSuffixesList {
 		if commonmodels.CheckIfIdentityGeneratedSuffix(suffix) || strings.Contains(suffix, s.env.RootDomain) {
@@ -331,9 +354,32 @@ func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) 
 		}
 	}
 	if len(filteredUrls) > 0 {
-		return filteredUrls[0], nil
+		return filteredUrls[0]
 	}
-	return tenantSuffixesList[0], nil
+	return tenantSuffixesList[0]
+}
+
+// TenantDefaultSuffix retrieves the default tenant suffix for the identity directories service.
+func (s *IdsecIdentityDirectoriesService) TenantDefaultSuffix() (string, error) {
+	s.Logger.Info("Discovering default tenant suffix")
+	tenantSuffixesList, err := s.tenantSuffixes()
+	if err != nil {
+		return "", err
+	}
+	return s.resolveDefaultSuffix(tenantSuffixesList), nil
+}
+
+// TenantSuffixes retrieves the tenant suffixes information, including the list of tenant default suffixes and the default tenant suffix, for the identity directories service.
+func (s *IdsecIdentityDirectoriesService) TenantSuffixes() (*directoriesmodels.IdsecIdentityTenantSuffixes, error) {
+	tenantSuffixesList, err := s.tenantSuffixes()
+	if err != nil {
+		return nil, err
+	}
+	defaultSuffix := s.resolveDefaultSuffix(tenantSuffixesList)
+	return &directoriesmodels.IdsecIdentityTenantSuffixes{
+		Suffixes:      tenantSuffixesList,
+		DefaultSuffix: defaultSuffix,
+	}, nil
 }
 
 // ServiceConfig returns the service configuration for the IdsecIdentityDirectoriesService.

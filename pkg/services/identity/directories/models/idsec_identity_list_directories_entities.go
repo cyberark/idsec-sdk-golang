@@ -1,5 +1,11 @@
 package models
 
+const (
+	DefaultListDirectoriesEntitiesPageSize     = 10000
+	DefaultListDirectoriesEntitiesLimit        = 10000
+	DefaultListDirectoriesEntitiesMaxPageCount = -1
+)
+
 // IdsecIdentityListDirectoriesEntities represents the schema for listing directory entities.
 type IdsecIdentityListDirectoriesEntities struct {
 	Directories  []string `json:"directories,omitempty" mapstructure:"directories" flag:"directories" desc:"Directories to search on"`

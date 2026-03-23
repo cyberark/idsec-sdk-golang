@@ -744,7 +744,7 @@ func TestFindFieldByName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := findFieldByName(tt.schema, tt.fieldName)
+			result := FindFieldByName(tt.schema, tt.fieldName)
 			if tt.expectNil {
 				if result != nil {
 					t.Errorf("findFieldByName() expected nil but got %v", result)

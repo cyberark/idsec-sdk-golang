@@ -14,9 +14,9 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles"
 	authprofilesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles/models"
+	identitycommon "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/common"
 	policymodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
 	rolesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/models"
@@ -87,6 +87,13 @@ func NewIdsecIdentityPoliciesService(authenticators ...auth.IdsecAuth) (*IdsecId
 	client.UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+	// Update identity URL accordingly
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
+	}
+	client.BaseURL = baseURL
+
 	identityPoliciesService.client = client
 	identityPoliciesService.ispAuth = ispAuth
 	identityPoliciesService.IdsecBaseService = baseService
@@ -1012,6 +1019,15 @@ func (s *IdsecIdentityPoliciesService) ListPoliciesBy(filters *policymodels.Idse
 	return filteredPolicies, nil
 }
 
+func (s *IdsecIdentityPoliciesService) returnFilteredOrders(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
+	if policiesOrder.ReturnAllPoliciesOrders {
+		return s.PoliciesOrder(&policymodels.IdsecIdentityGetPoliciesOrder{})
+	}
+	return s.PoliciesOrder(&policymodels.IdsecIdentityGetPoliciesOrder{
+		PoliciesOrder: policiesOrder.PoliciesOrder,
+	})
+}
+
 // SetPoliciesOrder sets the order of identity policies based on the provided order of policy names. Policies that are not included in the provided order will be appended at the end in their existing order. The method ensures that the provided order is valid and corresponds to existing policies. If the operation is successful, the new order will be reflected in subsequent list operations.
 func (s *IdsecIdentityPoliciesService) SetPoliciesOrder(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
 	s.Logger.Debug("Setting identity policies order")
@@ -1094,16 +1110,16 @@ func (s *IdsecIdentityPoliciesService) SetPoliciesOrder(policiesOrder *policymod
 				} else {
 					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
 				}
-				return s.PoliciesOrder()
+				return s.returnFilteredOrders(policiesOrder)
 			}
 		}
 		return nil, fmt.Errorf("failed to set identity policies order - [%v]", result)
 	}
-	return s.PoliciesOrder()
+	return s.returnFilteredOrders(policiesOrder)
 }
 
 // PoliciesOrder retrieves the current order of identity policies. The order is determined based on the policy links and their priority. The method returns a list of policy names in the order they are applied, which can be used for display purposes or to verify the current configuration.
-func (s *IdsecIdentityPoliciesService) PoliciesOrder() (*policymodels.IdsecIdentityPoliciesOrder, error) {
+func (s *IdsecIdentityPoliciesService) PoliciesOrder(policiesOrder *policymodels.IdsecIdentityGetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
 	s.Logger.Debug("Getting identity policies order")
 	policyLinks, _, err := s.listPolicyLinks()
 	if err != nil {
@@ -1117,6 +1133,19 @@ func (s *IdsecIdentityPoliciesService) PoliciesOrder() (*policymodels.IdsecIdent
 		}
 		policySet = policySet[len("/Policy/"):]
 		order.PoliciesOrder = append(order.PoliciesOrder, policySet)
+	}
+	if policiesOrder != nil && len(policiesOrder.PoliciesOrder) > 0 {
+		// Filter order to only include provided policies
+		var filteredOrder []string
+		for _, policyName := range policiesOrder.PoliciesOrder {
+			for _, existingPolicyName := range order.PoliciesOrder {
+				if policyName == existingPolicyName {
+					filteredOrder = append(filteredOrder, policyName)
+					break
+				}
+			}
+		}
+		order.PoliciesOrder = filteredOrder
 	}
 	return order, nil
 }

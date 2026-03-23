@@ -120,7 +120,10 @@ func NewDirectoryServiceQueryRequest(searchString string) *DirectoryServiceQuery
 			},
 		}
 		usersFilter := map[string]interface{}{
-			"DisplayName": map[string]string{"_like": searchString},
+			"_or": []map[string]interface{}{
+				{"DisplayName": map[string]string{"_like": searchString}},
+				{"SystemName": map[string]string{"_like": searchString}},
+			},
 		}
 		grp, _ := json.Marshal(groupFilter)
 		roles, _ := json.Marshal(rolesFilter)
@@ -191,6 +194,8 @@ type GroupRow struct {
 	DirectoryServiceType     string `json:"ServiceType" mapstructure:"ServiceType"`
 	SystemName               string `json:"SystemName,omitempty" mapstructure:"SystemName"`
 	InternalID               string `json:"InternalName,omitempty" mapstructure:"InternalName"`
+	DirectoryServiceUuid     string `json:"DirectoryServiceUuid,omitempty" mapstructure:"DirectoryServiceUuid"`
+	ExternalUuid             string `json:"ExternalUuid,omitempty" mapstructure:"ExternalUuid"`
 }
 
 // GroupResult represents a single group result from directory queries.
@@ -256,6 +261,8 @@ type UserRow struct {
 	Email                    string `json:"EMail,omitempty" mapstructure:"EMail"`
 	InternalID               string `json:"InternalName,omitempty" mapstructure:"InternalName"`
 	Description              string `json:"Description,omitempty" mapstructure:"Description"`
+	DirectoryServiceUuid     string `json:"DirectoryServiceUuid,omitempty" mapstructure:"DirectoryServiceUuid"`
+	ExternalUuid             string `json:"ExternalUuid,omitempty" mapstructure:"ExternalUuid"`
 }
 
 // UserResult represents a single user result from directory queries.

@@ -25,6 +25,7 @@ nav:
       - Add SIA Certificate: howto/add_sia_certificate.md
       - Create Identity Policy: howto/create_identity_policy.md
       - Create Identity Service User With Attributes: howto/create_identity_service_user_with_attributes.md
+      - Create pCloud Application: howto/create_pcloud_application.md
       - Simple commands workflow: howto/simple_commands_workflow.md
       - Simple SDK workflow: howto/simple_sdk_workflow.md
       - Policy:

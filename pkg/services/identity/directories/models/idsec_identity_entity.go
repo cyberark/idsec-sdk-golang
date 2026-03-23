@@ -33,13 +33,17 @@ func (a *IdsecIdentityBaseEntity) GetEntityType() string {
 // IdsecIdentityUserEntity represents the schema for a user entity.
 type IdsecIdentityUserEntity struct {
 	IdsecIdentityBaseEntity
-	Email       string `json:"email,omitempty" mapstructure:"email" flag:"email" desc:"Email of the user"`
-	Description string `json:"description,omitempty" mapstructure:"description" flag:"description" desc:"Description of the user"`
+	Email                string `json:"email,omitempty" mapstructure:"email" flag:"email" desc:"Email of the user"`
+	Description          string `json:"description,omitempty" mapstructure:"description" flag:"description" desc:"Description of the user"`
+	DirectoryServiceUuid string `json:"directory_service_uuid,omitempty" mapstructure:"directory_service_uuid" flag:"directory-service-uuid" desc:"Directory service UUID of the user"`
+	ExternalUuid         string `json:"external_uuid,omitempty" mapstructure:"external_uuid" flag:"external-uuid" desc:"External UUID of the user"`
 }
 
 // IdsecIdentityGroupEntity represents the schema for a group entity.
 type IdsecIdentityGroupEntity struct {
 	IdsecIdentityBaseEntity
+	DirectoryServiceUuid string `json:"directory_service_uuid,omitempty" mapstructure:"directory_service_uuid" flag:"directory-service-uuid" desc:"Directory service UUID of the group"`
+	ExternalUuid         string `json:"external_uuid,omitempty" mapstructure:"external_uuid" flag:"external-uuid" desc:"External UUID of the group"`
 }
 
 // GetEntityType returns the entity type of the IdsecIdentityGroupEntity.

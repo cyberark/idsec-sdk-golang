@@ -16,6 +16,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/common/identity"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	identitycommon "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
 	directoriesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/models"
 	rolesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/models"
@@ -75,6 +76,13 @@ func NewIdsecIdentityRolesService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 	client.UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+	// Update identity URL accordingly
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
+	}
+	client.BaseURL = baseURL
+
 	identityRolesService.client = client
 	identityRolesService.ispAuth = ispAuth
 	identityRolesService.IdsecBaseService = baseService

@@ -4,6 +4,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	pcloudaccountsactions "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/actions"
+	pcloudapplicationsactions "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications/actions"
 	pcloudplatformsactions "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms/actions"
 	pcloudsafesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/actions"
 )
@@ -20,6 +21,7 @@ var CLIAction = &actions.IdsecServiceCLIActionDefinition{
 		pcloudaccountsactions.CLIAction,
 		pcloudsafesactions.CLIAction,
 		pcloudplatformsactions.CLIAction,
+		pcloudapplicationsactions.CLIAction,
 	},
 }
 

@@ -3,15 +3,17 @@ package pcloud
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 )
 
 // IdsecPCloudAPI is a struct that provides access to the Idsec PCloud API as a wrapped set of services.
 type IdsecPCloudAPI struct {
-	safesService     *safes.IdsecPCloudSafesService
-	accountsService  *accounts.IdsecPCloudAccountsService
-	platformsService *platforms.IdsecPCloudPlatformsService
+	safesService        *safes.IdsecPCloudSafesService
+	accountsService     *accounts.IdsecPCloudAccountsService
+	platformsService    *platforms.IdsecPCloudPlatformsService
+	applicationsService *applications.IdsecPCloudApplicationsService
 }
 
 // NewIdsecPCloudAPI creates a new instance of IdsecPCloudAPI with the provided IdsecISPAuth.
@@ -29,10 +31,15 @@ func NewIdsecPCloudAPI(ispAuth *auth.IdsecISPAuth) (*IdsecPCloudAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	applicationsService, err := applications.NewIdsecPCloudApplicationsService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	return &IdsecPCloudAPI{
-		safesService:     safesService,
-		accountsService:  accountsService,
-		platformsService: platformsService,
+		safesService:        safesService,
+		accountsService:     accountsService,
+		platformsService:    platformsService,
+		applicationsService: applicationsService,
 	}, nil
 }
 
@@ -49,4 +56,9 @@ func (api *IdsecPCloudAPI) Accounts() *accounts.IdsecPCloudAccountsService {
 // Platforms returns the Platforms service of the IdsecPCloudAPI instance.
 func (api *IdsecPCloudAPI) Platforms() *platforms.IdsecPCloudPlatformsService {
 	return api.platformsService
+}
+
+// Applications returns the Applications service of the IdsecPCloudAPI instance.
+func (api *IdsecPCloudAPI) Applications() *applications.IdsecPCloudApplicationsService {
+	return api.applicationsService
 }

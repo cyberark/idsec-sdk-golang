@@ -98,6 +98,7 @@ The Identity (identity) service requires the IdsecISPAuth authenticator, and exp
 - **IdsecIdentityDirectoriesService** - Identity directories service
 - **IdsecIdentityAuthProfilesService** - Identity auth profiles service
 - **IdsecIdentityPoliciesService** - Identity policies service
+- **IdsecIdentityWebappsService** - Identity webapps service
 
 
 ## Privilege Cloud service
@@ -106,6 +107,7 @@ The Privilege Cloud (pCloud) service requires the IdsecISPAuth authenticator, an
 - **IdsecPCloudAccountsService** - Accounts management service
 - **IdsecPCloudSafesService** - Safes management service
 - **IdsecPCloudPlatformsService** - Platforms management service
+- **IdsecPCloudApplicationsService** - Applications management service
 
 
 ## Connector Manager Service

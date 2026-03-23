@@ -24,6 +24,7 @@ var ServiceConfig = services.IdsecServiceConfig{
 			identityusersactions.TerraformActionUserDataSource,
 			identityusersactions.TerraformActionUserAttributesSchemaDataSource,
 			identityusersactions.TerraformActionUserAttributesDataSource,
+			identityusersactions.TerraformActionUserInfoDataSource,
 		},
 	},
 }

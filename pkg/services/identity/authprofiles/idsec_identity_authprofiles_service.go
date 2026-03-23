@@ -13,6 +13,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	authprofilesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles/models"
+	identitycommon "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/common"
 )
 
 const (
@@ -52,9 +53,17 @@ func NewIdsecIdentityAuthProfilesService(authenticators ...auth.IdsecAuth) (*Ids
 	client.UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+
+	// Update identity URL accordingly
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
+	}
+	client.BaseURL = baseURL
+
+	identityAuthProfilesService.IdsecBaseService = baseService
 	identityAuthProfilesService.client = client
 	identityAuthProfilesService.ispAuth = ispAuth
-	identityAuthProfilesService.IdsecBaseService = baseService
 	return identityAuthProfilesService, nil
 }
 
@@ -75,11 +84,11 @@ func (s *IdsecIdentityAuthProfilesService) refreshIdentityAuthProfilesAuth(clien
 
 func (s *IdsecIdentityAuthProfilesService) parseAuthProfileFromMap(data map[string]interface{}) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	type identityAuthProfileStruct struct {
-		Uuid              string                 `json:"Uuid"`
-		Name              string                 `json:"Name"`
-		DurationInMinutes int                    `json:"DurationInMinutes"`
-		Challenges        []string               `json:"Challenges"`
-		AdditionalData    map[string]interface{} `json:"AdditionalData"`
+		Uuid              string                 `json:"Uuid"`              //nolint:tagliatelle
+		Name              string                 `json:"Name"`              //nolint:tagliatelle
+		DurationInMinutes int                    `json:"DurationInMinutes"` //nolint:tagliatelle
+		Challenges        []string               `json:"Challenges"`        //nolint:tagliatelle
+		AdditionalData    map[string]interface{} `json:"AdditionalData"`    //nolint:tagliatelle
 	}
 	var authProfile identityAuthProfileStruct
 	authProfileBytes, err := json.Marshal(data)

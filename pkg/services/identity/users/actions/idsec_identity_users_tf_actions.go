@@ -130,3 +130,17 @@ var TerraformActionUserAttributesDataSource = &actions.IdsecServiceTerraformData
 	},
 	DataSourceAction: "user-attributes",
 }
+
+// TerraformActionUserInfoDataSource is a struct that defines the User Info action for the Idsec service for Terraform.
+var TerraformActionUserInfoDataSource = &actions.IdsecServiceTerraformDataSourceActionDefinition{
+	IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
+		IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+			ActionName:        "identity-user-info",
+			ActionDescription: "The Identity service user info data source. It reads the user info information and metadata.",
+			ActionVersion:     1,
+			Schemas:           ActionToSchemaMap,
+		},
+		StateSchema: &usersmodels.IdsecIdentityUserInfo{},
+	},
+	DataSourceAction: "user-info",
+}

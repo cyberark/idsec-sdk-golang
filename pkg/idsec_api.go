@@ -64,7 +64,9 @@ import (
 	policies "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
 	roles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
 	users "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
+	webapps "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
+	applications "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications"
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 	policy "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
@@ -350,6 +352,19 @@ func (api *IdsecAPI) IdentityUsers() (*users.IdsecIdentityUsersService, error) {
 	return service, nil
 }
 
+func (api *IdsecAPI) IdentityWebapps() (*webapps.IdsecIdentityWebappsService, error) {
+	if serviceIfs, ok := api.services[webapps.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*webapps.IdsecIdentityWebappsService), nil
+	}
+	service, err := webapps.ServiceGenerator(api.loadServiceAuthenticators(webapps.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[webapps.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) PcloudAccounts() (*accounts.IdsecPCloudAccountsService, error) {
 	if serviceIfs, ok := api.services[accounts.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*accounts.IdsecPCloudAccountsService), nil
@@ -360,6 +375,19 @@ func (api *IdsecAPI) PcloudAccounts() (*accounts.IdsecPCloudAccountsService, err
 	}
 	var baseService services.IdsecService = service
 	api.services[accounts.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) PcloudApplications() (*applications.IdsecPCloudApplicationsService, error) {
+	if serviceIfs, ok := api.services[applications.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*applications.IdsecPCloudApplicationsService), nil
+	}
+	service, err := applications.ServiceGenerator(api.loadServiceAuthenticators(applications.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[applications.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
