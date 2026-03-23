@@ -62,9 +62,9 @@ var TerraformActionWebappPermissionResource = &actions.IdsecServiceTerraformReso
 		actions.StateOperation,
 	},
 	ActionsMappings: map[actions.IdsecServiceActionOperation]string{
-		actions.CreateOperation: "set-webapp-permissions",
-		actions.ReadOperation:   "webapp-permissions",
-		actions.UpdateOperation: "set-webapp-permissions",
+		actions.CreateOperation: "set-webapp-permission",
+		actions.ReadOperation:   "webapp-permission",
+		actions.UpdateOperation: "set-webapp-permission",
 	},
 }
 
