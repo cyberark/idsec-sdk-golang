@@ -174,9 +174,13 @@ func (s *IdsecIdentityAuthProfilesService) UpdateAuthProfile(updateAuthProfile *
 	}
 	if len(updateAuthProfile.FirstChallenges) > 0 {
 		existingAuthProfile.FirstChallenges = updateAuthProfile.FirstChallenges
+	} else {
+		existingAuthProfile.FirstChallenges = nil
 	}
 	if len(updateAuthProfile.SecondChallenges) > 0 {
 		existingAuthProfile.SecondChallenges = updateAuthProfile.SecondChallenges
+	} else {
+		existingAuthProfile.SecondChallenges = nil
 	}
 	if updateAuthProfile.DurationInMinutes > 0 {
 		existingAuthProfile.DurationInMinutes = updateAuthProfile.DurationInMinutes
@@ -194,6 +198,8 @@ func (s *IdsecIdentityAuthProfilesService) UpdateAuthProfile(updateAuthProfile *
 	}
 	if len(existingAuthProfile.SecondChallenges) > 0 {
 		updateAuthProfileRequest["settings"].(map[string]interface{})["Challenges"] = append(updateAuthProfileRequest["settings"].(map[string]interface{})["Challenges"].([]string), strings.Join(existingAuthProfile.SecondChallenges, ","))
+	} else {
+		updateAuthProfileRequest["settings"].(map[string]interface{})["Challenges"] = append(updateAuthProfileRequest["settings"].(map[string]interface{})["Challenges"].([]string), "")
 	}
 	if existingAuthProfile.AdditionalData != nil {
 		updateAuthProfileRequest["settings"].(map[string]interface{})["AdditionalData"] = existingAuthProfile.AdditionalData
