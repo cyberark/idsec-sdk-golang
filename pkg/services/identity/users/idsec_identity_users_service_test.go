@@ -525,7 +525,7 @@ func TestCreate(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.CreateUser(tt.createUser)
+			result, err := service.Create(tt.createUser)
 
 			if tt.expectedError {
 				if err == nil {
@@ -564,7 +564,7 @@ func TestCreate(t *testing.T) {
 	}
 }
 
-func TestUpdateUser(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	tests := []struct {
 		name             string
 		updateUser       *usersmodels.IdsecIdentityUpdateUser
@@ -716,7 +716,7 @@ func TestUpdateUser(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpdateUser(tt.updateUser)
+			result, err := service.Update(tt.updateUser)
 
 			if tt.expectedError {
 				if err == nil {
@@ -737,7 +737,7 @@ func TestUpdateUser(t *testing.T) {
 	}
 }
 
-func TestDeleteUser(t *testing.T) {
+func TestDelete(t *testing.T) {
 	tests := []struct {
 		name             string
 		deleteUser       *usersmodels.IdsecIdentityDeleteUser
@@ -811,7 +811,7 @@ func TestDeleteUser(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			err = service.DeleteUser(tt.deleteUser)
+			err = service.Delete(tt.deleteUser)
 
 			if tt.expectedError {
 				if err == nil {
@@ -903,7 +903,7 @@ func TestDeleteUsers(t *testing.T) {
 	}
 }
 
-func TestUser(t *testing.T) {
+func TestGet(t *testing.T) {
 	tests := []struct {
 		name             string
 		getUser          *usersmodels.IdsecIdentityGetUser
@@ -1107,7 +1107,7 @@ func TestUser(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.User(tt.getUser)
+			result, err := service.Get(tt.getUser)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1146,7 +1146,7 @@ func TestUser(t *testing.T) {
 	}
 }
 
-func TestListUsers(t *testing.T) {
+func TestList(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -1195,7 +1195,7 @@ func TestListUsers(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			pages, err := service.ListUsers()
+			pages, err := service.List()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1221,7 +1221,7 @@ func TestListUsers(t *testing.T) {
 	}
 }
 
-func TestResetUserPassword(t *testing.T) {
+func TestResetPassword(t *testing.T) {
 	tests := []struct {
 		name             string
 		resetPassword    *usersmodels.IdsecIdentityResetUserPassword
@@ -1334,7 +1334,7 @@ func TestResetUserPassword(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			err = service.ResetUserPassword(tt.resetPassword)
+			err = service.ResetPassword(tt.resetPassword)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1350,7 +1350,7 @@ func TestResetUserPassword(t *testing.T) {
 	}
 }
 
-func TestUserInfo(t *testing.T) {
+func TestInfo(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -1396,7 +1396,7 @@ func TestUserInfo(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UserInfo()
+			result, err := service.Info()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1417,7 +1417,7 @@ func TestUserInfo(t *testing.T) {
 	}
 }
 
-func TestUsersStats(t *testing.T) {
+func TestStats(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -1466,7 +1466,7 @@ func TestUsersStats(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UsersStats()
+			result, err := service.Stats()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1487,7 +1487,7 @@ func TestUsersStats(t *testing.T) {
 	}
 }
 
-func TestUserAttributesSchema(t *testing.T) {
+func TestAttributesSchema(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -1569,7 +1569,7 @@ func TestUserAttributesSchema(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UserAttributesSchema()
+			result, err := service.AttributesSchema()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1594,7 +1594,7 @@ func TestUserAttributesSchema(t *testing.T) {
 	}
 }
 
-func TestUpsertUserAttributesSchema(t *testing.T) {
+func TestUpsertAttributesSchema(t *testing.T) {
 	tests := []struct {
 		name             string
 		upsertSchema     *usersmodels.IdsecIdentityUpsertUserAttributesSchema
@@ -1757,7 +1757,7 @@ func TestUpsertUserAttributesSchema(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpsertUserAttributesSchema(tt.upsertSchema)
+			result, err := service.UpsertAttributesSchema(tt.upsertSchema)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1778,7 +1778,7 @@ func TestUpsertUserAttributesSchema(t *testing.T) {
 	}
 }
 
-func TestDeleteUserAttributesSchema(t *testing.T) {
+func TestDeleteAttributesSchema(t *testing.T) {
 	tests := []struct {
 		name             string
 		deleteSchema     *usersmodels.IdsecIdentityDeleteUserAttributesSchema
@@ -1910,7 +1910,7 @@ func TestDeleteUserAttributesSchema(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.DeleteUserAttributesSchema(tt.deleteSchema)
+			result, err := service.DeleteAttributesSchema(tt.deleteSchema)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1931,7 +1931,7 @@ func TestDeleteUserAttributesSchema(t *testing.T) {
 	}
 }
 
-func TestUserAttributes(t *testing.T) {
+func TestGetAttributes(t *testing.T) {
 	tests := []struct {
 		name             string
 		getUserAttrs     *usersmodels.IdsecIdentityGetUserAttributes
@@ -2029,7 +2029,7 @@ func TestUserAttributes(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UserAttributes(tt.getUserAttrs)
+			result, err := service.GetAttributes(tt.getUserAttrs)
 
 			if tt.expectedError {
 				if err == nil {
@@ -2054,7 +2054,7 @@ func TestUserAttributes(t *testing.T) {
 	}
 }
 
-func TestUpsertUserAttributes(t *testing.T) {
+func TestUpsertAttributes(t *testing.T) {
 	tests := []struct {
 		name             string
 		upsertAttrs      *usersmodels.IdsecIdentityUpsertUserAttributes
@@ -2191,7 +2191,7 @@ func TestUpsertUserAttributes(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpsertUserAttributes(tt.upsertAttrs)
+			result, err := service.UpsertAttributes(tt.upsertAttrs)
 
 			if tt.expectedError {
 				if err == nil {
@@ -2212,7 +2212,7 @@ func TestUpsertUserAttributes(t *testing.T) {
 	}
 }
 
-func TestDeleteUserAttributes(t *testing.T) {
+func TestDeleteAttributes(t *testing.T) {
 	tests := []struct {
 		name             string
 		deleteAttrs      *usersmodels.IdsecIdentityDeleteUserAttributes
@@ -2342,7 +2342,7 @@ func TestDeleteUserAttributes(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.DeleteUserAttributes(tt.deleteAttrs)
+			result, err := service.DeleteAttributes(tt.deleteAttrs)
 
 			if tt.expectedError {
 				if err == nil {

@@ -5,10 +5,15 @@
 package common
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 )
@@ -30,6 +35,13 @@ const (
 const (
 	// LoggerStyleDefault is the default logger style
 	LoggerStyleDefault = "default"
+
+	defaultLogRotationMaxSizeBytes   = int64(50 * 1024 * 1024) // 50 MB
+	defaultLogRotationBackupHistory  = 5
+	defaultLogRotationStatCheckBytes = int64(1 * 1024 * 1024) // 1 MB
+	defaultFileLogLevel              = Info
+	defaultFileLogDir                = ".idsec/logs"
+	defaultFileLogName               = "idsec-cli.log"
 )
 
 // IdsecLogger provides structured logging with configurable levels and output formatting.
@@ -48,6 +60,10 @@ type IdsecLogger struct {
 	logLevel               int
 	name                   string
 	resolveLogLevelFromEnv bool
+	fileOutput             io.Writer
+	fileLogLevel           int
+	isFileLoggingEnabled   bool
+	fileLoggingResolved    bool
 }
 
 // NewIdsecLogger creates a new instance of IdsecLogger with the specified configuration.
@@ -76,6 +92,133 @@ func NewIdsecLogger(name string, level int, verbose bool, resolveLogLevelFromEnv
 		logLevel:               level,
 		resolveLogLevelFromEnv: resolveLogLevelFromEnv,
 	}
+}
+
+// isFileLoggingExplicitlyDisabled checks if file logging was disabled by env value.
+func isFileLoggingExplicitlyDisabled(raw string) bool {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	return v == "none" || v == "off"
+}
+
+// resolveFileLoggingConfig resolves file writer config for CLI-only file logging.
+func resolveFileLoggingConfig() (io.Writer, int, bool) {
+	// File logging is intentionally available only for CLI executions.
+	if config.IdsecToolInUse() != config.IdsecToolCLI {
+		return nil, Critical, false
+	}
+	rawLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	if isFileLoggingExplicitlyDisabled(rawLevel) {
+		return nil, Critical, false
+	}
+	rawPath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	filePath := strings.TrimSpace(rawPath)
+	if filePath == "" {
+		filePath = defaultFileLogPath()
+	}
+	if filePath == "" {
+		return nil, Critical, false
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
+		return nil, Critical, false
+	}
+	fileLogLevel := resolveFileLogLevelFromEnv()
+	return &rotatingFileWriter{
+		filePath:          filePath,
+		maxSizeBytes:      defaultLogRotationMaxSizeBytes,
+		maxBackups:        defaultLogRotationBackupHistory,
+		statCheckInterval: defaultLogRotationStatCheckBytes,
+	}, fileLogLevel, true
+}
+
+// defaultFileLogPath resolves the default CLI file log path in the user home directory.
+func defaultFileLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, defaultFileLogDir, defaultFileLogName)
+}
+
+// resolveFileLogLevelFromEnv resolves the file log level from env with INFO default.
+func resolveFileLogLevelFromEnv() int {
+	fileLogLevel := strings.TrimSpace(os.Getenv(config.IdsecFileLogLevelEnvVar))
+	if fileLogLevel == "" {
+		return defaultFileLogLevel
+	}
+	return StrToLogLevel(fileLogLevel)
+}
+
+type rotatingFileWriter struct {
+	mu                 sync.Mutex
+	filePath           string
+	maxSizeBytes       int64
+	maxBackups         int
+	bytesSinceLastStat int64
+	statCheckInterval  int64
+}
+
+// Write appends to the log file and checks rotation periodically.
+func (w *rotatingFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(w.filePath), 0o700); err != nil {
+		return 0, err
+	}
+
+	w.bytesSinceLastStat += int64(len(p))
+	if w.bytesSinceLastStat >= w.statCheckInterval {
+		w.bytesSinceLastStat = 0
+		if err := w.rotateIfNeeded(); err != nil {
+			return 0, err
+		}
+	}
+
+	file, err := os.OpenFile(w.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = file.Close() }()
+
+	return file.Write(p)
+}
+
+// rotateIfNeeded stats the file and triggers rotation if it exceeds max size.
+func (w *rotatingFileWriter) rotateIfNeeded() error {
+	fileInfo, err := os.Stat(w.filePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if fileInfo.Size() <= w.maxSizeBytes {
+		return nil
+	}
+	return w.rotate()
+}
+
+// rotate shifts backups and rotates the current log file to .1.
+func (w *rotatingFileWriter) rotate() error {
+	if w.maxBackups < 1 {
+		return os.Remove(w.filePath)
+	}
+	oldestFilePath := fmt.Sprintf("%s.%d", w.filePath, w.maxBackups)
+	if err := os.Remove(oldestFilePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for i := w.maxBackups - 1; i >= 1; i-- {
+		sourcePath := fmt.Sprintf("%s.%d", w.filePath, i)
+		targetPath := fmt.Sprintf("%s.%d", w.filePath, i+1)
+		if err := os.Rename(sourcePath, targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	rotatedPath := fmt.Sprintf("%s.1", w.filePath)
+	if err := os.Rename(w.filePath, rotatedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // LogLevelFromEnv retrieves the log level from the LOG_LEVEL environment variable.
@@ -159,6 +302,34 @@ func (l *IdsecLogger) SetVerbose(value bool) {
 	l.verbose = value
 }
 
+// ensureFileLoggingResolved lazily resolves file logging once per logger instance.
+func (l *IdsecLogger) ensureFileLoggingResolved() {
+	if l.fileLoggingResolved {
+		return
+	}
+	l.fileLoggingResolved = true
+	l.fileOutput, l.fileLogLevel, l.isFileLoggingEnabled = resolveFileLoggingConfig()
+}
+
+// logToFile writes one sanitized log line to file if file logging is enabled.
+func (l *IdsecLogger) logToFile(level int, levelName string, message string) {
+	l.ensureFileLoggingResolved()
+	if !l.isFileLoggingEnabled || l.fileOutput == nil {
+		return
+	}
+	if l.fileLogLevel < level {
+		return
+	}
+	logLine := fmt.Sprintf(
+		"%s | %s | %s | %s\n",
+		time.Now().UTC().Format(time.RFC3339),
+		l.name,
+		levelName,
+		sanitizeMessage(message),
+	)
+	_, _ = l.fileOutput.Write([]byte(logLine))
+}
+
 // Debug logs a debug message with green color formatting.
 //
 // Debug messages are only output when the logger is in verbose mode and
@@ -173,13 +344,15 @@ func (l *IdsecLogger) SetVerbose(value bool) {
 //
 //	logger.Debug("Processing user %s with ID %d", username, userID)
 func (l *IdsecLogger) Debug(msg string, v ...interface{}) {
+	formattedMessage := fmt.Sprintf(msg, v...)
+	l.logToFile(Debug, "DEBUG", formattedMessage)
 	if !l.verbose {
 		return
 	}
 	if l.LogLevel() < Debug {
 		return
 	}
-	colorMsg := fmt.Sprintf("| DEBUG | \033[1;32m%s\033[0m", fmt.Sprintf(msg, v...))
+	colorMsg := fmt.Sprintf("| DEBUG | \033[1;32m%s\033[0m", formattedMessage)
 	l.Println(colorMsg)
 }
 
@@ -197,13 +370,15 @@ func (l *IdsecLogger) Debug(msg string, v ...interface{}) {
 //
 //	logger.Info("User %s logged in successfully", username)
 func (l *IdsecLogger) Info(msg string, v ...interface{}) {
+	formattedMessage := fmt.Sprintf(msg, v...)
+	l.logToFile(Info, "INFO", formattedMessage)
 	if !l.verbose {
 		return
 	}
 	if l.LogLevel() < Info {
 		return
 	}
-	colorMsg := fmt.Sprintf("| INFO | \033[32m%s\033[0m", fmt.Sprintf(msg, v...))
+	colorMsg := fmt.Sprintf("| INFO | \033[32m%s\033[0m", formattedMessage)
 	l.Println(colorMsg)
 }
 
@@ -221,13 +396,15 @@ func (l *IdsecLogger) Info(msg string, v ...interface{}) {
 //
 //	logger.Warning("Rate limit approaching for user %s", username)
 func (l *IdsecLogger) Warning(msg string, v ...interface{}) {
+	formattedMessage := fmt.Sprintf(msg, v...)
+	l.logToFile(Warning, "WARNING", formattedMessage)
 	if !l.verbose {
 		return
 	}
 	if l.LogLevel() < Warning {
 		return
 	}
-	colorMsg := fmt.Sprintf("| WARNING | \033[33m%s\033[0m", fmt.Sprintf(msg, v...))
+	colorMsg := fmt.Sprintf("| WARNING | \033[33m%s\033[0m", formattedMessage)
 	l.Println(colorMsg)
 }
 
@@ -245,13 +422,15 @@ func (l *IdsecLogger) Warning(msg string, v ...interface{}) {
 //
 //	logger.Error("Failed to connect to database: %v", err)
 func (l *IdsecLogger) Error(msg string, v ...interface{}) {
+	formattedMessage := fmt.Sprintf(msg, v...)
+	l.logToFile(Error, "ERROR", formattedMessage)
 	if !l.verbose {
 		return
 	}
 	if l.LogLevel() < Error {
 		return
 	}
-	colorMsg := fmt.Sprintf("| ERROR | \033[31m%s\033[0m", fmt.Sprintf(msg, v...))
+	colorMsg := fmt.Sprintf("| ERROR | \033[31m%s\033[0m", formattedMessage)
 	l.Println(colorMsg)
 }
 
@@ -271,13 +450,15 @@ func (l *IdsecLogger) Error(msg string, v ...interface{}) {
 //	logger.Fatal("Cannot start application: %v", err)
 //	// Program terminates after this call
 func (l *IdsecLogger) Fatal(msg string, v ...interface{}) {
+	formattedMessage := fmt.Sprintf(msg, v...)
+	l.logToFile(Critical, "FATAL", formattedMessage)
 	if !l.verbose {
 		return
 	}
 	if l.LogLevel() < Critical {
 		return
 	}
-	colorMsg := fmt.Sprintf("| FATAL | \033[1;31m%s\033[0m", fmt.Sprintf(msg, v...))
+	colorMsg := fmt.Sprintf("| FATAL | \033[1;31m%s\033[0m", formattedMessage)
 	l.Println(colorMsg)
 	os.Exit(-1)
 }

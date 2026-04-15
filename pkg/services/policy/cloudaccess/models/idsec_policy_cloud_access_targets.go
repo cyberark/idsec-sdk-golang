@@ -35,30 +35,23 @@ type IdsecPolicyCloudAccessBaseTarget interface {
 
 // IdsecPolicyCloudAccessTarget represents the base target structure.
 type IdsecPolicyCloudAccessTarget struct {
-	RoleID        string `json:"role_id" validate:"required" mapstructure:"role_id" flag:"role-id" desc:"AWS: The unique identifier assigned to the IAM role in AWS (IAM role ARN); AWS organization: The unique identifier assigned to the IAM role in AWS (IAM role ARN); Azure: The identifier of Azure resource role or Entra ID role; GCP: The Google Cloud role and hierarchy structure"`
-	WorkspaceID   string `json:"workspace_id" validate:"required" mapstructure:"workspace_id" flag:"workspace-id" desc:"AWS: The workspace ID given to the standalone AWS account when it was onboarded to CyberArk; AWS organization: The workspace ID given to the AWS organization when it was onboarded to CyberArk; Azure: The workspace ID given to Microsoft Entra ID when it was onboarded to CyberArk; GCP: The workspace ID given to the Google Cloud organization when it was onboarded to CyberArk"`
-	RoleName      string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The name of role with which the identity can access the target workspace"`
-	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The workspace name of the target. GCP: The Google Cloud Workspace"`
-}
-
-// IdsecPolicyCloudAccessOrgTarget represents a target with an organization ID.
-type IdsecPolicyCloudAccessOrgTarget struct {
-	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
-	OrgID                        string `json:"org_id" mapstructure:"org_id" flag:"org-id" desc:"AWSOrg:Management account ID (required only for AWS IAM Identity Center), Azure: Azure directory ID (UUID), GCP: The Google Cloud organization ID"`
+	RoleID        string `json:"role_id" validate:"required" mapstructure:"role_id" flag:"role-id" desc:"The unique identifier assigned to the role"`
+	WorkspaceID   string `json:"workspace_id" validate:"required" mapstructure:"workspace_id" flag:"workspace-id" desc:"The unique identifier assigned to the workspace when it was onboarded to the platform"`
+	RoleName      string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The name of role with which the identity can access the target workspace (read-only)"`
+	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The workspace name of the target (read-only)"`
 }
 
 // IdsecPolicyCloudAccessAWSAccountTarget represents an AWS account target.
+// Fields: role_id (IAM role ARN), workspace_id (AWS account ID); role_name, workspace_name are read-only.
 type IdsecPolicyCloudAccessAWSAccountTarget struct {
-	IdsecPolicyCloudAccessTarget `mapstructure:",squash" desc:"AWS account details"`
+	IdsecPolicyCloudAccessTarget `mapstructure:",squash" desc:"AWS account target with IAM role ARN and account workspace ID"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessAWSAccountTarget to a map.
 func (s *IdsecPolicyCloudAccessAWSAccountTarget) Serialize() (map[string]interface{}, error) {
 	return map[string]interface{}{
-		"roleId":        s.RoleID,
-		"workspaceId":   s.WorkspaceID,
-		"roleName":      s.RoleName,
-		"workspaceName": s.WorkspaceName,
+		"roleId":      s.RoleID,
+		"workspaceId": s.WorkspaceID,
 	}, nil
 }
 
@@ -80,18 +73,18 @@ func (s *IdsecPolicyCloudAccessAWSAccountTarget) Deserialize(data map[string]int
 }
 
 // IdsecPolicyCloudAccessAWSOrganizationTarget represents an AWS organization target.
+// Fields: role_id (IAM role ARN), workspace_id (organization workspace ID), org_id (management account ID - required); role_name, workspace_name are read-only.
 type IdsecPolicyCloudAccessAWSOrganizationTarget struct {
-	IdsecPolicyCloudAccessOrgTarget `mapstructure:",squash"`
+	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
+	OrgID                        string `json:"org_id" validate:"required" mapstructure:"org_id" flag:"org-id" desc:"The AWS organization management account ID (required for AWS Organization targets)"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessAWSOrganizationTarget to a map.
 func (s *IdsecPolicyCloudAccessAWSOrganizationTarget) Serialize() (map[string]interface{}, error) {
 	return map[string]interface{}{
-		"roleId":        s.RoleID,
-		"workspaceId":   s.WorkspaceID,
-		"roleName":      s.RoleName,
-		"workspaceName": s.WorkspaceName,
-		"orgId":         s.OrgID,
+		"roleId":      s.RoleID,
+		"workspaceId": s.WorkspaceID,
+		"orgId":       s.OrgID,
 	}, nil
 }
 
@@ -116,10 +109,12 @@ func (s *IdsecPolicyCloudAccessAWSOrganizationTarget) Deserialize(data map[strin
 }
 
 // IdsecPolicyCloudAccessAzureTarget represents an Azure target.
+// Fields: role_id (Azure resource role or Entra ID role), workspace_id (Entra ID workspace), org_id (Azure directory UUID - required), workspace_type (required); role_type, role_name, workspace_name are read-only.
 type IdsecPolicyCloudAccessAzureTarget struct {
-	IdsecPolicyCloudAccessOrgTarget `mapstructure:",squash"`
-	WorkspaceType                   string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk" choices:"directory,subscription,resource_group,resource,management_group"`
-	RoleType                        int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure"`
+	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
+	OrgID                        string `json:"org_id" validate:"required" mapstructure:"org_id" flag:"org-id" desc:"The Azure directory ID (UUID) - required for Azure targets"`
+	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk (Directory, Subscription, Resource Group, Resource, Management Group)" choices:"directory,subscription,resource_group,resource,management_group"`
+	RoleType                     int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure (read-only)"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessAzureTarget to a map.
@@ -127,11 +122,8 @@ func (s *IdsecPolicyCloudAccessAzureTarget) Serialize() (map[string]interface{},
 	return map[string]interface{}{
 		"roleId":        s.RoleID,
 		"workspaceId":   s.WorkspaceID,
-		"roleName":      s.RoleName,
-		"workspaceName": s.WorkspaceName,
 		"orgId":         s.OrgID,
 		"workspaceType": s.WorkspaceType,
-		"roleType":      s.RoleType,
 	}, nil
 }
 
@@ -162,11 +154,14 @@ func (s *IdsecPolicyCloudAccessAzureTarget) Deserialize(data map[string]interfac
 }
 
 // IdsecPolicyCloudAccessGCPTarget represents a GCP target.
+// Fields: role_id (GCP role and hierarchy), workspace_id (GCP organization workspace), org_id (GCP organization ID), workspace_type (required); domain_name, role_package, role_type, role_name, workspace_name are read-only.
 type IdsecPolicyCloudAccessGCPTarget struct {
-	IdsecPolicyCloudAccessOrgTarget `mapstructure:",squash"`
-	WorkspaceType                   string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Google Cloud organization was onboarded to CyberArk - Full organization, folder, project" choices:"gcp_organization,folder,project"`
-	RolePackage                     string `json:"role_package,omitempty" mapstructure:"role_package,omitempty" flag:"role-package" desc:"The role package of the target"`
-	RoleType                        int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of role in GCP"`
+	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
+	OrgID                        string `json:"org_id,omitempty" mapstructure:"org_id,omitempty" flag:"org-id" desc:"The Google Cloud organization ID"`
+	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Google Cloud organization was onboarded to CyberArk (Organization, Folder, or Project - case sensitive)" choices:"gcp_organization,folder,project"`
+	DomainName                   string `json:"domain_name,omitempty" mapstructure:"domain_name,omitempty" flag:"domain-name" desc:"The Google Workspace domain name (read-only)"`
+	RolePackage                  string `json:"role_package,omitempty" mapstructure:"role_package,omitempty" flag:"role-package" desc:"The role package of the target (read-only)"`
+	RoleType                     int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of role in GCP: 0=PreDefined, 1=Custom, 2=Basic (read-only)"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessGCPTarget to a map.
@@ -174,12 +169,8 @@ func (s *IdsecPolicyCloudAccessGCPTarget) Serialize() (map[string]interface{}, e
 	return map[string]interface{}{
 		"roleId":        s.RoleID,
 		"workspaceId":   s.WorkspaceID,
-		"roleName":      s.RoleName,
-		"workspaceName": s.WorkspaceName,
 		"orgId":         s.OrgID,
 		"workspaceType": s.WorkspaceType,
-		"rolePackage":   s.RolePackage,
-		"roleType":      s.RoleType,
 	}, nil
 }
 
@@ -203,6 +194,9 @@ func (s *IdsecPolicyCloudAccessGCPTarget) Deserialize(data map[string]interface{
 	if workspaceType, ok := data["workspace_type"].(string); ok {
 		s.WorkspaceType = workspaceType
 	}
+	if domainName, ok := data["domain_name"].(string); ok {
+		s.DomainName = domainName
+	}
 	if rolePackage, ok := data["role_package"].(string); ok {
 		s.RolePackage = rolePackage
 	}
@@ -216,7 +210,7 @@ func (s *IdsecPolicyCloudAccessGCPTarget) Deserialize(data map[string]interface{
 type IdsecPolicyCloudAccessCloudConsoleTarget struct {
 	AwsAccountTargets      []IdsecPolicyCloudAccessAWSAccountTarget      `json:"aws_account_targets,omitempty" mapstructure:"aws_account_targets,omitempty" flag:"aws-account-targets" desc:"AWS account details"`
 	AwsOrganizationTargets []IdsecPolicyCloudAccessAWSOrganizationTarget `json:"aws_organization_targets,omitempty" mapstructure:"aws_organization_targets,omitempty" flag:"aws-organization-targets" desc:"AWS organization workspace details"`
-	AzureTargets           []IdsecPolicyCloudAccessAzureTarget           `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"List of Azure targets or Microsoft Entra ID workspace details"`
+	AzureTargets           []IdsecPolicyCloudAccessAzureTarget           `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"Microsoft Entra ID workspace details"`
 	GcpTargets             []IdsecPolicyCloudAccessGCPTarget             `json:"gcp_targets,omitempty" mapstructure:"gcp_targets,omitempty" flag:"gcp-targets" desc:"Google Cloud workspace details"`
 }
 

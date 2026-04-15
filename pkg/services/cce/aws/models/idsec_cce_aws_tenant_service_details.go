@@ -10,7 +10,7 @@ type TfIdsecCCEAWSGetTenantServiceDetails struct {
 // OPENAPI-CORRELATION: GetTenantServiceDetailsOutput
 type TfIdsecCCEAWSTenantServiceDetails struct {
 	// TenantID is the CyberArk tenant ID (UUID format).
-	TenantID string `json:"tenantId" mapstructure:"tenant_id" desc:"CyberArk tenant ID (UUID format)"`
+	TenantID string `json:"tenantId" mapstructure:"tenant_id" desc:"CyberArk tenant ID (UUID format)."`
 	// ServicesDetails contains service-specific details keyed by service name.
-	ServicesDetails map[string]map[string]interface{} `json:"servicesDetails" mapstructure:"services_details" desc:"Service-specific details keyed by service name"`
+	ServicesDetails map[string]map[string]interface{} `json:"servicesDetails" mapstructure:"services_details" desc:"A key-value map of service-specific details, keyed by service name."`
 }

@@ -4,8 +4,8 @@ import filtersmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/f
 
 // ActionToSchemaMap is a map that defines the mapping between Sec Hub filters action names and their corresponding schema types.
 var ActionToSchemaMap = map[string]interface{}{
-	"filter":        &filtersmodels.IdsecSecHubGetFilter{},
-	"list-filters":  &filtersmodels.IdsecSecHubGetFilters{},
-	"add-filter":    &filtersmodels.IdsecSecHubAddFilter{},
-	"delete-filter": &filtersmodels.IdsecSecHubDeleteFilter{},
+	"get":    &filtersmodels.IdsecSecHubGetFilter{},
+	"list":   &filtersmodels.IdsecSecHubGetFilters{},
+	"create": &filtersmodels.IdsecSecHubCreateFilter{},
+	"delete": &filtersmodels.IdsecSecHubDeleteFilter{},
 }

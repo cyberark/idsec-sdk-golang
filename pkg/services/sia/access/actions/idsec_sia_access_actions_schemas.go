@@ -11,4 +11,10 @@ var ActionToSchemaMap = map[string]interface{}{
 	"delete-connector":                  &accessmodels.IdsecSIADeleteConnector{},
 	"list-connectors":                   nil,
 	"update-connector-maintenance-mode": &accessmodels.IdsecSIAMaintenanceConnector{},
+	"list-relays":                       nil,
+	"get-relay":                         &accessmodels.IdsecSIAGetHTTPSRelay{},
+	"delete-relay":                      &accessmodels.IdsecSIADeleteHTTPSRelay{},
+	"upgrade-relay":                     &accessmodels.IdsecSIAUpgradeHTTPSRelay{},
+	"relay-setup-script":                &accessmodels.IdsecSIAHTTPSRelaySetupScriptRequest{},
+	"install-relay":                     &accessmodels.IdsecSIAInstallRelay{},
 }

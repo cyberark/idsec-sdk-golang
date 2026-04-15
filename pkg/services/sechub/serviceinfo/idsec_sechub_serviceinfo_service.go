@@ -20,10 +20,8 @@ const (
 
 // IdsecSecHubServiceInfoService is the service for retrieve Secrets Hub service Info
 type IdsecSecHubServiceInfoService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSecHubServiceInfoService creates a new instance of IdsecSecHubServiceInfoService.
@@ -39,29 +37,30 @@ func NewIdsecSecHubServiceInfoService(authenticators ...auth.IdsecAuth) (*IdsecS
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "secretshub", ".", "", serviceInfoService.refreshSecHubAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "secretshub", ".", "", serviceInfoService.refreshSecHubAuth)
 	if err != nil {
 		return nil, err
 	}
-	serviceInfoService.client = client
-	serviceInfoService.ispAuth = ispAuth
+
 	serviceInfoService.IdsecBaseService = baseService
+	serviceInfoService.IdsecISPBaseService = ispBaseService
 	return serviceInfoService, nil
 }
 
 func (s *IdsecSecHubServiceInfoService) refreshSecHubAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// ServiceInfo retrieves the service info from the Secrets Hub service.
+// Get retrieves the service info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/b7c22j9aexv8r-service-info
-func (s *IdsecSecHubServiceInfoService) ServiceInfo() (*serviceinfomodels.IdsecSecHubGetServiceInfo, error) {
+func (s *IdsecSecHubServiceInfoService) Get() (*serviceinfomodels.IdsecSecHubGetServiceInfo, error) {
 	s.Logger.Info("Getting serviceinfo")
-	response, err := s.client.Get(context.Background(), sechubURL, nil)
+	response, err := s.ISPClient().Get(context.Background(), sechubURL, nil)
 	if err != nil {
 		return nil, err
 	}

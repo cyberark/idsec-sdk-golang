@@ -69,14 +69,14 @@ func TestPolicyStatus_validation(t *testing.T) {
 	}
 }
 
-// TestNilInputPanics consolidates panic behavior tests for Add/Update/Delete policy methods.
+// TestNilInputPanics consolidates panic behavior tests for Create/Update/Delete policy methods.
 func TestNilInputPanics(t *testing.T) {
 	svc := &IdsecPolicyCloudAccessService{}
 	tests := []struct {
 		name string
 		fn   func()
 	}{
-		{"add_policy_nil_panics", func() { _, _ = svc.AddPolicy(nil) }},
+		{"create_policy_nil_panics", func() { _, _ = svc.CreatePolicy(nil) }},
 		{"update_policy_nil_panics", func() { _, _ = svc.UpdatePolicy(nil) }},
 		{"delete_policy_nil_panics", func() { _ = svc.DeletePolicy(nil) }},
 	}

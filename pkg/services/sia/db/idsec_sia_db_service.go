@@ -10,9 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -23,7 +21,7 @@ import (
 	dbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
 	ssomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso/models"
-	workspacesdbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db/models"
+	workspacesdbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb/models"
 )
 
 const (
@@ -33,10 +31,8 @@ const (
 
 // IdsecSIADBService is a struct that implements the IdsecService interface and provides functionality for DB service of SIA.
 type IdsecSIADBService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth    *auth.IdsecISPAuth
-	client     *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 	ssoService *sso.IdsecSIASSOService
 }
 
@@ -53,14 +49,13 @@ func NewIdsecSIADBService(authenticators ...auth.IdsecAuth) (*IdsecSIADBService,
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", dbService.refreshSIAAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", dbService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	dbService.client = client
-	dbService.ispAuth = ispAuth
 	dbService.IdsecBaseService = baseService
-	dbService.ssoService, err = sso.NewIdsecSIASSOService(ispAuth)
+	dbService.IdsecISPBaseService = ispBaseService
+	dbService.ssoService, err = sso.NewIdsecSIASSOService(ispBaseService)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +63,7 @@ func NewIdsecSIADBService(authenticators ...auth.IdsecAuth) (*IdsecSIADBService,
 }
 
 func (s *IdsecSIADBService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -76,7 +71,7 @@ func (s *IdsecSIADBService) refreshSIAAuth(client *common.IdsecClient) error {
 }
 
 func (s *IdsecSIADBService) proxyAddress(dbType string) (string, error) {
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return "", err
 	}
@@ -85,7 +80,7 @@ func (s *IdsecSIADBService) proxyAddress(dbType string) (string, error) {
 }
 
 func (s *IdsecSIADBService) connectionString(targetAddress string, targetUsername string, networkName string) (string, error) {
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return "", err
 	}
@@ -183,19 +178,6 @@ func (s *IdsecSIADBService) createMyLoginCnf(username string, address string, pa
 	return tempFile.Name(), nil
 }
 
-func (s *IdsecSIADBService) execute(commandLine string) error {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd.exe", "/C", commandLine)
-	} else {
-		cmd = exec.Command("sh", "-c", commandLine)
-	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
-}
-
 func (s *IdsecSIADBService) generateAssets(
 	assetType string,
 	connectionMethod string,
@@ -216,7 +198,7 @@ func (s *IdsecSIADBService) generateAssets(
 	if resourceType != "" {
 		assetsRequest["resource_type"] = resourceType
 	}
-	response, err := s.client.Post(context.Background(), assetsURL, assetsRequest)
+	response, err := s.ISPClient().Post(context.Background(), assetsURL, assetsRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +252,7 @@ func (s *IdsecSIADBService) Psql(psqlExecution *dbmodels.IdsecSIADBPsqlExecution
 			s.Logger.Warning("Error removing password from pgpass: %v", err)
 		}
 	}(s, connectionString, proxyAddress, password)
-	return s.execute(executionAction)
+	return common.ExecuteCommand(executionAction)
 }
 
 // Mysql executes a MySQL command using the provided execution parameters.
@@ -300,7 +282,7 @@ func (s *IdsecSIADBService) Mysql(mysqlExecution *dbmodels.IdsecSIADBMysqlExecut
 			s.Logger.Warning("Error removing temporary .mylogin.cnf file: %v", err)
 		}
 	}()
-	return s.execute(executionAction)
+	return common.ExecuteCommand(executionAction)
 }
 
 // Sqlcmd executes a sqlcmd command using the provided execution parameters.
@@ -320,11 +302,11 @@ func (s *IdsecSIADBService) Sqlcmd(sqlcmdExecution *dbmodels.IdsecSIADBSqlcmdExe
 		return err
 	}
 	executionAction := fmt.Sprintf("%s -U %s -S %s -l %d -P%s", sqlcmdExecution.SqlcmdPath, connectionString, proxyAddress, defaultSqlcmdTimeout, password)
-	return s.execute(executionAction)
+	return common.ExecuteCommand(executionAction)
 }
 
-// GenerateOracleTnsNames generates Oracle TNS names and writes them to the specified folder.
-func (s *IdsecSIADBService) GenerateOracleTnsNames(generateOracleAssets *dbmodels.IdsecSIADBOracleGenerateAssets) error {
+// GenerateOracleTnsnames generates Oracle TNS names and writes them to the specified folder.
+func (s *IdsecSIADBService) GenerateOracleTnsnames(generateOracleAssets *dbmodels.IdsecSIADBOracleGenerateAssets) error {
 	s.Logger.Info("Generating Oracle TNS names")
 	assetsData, err := s.generateAssets(
 		dbmodels.AssetTypeOracleTNSAssets,

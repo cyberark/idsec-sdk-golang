@@ -241,7 +241,7 @@ const (
 	}`
 )
 
-func TestCreateRole(t *testing.T) {
+func TestCreate(t *testing.T) {
 	tests := []struct {
 		name                              string
 		createRole                        *rolesmodels.IdsecIdentityCreateRole
@@ -394,7 +394,7 @@ func TestCreateRole(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.CreateRole(tt.createRole)
+			result, err := service.Create(tt.createRole)
 
 			if tt.expectedError {
 				if err == nil {
@@ -418,7 +418,7 @@ func TestCreateRole(t *testing.T) {
 	}
 }
 
-func TestAddAdminRightsToRole(t *testing.T) {
+func TestAddAdminRights(t *testing.T) {
 	tests := []struct {
 		name                              string
 		addAdminRights                    *rolesmodels.IdsecIdentityAddAdminRightsToRole
@@ -514,7 +514,7 @@ func TestAddAdminRightsToRole(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			_, err = service.AddAdminRightsToRole(tt.addAdminRights)
+			_, err = service.AddAdminRights(tt.addAdminRights)
 
 			if tt.expectedError {
 				if err == nil {
@@ -530,7 +530,7 @@ func TestAddAdminRightsToRole(t *testing.T) {
 	}
 }
 
-func TestRemoveAdminRightsFromRole(t *testing.T) {
+func TestRemoveAdminRights(t *testing.T) {
 	tests := []struct {
 		name                              string
 		removeAdminRights                 *rolesmodels.IdsecIdentityRemoveAdminRightsToRole
@@ -598,7 +598,7 @@ func TestRemoveAdminRightsFromRole(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			err = service.RemoveAdminRightsFromRole(tt.removeAdminRights)
+			err = service.RemoveAdminRights(tt.removeAdminRights)
 
 			if tt.expectedError {
 				if err == nil {
@@ -614,7 +614,7 @@ func TestRemoveAdminRightsFromRole(t *testing.T) {
 	}
 }
 
-func TestUpdateRole(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	tests := []struct {
 		name                              string
 		updateRole                        *rolesmodels.IdsecIdentityUpdateRole
@@ -678,7 +678,7 @@ func TestUpdateRole(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpdateRole(tt.updateRole)
+			result, err := service.Update(tt.updateRole)
 
 			if tt.expectedError {
 				if err == nil {
@@ -699,7 +699,7 @@ func TestUpdateRole(t *testing.T) {
 	}
 }
 
-func TestDeleteRole(t *testing.T) {
+func TestDelete(t *testing.T) {
 	tests := []struct {
 		name                              string
 		deleteRole                        *rolesmodels.IdsecIdentityDeleteRole
@@ -768,7 +768,7 @@ func TestDeleteRole(t *testing.T) {
 			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
 			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
-			err = service.DeleteRole(tt.deleteRole)
+			err = service.Delete(tt.deleteRole)
 
 			if tt.expectedError {
 				if err == nil {
@@ -784,7 +784,7 @@ func TestDeleteRole(t *testing.T) {
 	}
 }
 
-func TestListRoleMembers(t *testing.T) {
+func TestListMembers(t *testing.T) {
 	tests := []struct {
 		name                              string
 		listRoleMembers                   *rolesmodels.IdsecIdentityListRoleMembers
@@ -851,7 +851,7 @@ func TestListRoleMembers(t *testing.T) {
 			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
 			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
-			result, err := service.ListRoleMembers(tt.listRoleMembers)
+			result, err := service.ListMembers(tt.listRoleMembers)
 
 			if tt.expectedError {
 				if err == nil {
@@ -872,7 +872,7 @@ func TestListRoleMembers(t *testing.T) {
 	}
 }
 
-func TestAddMemberToRole(t *testing.T) {
+func TestAddMember(t *testing.T) {
 	tests := []struct {
 		name                              string
 		addMember                         *rolesmodels.IdsecIdentityAddMemberToRole
@@ -940,7 +940,7 @@ func TestAddMemberToRole(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.AddMemberToRole(tt.addMember)
+			result, err := service.AddMember(tt.addMember)
 
 			if tt.expectedError {
 				if err == nil {
@@ -961,7 +961,7 @@ func TestAddMemberToRole(t *testing.T) {
 	}
 }
 
-func TestRemoveMemberFromRole(t *testing.T) {
+func TestRemoveMember(t *testing.T) {
 	tests := []struct {
 		name                              string
 		removeMember                      *rolesmodels.IdsecIdentityRemoveMemberFromRole
@@ -1019,7 +1019,7 @@ func TestRemoveMemberFromRole(t *testing.T) {
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
 			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
-			err = service.RemoveMemberFromRole(tt.removeMember)
+			err = service.RemoveMember(tt.removeMember)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1035,7 +1035,7 @@ func TestRemoveMemberFromRole(t *testing.T) {
 	}
 }
 
-func TestRoleMember(t *testing.T) {
+func TestGetMember(t *testing.T) {
 	tests := []struct {
 		name                              string
 		getRoleMember                     *rolesmodels.IdsecIdentityGetRoleMember
@@ -1113,7 +1113,7 @@ func TestRoleMember(t *testing.T) {
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
 			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
-			result, err := service.RoleMember(tt.getRoleMember)
+			result, err := service.GetMember(tt.getRoleMember)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1134,7 +1134,7 @@ func TestRoleMember(t *testing.T) {
 	}
 }
 
-func TestRoleMembersStats(t *testing.T) {
+func TestMemberStats(t *testing.T) {
 	tests := []struct {
 		name                              string
 		getRoleMembersStats               *rolesmodels.IdsecIdentityGetRoleMembersStats
@@ -1198,7 +1198,7 @@ func TestRoleMembersStats(t *testing.T) {
 			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
 			service.DirectoriesService.DoTenantSuffixPost = MockPostFunc(MockHTTPResponse(http.StatusOK, TenantSuffixResponseJSON), nil)
 
-			result, err := service.RoleMembersStats(tt.getRoleMembersStats)
+			result, err := service.MemberStats(tt.getRoleMembersStats)
 
 			if tt.expectedError {
 				if err == nil {

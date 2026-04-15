@@ -2,8 +2,10 @@ package aws
 
 import (
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
@@ -16,11 +18,18 @@ import (
 
 // setupAWSService creates an IdsecCCEAWSService with the given mock ISP client.
 func setupAWSService(client *isp.IdsecISPServiceClient) *IdsecCCEAWSService {
+	ispBase := &services.IdsecISPBaseService{}
+	// Use reflection to set the private client field for testing
+	v := reflect.ValueOf(ispBase).Elem()
+	clientField := v.FieldByName("client")
+	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
+	clientField.Set(reflect.ValueOf(client))
+
 	return &IdsecCCEAWSService{
-		client: client,
 		IdsecBaseService: &services.IdsecBaseService{
 			Logger: common.GlobalLogger,
 		},
+		IdsecISPBaseService: ispBase,
 	}
 }
 

@@ -63,10 +63,8 @@ type IdsecIdentityWebappsTemplatePage = common.IdsecPage[webappsmodels.IdsecIden
 
 // IdsecIdentityWebappsService is the service for managing identity webapps.
 type IdsecIdentityWebappsService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth            *auth.IdsecISPAuth
-	client             *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 	DirectoriesService *directories.IdsecIdentityDirectoriesService
 
 	DoPost             func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -86,23 +84,27 @@ func NewIdsecIdentityWebappsService(authenticators ...auth.IdsecAuth) (*IdsecIde
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityWebappsService.refreshIdentityWebappsAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityWebappsService.refreshIdentityWebappsAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
-	identityWebappsService.client = client
-	identityWebappsService.ispAuth = ispAuth
 	identityWebappsService.IdsecBaseService = baseService
+	identityWebappsService.IdsecISPBaseService = ispBaseService
 	identityWebappsService.DirectoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
 	if err != nil {
 		return nil, err
@@ -114,18 +116,18 @@ func (s *IdsecIdentityWebappsService) postOperation() func(ctx context.Context, 
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityWebappsService) redrockQueryPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoRedrockQueryPost != nil {
 		return s.DoRedrockQueryPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityWebappsService) refreshIdentityWebappsAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -169,7 +171,7 @@ func (s *IdsecIdentityWebappsService) getWebappIDByName(webappName string) (stri
 	if err == nil {
 		return webappID, nil
 	}
-	pages, err := s.ListWebappsBy(&webappsmodels.IdsecIdentityWebappsFilters{
+	pages, err := s.ListBy(&webappsmodels.IdsecIdentityWebappsFilters{
 		Search:   webappName,
 		Limit:    1,
 		PageSize: 1,
@@ -188,7 +190,7 @@ func (s *IdsecIdentityWebappsService) getWebappIDByName(webappName string) (stri
 }
 
 // Import imports a webapp into the system and returns the imported webapp details.
-func (s *IdsecIdentityWebappsService) ImportWebapp(importWebapp *webappsmodels.IdsecIdentityImportWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
+func (s *IdsecIdentityWebappsService) Import(importWebapp *webappsmodels.IdsecIdentityImportWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
 	s.Logger.Info("Importing webapp with template name: [%s]", importWebapp.TemplateName)
 	importTemplateRequest := map[string]interface{}{
 		"ID": []string{importWebapp.TemplateName},
@@ -227,7 +229,7 @@ func (s *IdsecIdentityWebappsService) ImportWebapp(importWebapp *webappsmodels.I
 	}
 	webappID := webappInfoMap["_RowKey"].(string)
 	if importWebapp.WebappName != nil || importWebapp.Description != nil || importWebapp.IdsecIdentityWebappAppsConfiguration != (webappsmodels.IdsecIdentityWebappAppsConfiguration{}) || importWebapp.IdsecIdentityWebappPolicyConfiguration != (webappsmodels.IdsecIdentityWebappPolicyConfiguration{}) {
-		return s.UpdateWebapp(&webappsmodels.IdsecIdentityUpdateWebapp{
+		return s.Update(&webappsmodels.IdsecIdentityUpdateWebapp{
 			IdsecIdentityWebappAppsConfiguration:   importWebapp.IdsecIdentityWebappAppsConfiguration,
 			IdsecIdentityWebappPolicyConfiguration: importWebapp.IdsecIdentityWebappPolicyConfiguration,
 			WebappID:                               webappID,
@@ -236,7 +238,7 @@ func (s *IdsecIdentityWebappsService) ImportWebapp(importWebapp *webappsmodels.I
 			Description:                            importWebapp.Description,
 		})
 	}
-	return s.Webapp(&webappsmodels.IdsecIdentityGetWebapp{WebappID: webappID})
+	return s.Get(&webappsmodels.IdsecIdentityGetWebapp{WebappID: webappID})
 }
 
 func (s *IdsecIdentityWebappsService) serializeOauthProfile(oauthProfile *webappsmodels.IdsecIdentityWebappOAuthProfile) (map[string]interface{}, error) {
@@ -275,11 +277,11 @@ func (s *IdsecIdentityWebappsService) serializeAuthRules(authRules *webappsmodel
 	return authRuleJson, nil
 }
 
-// UpdateWebapp updates the details of an existing webapp and returns the updated webapp details.
-func (s *IdsecIdentityWebappsService) UpdateWebapp(updateWebapp *webappsmodels.IdsecIdentityUpdateWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
+// Update updates the details of an existing webapp and returns the updated webapp details.
+func (s *IdsecIdentityWebappsService) Update(updateWebapp *webappsmodels.IdsecIdentityUpdateWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
 	s.Logger.Info("Updating webapp with id: [%s]", updateWebapp.WebappID)
 	// First get existing app
-	webapp, err := s.Webapp(&webappsmodels.IdsecIdentityGetWebapp{WebappID: updateWebapp.WebappID})
+	webapp, err := s.Get(&webappsmodels.IdsecIdentityGetWebapp{WebappID: updateWebapp.WebappID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get existing webapp details: %w", err)
 	}
@@ -447,11 +449,11 @@ func (s *IdsecIdentityWebappsService) UpdateWebapp(updateWebapp *webappsmodels.I
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to update application - [%v]", result)
 	}
-	return s.Webapp(&webappsmodels.IdsecIdentityGetWebapp{WebappID: updateWebapp.WebappID})
+	return s.Get(&webappsmodels.IdsecIdentityGetWebapp{WebappID: updateWebapp.WebappID})
 }
 
-// DeleteWebapp deletes an existing webapp from the system.
-func (s *IdsecIdentityWebappsService) DeleteWebapp(deleteWebapp *webappsmodels.IdsecIdentityDeleteWebapp) error {
+// Delete deletes an existing webapp from the system.
+func (s *IdsecIdentityWebappsService) Delete(deleteWebapp *webappsmodels.IdsecIdentityDeleteWebapp) error {
 	if deleteWebapp.WebappID == "" && deleteWebapp.WebappName != "" {
 		webappID, err := s.getWebappIDByName(deleteWebapp.WebappName)
 		if err != nil {
@@ -489,8 +491,8 @@ func (s *IdsecIdentityWebappsService) DeleteWebapp(deleteWebapp *webappsmodels.I
 	return nil
 }
 
-// Webapp fetches the details of a specific webapp by ID or name.
-func (s *IdsecIdentityWebappsService) Webapp(getWebapp *webappsmodels.IdsecIdentityGetWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
+// Get fetches the details of a specific webapp by ID or name.
+func (s *IdsecIdentityWebappsService) Get(getWebapp *webappsmodels.IdsecIdentityGetWebapp) (*webappsmodels.IdsecIdentityWebapp, error) {
 	if getWebapp.WebappID == "" && getWebapp.WebappName != "" {
 		webappID, err := s.getWebappIDByName(getWebapp.WebappName)
 		if err != nil {
@@ -705,13 +707,13 @@ func (s *IdsecIdentityWebappsService) listApps(pageSize int, limit int, pageNumb
 	return output, nil
 }
 
-// ListWebapps fetches a list of webapps based on the provided filters and returns a channel of IdsecIdentityWebappsPage.
-func (s *IdsecIdentityWebappsService) ListWebapps() (<-chan *IdsecIdentityWebappsPage, error) {
+// List fetches a list of webapps based on the provided filters and returns a channel of IdsecIdentityWebappsPage.
+func (s *IdsecIdentityWebappsService) List() (<-chan *IdsecIdentityWebappsPage, error) {
 	return s.listApps(defaultPageSize, defaultLimit, 1, -1, "")
 }
 
-// ListWebappsBy fetches a list of webapps based on the provided filters and returns a channel of IdsecIdentityWebappsPage.
-func (s *IdsecIdentityWebappsService) ListWebappsBy(filters *webappsmodels.IdsecIdentityWebappsFilters) (<-chan *IdsecIdentityWebappsPage, error) {
+// ListBy fetches a list of webapps based on the provided filters and returns a channel of IdsecIdentityWebappsPage.
+func (s *IdsecIdentityWebappsService) ListBy(filters *webappsmodels.IdsecIdentityWebappsFilters) (<-chan *IdsecIdentityWebappsPage, error) {
 	return s.listApps(filters.PageSize, filters.Limit, filters.PageNumber, filters.MaxPageCount, filters.Search)
 }
 
@@ -727,8 +729,8 @@ func (s *IdsecIdentityWebappsService) parseGrants(grants int) ([]string, error) 
 	return grantsList, nil
 }
 
-// SetWebappPermissions sets the permissions for a specific webapp and returns the updated permissions.
-func (s *IdsecIdentityWebappsService) SetWebappPermissions(setPermissions *webappsmodels.IdsecIdentitySetWebappPermissions) (*webappsmodels.IdsecIdentityWebappPermissions, error) {
+// SetPermissions sets the permissions for a specific webapp and returns the updated permissions.
+func (s *IdsecIdentityWebappsService) SetPermissions(setPermissions *webappsmodels.IdsecIdentitySetWebappPermissions) (*webappsmodels.IdsecIdentityWebappPermissions, error) {
 	if setPermissions.WebappID == "" && setPermissions.WebappName != "" {
 		webappID, err := s.getWebappIDByName(setPermissions.WebappName)
 		if err != nil {
@@ -773,7 +775,7 @@ func (s *IdsecIdentityWebappsService) SetWebappPermissions(setPermissions *webap
 				default:
 					entityType = directoriesmodels.EntityTypeUser
 				}
-				pages, err := s.DirectoriesService.ListDirectoriesEntities(&directoriesmodels.IdsecIdentityListDirectoriesEntities{
+				pages, err := s.DirectoriesService.ListEntities(&directoriesmodels.IdsecIdentityListDirectoriesEntities{
 					EntityTypes:  []string{entityType},
 					Search:       g.Principal,
 					Limit:        1,
@@ -876,12 +878,12 @@ func (s *IdsecIdentityWebappsService) SetWebappPermissions(setPermissions *webap
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to set application permissions - [%v]", result)
 	}
-	return s.WebappPermissions(&webappsmodels.IdsecIdentityGetWebappPermissions{WebappID: setPermissions.WebappID})
+	return s.GetPermissions(&webappsmodels.IdsecIdentityGetWebappPermissions{WebappID: setPermissions.WebappID})
 }
 
-// SetWebappPermission sets the permissions for a specific principal on a webapp and returns the updated permission details for that principal.
-func (s *IdsecIdentityWebappsService) SetWebappPermission(setPermission *webappsmodels.IdsecIdentitySetWebappPermission) (*webappsmodels.IdsecIdentityWebappPermission, error) {
-	permissions, err := s.SetWebappPermissions(&webappsmodels.IdsecIdentitySetWebappPermissions{
+// SetPermission sets the permissions for a specific principal on a webapp and returns the updated permission details for that principal.
+func (s *IdsecIdentityWebappsService) SetPermission(setPermission *webappsmodels.IdsecIdentitySetWebappPermission) (*webappsmodels.IdsecIdentityWebappPermission, error) {
+	permissions, err := s.SetPermissions(&webappsmodels.IdsecIdentitySetWebappPermissions{
 		WebappID: setPermission.WebappID,
 		Grants:   []webappsmodels.IdsecIdentityWebappGrant{setPermission.IdsecIdentityWebappGrant},
 	})
@@ -905,8 +907,8 @@ func (s *IdsecIdentityWebappsService) SetWebappPermission(setPermission *webapps
 	return nil, fmt.Errorf("failed to find updated permission for principal [%s] after setting permission", setPermission.Principal)
 }
 
-// WebappPermissions fetches the permissions of a specific webapp by ID or name.
-func (s *IdsecIdentityWebappsService) WebappPermissions(getPermissions *webappsmodels.IdsecIdentityGetWebappPermissions) (*webappsmodels.IdsecIdentityWebappPermissions, error) {
+// GetPermissions fetches the permissions of a specific webapp by ID or name.
+func (s *IdsecIdentityWebappsService) GetPermissions(getPermissions *webappsmodels.IdsecIdentityGetWebappPermissions) (*webappsmodels.IdsecIdentityWebappPermissions, error) {
 	if getPermissions.WebappID == "" && getPermissions.WebappName != "" {
 		webappID, err := s.getWebappIDByName(getPermissions.WebappName)
 		if err != nil {
@@ -974,12 +976,12 @@ func (s *IdsecIdentityWebappsService) WebappPermissions(getPermissions *webappsm
 	return webappPerms, nil
 }
 
-// WebappPermission fetches the permissions for a specific principal on a webapp by webapp ID or name and principal name or ID.
-func (s *IdsecIdentityWebappsService) WebappPermission(getPermission *webappsmodels.IdsecIdentityGetWebappPermission) (*webappsmodels.IdsecIdentityWebappPermission, error) {
+// GetPermission fetches the permissions for a specific principal on a webapp by webapp ID or name and principal name or ID.
+func (s *IdsecIdentityWebappsService) GetPermission(getPermission *webappsmodels.IdsecIdentityGetWebappPermission) (*webappsmodels.IdsecIdentityWebappPermission, error) {
 	if getPermission.Principal == nil && getPermission.PrincipalId == nil {
 		return nil, fmt.Errorf("either principal name or principal ID must be provided to get specific permission")
 	}
-	permissions, err := s.WebappPermissions(&webappsmodels.IdsecIdentityGetWebappPermissions{
+	permissions, err := s.GetPermissions(&webappsmodels.IdsecIdentityGetWebappPermissions{
 		WebappID:   getPermission.WebappID,
 		WebappName: getPermission.WebappName,
 	})
@@ -1150,18 +1152,18 @@ func (s *IdsecIdentityWebappsService) listAppsTemplates(pageSize int, limit int,
 	return output, nil
 }
 
-// ListWebappTemplates fetches a list of webapp templates based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
-func (s *IdsecIdentityWebappsService) ListWebappTemplates() (<-chan *IdsecIdentityWebappsTemplatePage, error) {
+// ListTemplates fetches a list of webapp templates based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
+func (s *IdsecIdentityWebappsService) ListTemplates() (<-chan *IdsecIdentityWebappsTemplatePage, error) {
 	return s.listAppsTemplates(defaultPageSize, defaultLimit, 1, -1, "")
 }
 
-// ListWebappTemplatesBy fetches a list of webapp templates based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
-func (s *IdsecIdentityWebappsService) ListWebappTemplatesBy(filters *webappsmodels.IdsecIdentityWebappsTemplatesFilters) (<-chan *IdsecIdentityWebappsTemplatePage, error) {
+// ListTemplatesBy fetches a list of webapp templates based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
+func (s *IdsecIdentityWebappsService) ListTemplatesBy(filters *webappsmodels.IdsecIdentityWebappsTemplatesFilters) (<-chan *IdsecIdentityWebappsTemplatePage, error) {
 	return s.listAppsTemplates(filters.PageSize, filters.Limit, filters.PageNumber, filters.MaxPageCount, filters.Search)
 }
 
-// ListWebappCustomTemplates fetches the list of custom webapp templates available in the system and returns a channel of IdsecIdentityWebappsTemplatePage.
-func (s *IdsecIdentityWebappsService) ListWebappCustomTemplates() (*webappsmodels.IdsecIdentityWebappCustomTemplates, error) {
+// ListCustomTemplates fetches the list of custom webapp templates available in the system and returns a channel of IdsecIdentityWebappsTemplatePage.
+func (s *IdsecIdentityWebappsService) ListCustomTemplates() (*webappsmodels.IdsecIdentityWebappCustomTemplates, error) {
 	s.Logger.Info("Listing custom webapp templates")
 	response, err := s.postOperation()(context.Background(), getApplicationsCustomTemplatesURL, map[string]interface{}{})
 	if err != nil {
@@ -1250,10 +1252,10 @@ func (s *IdsecIdentityWebappsService) ListWebappCustomTemplates() (*webappsmodel
 	return customTemplates, nil
 }
 
-// ListWebappCustomTemplatesBy fetches the list of custom webapp templates available in the system based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
-func (s *IdsecIdentityWebappsService) ListWebappCustomTemplatesBy(filters *webappsmodels.IdsecIdentityWebappsCustomTemplatesFilters) (*webappsmodels.IdsecIdentityWebappCustomTemplates, error) {
+// ListCustomTemplatesBy fetches the list of custom webapp templates available in the system based on the provided filters and returns a channel of IdsecIdentityWebappsTemplatePage.
+func (s *IdsecIdentityWebappsService) ListCustomTemplatesBy(filters *webappsmodels.IdsecIdentityWebappsCustomTemplatesFilters) (*webappsmodels.IdsecIdentityWebappCustomTemplates, error) {
 	s.Logger.Info("Listing custom webapp templates with filters")
-	customTemplates, err := s.ListWebappCustomTemplates()
+	customTemplates, err := s.ListCustomTemplates()
 	if err != nil {
 		return nil, err
 	}
@@ -1269,8 +1271,8 @@ func (s *IdsecIdentityWebappsService) ListWebappCustomTemplatesBy(filters *webap
 	return filteredTemplates, nil
 }
 
-// ListWebappTemplatesCategories fetches the list of webapp template categories available in the system.
-func (s *IdsecIdentityWebappsService) ListWebappTemplatesCategories() (*webappsmodels.IdsecIdentityWebappTemplatesCategories, error) {
+// ListTemplatesCategories fetches the list of webapp template categories available in the system.
+func (s *IdsecIdentityWebappsService) ListTemplatesCategories() (*webappsmodels.IdsecIdentityWebappTemplatesCategories, error) {
 	s.Logger.Info("Listing webapp template categories")
 	response, err := s.postOperation()(context.Background(), getApplicationsTemplatesCategoriesURL, map[string]interface{}{})
 	if err != nil {
@@ -1310,8 +1312,8 @@ func (s *IdsecIdentityWebappsService) ListWebappTemplatesCategories() (*webappsm
 	return categories, nil
 }
 
-// WebappTemplate fetches the details of a specific webapp template by its ID.
-func (s *IdsecIdentityWebappsService) WebappTemplate(getTemplate *webappsmodels.IdsecIdentityGetWebappTemplate) (*webappsmodels.IdsecIdentityWebappTemplate, error) {
+// GetTemplate fetches the details of a specific webapp template by its ID.
+func (s *IdsecIdentityWebappsService) GetTemplate(getTemplate *webappsmodels.IdsecIdentityGetWebappTemplate) (*webappsmodels.IdsecIdentityWebappTemplate, error) {
 	searchString := getTemplate.WebappTemplateID
 	if searchString == "" && getTemplate.WebappTemplateName != "" {
 		searchString = getTemplate.WebappTemplateName
@@ -1320,7 +1322,7 @@ func (s *IdsecIdentityWebappsService) WebappTemplate(getTemplate *webappsmodels.
 		return nil, fmt.Errorf("either webapp template ID or name must be provided for fetching details")
 	}
 	s.Logger.Info("Getting webapp template details by: [%s]", searchString)
-	pages, err := s.ListWebappTemplatesBy(&webappsmodels.IdsecIdentityWebappsTemplatesFilters{
+	pages, err := s.ListTemplatesBy(&webappsmodels.IdsecIdentityWebappsTemplatesFilters{
 		PageSize:   1,
 		PageNumber: 1,
 		Search:     searchString,
@@ -1338,8 +1340,8 @@ func (s *IdsecIdentityWebappsService) WebappTemplate(getTemplate *webappsmodels.
 	return nil, fmt.Errorf("webapp template not found with ID or name: [%s]", searchString)
 }
 
-// WebappCustomTemplate fetches the details of a specific custom webapp template by its ID.
-func (s *IdsecIdentityWebappsService) WebappCustomTemplate(getCustomTemplate *webappsmodels.IdsecIdentityGetWebappCustomTemplate) (*webappsmodels.IdsecIdentityWebappTemplate, error) {
+// GetCustomTemplate fetches the details of a specific custom webapp template by its ID.
+func (s *IdsecIdentityWebappsService) GetCustomTemplate(getCustomTemplate *webappsmodels.IdsecIdentityGetWebappCustomTemplate) (*webappsmodels.IdsecIdentityWebappTemplate, error) {
 	searchString := getCustomTemplate.WebappTemplateID
 	if searchString == "" && getCustomTemplate.WebappTemplateName != "" {
 		searchString = getCustomTemplate.WebappTemplateName
@@ -1348,7 +1350,7 @@ func (s *IdsecIdentityWebappsService) WebappCustomTemplate(getCustomTemplate *we
 		return nil, fmt.Errorf("either custom webapp template ID or name must be provided for fetching details")
 	}
 	s.Logger.Info("Getting custom webapp template details by: [%s]", searchString)
-	customTemplates, err := s.ListWebappCustomTemplates()
+	customTemplates, err := s.ListCustomTemplates()
 	if err != nil {
 		return nil, err
 	}
@@ -1360,10 +1362,10 @@ func (s *IdsecIdentityWebappsService) WebappCustomTemplate(getCustomTemplate *we
 	return nil, fmt.Errorf("custom webapp template not found with ID or name: [%s]", searchString)
 }
 
-// WebappsStatsStats fetches statistics about the webapps in the system, such as total count and count by type.
-func (s *IdsecIdentityWebappsService) WebappStats() (*webappsmodels.IdsecIdentityWebappsStats, error) {
+// Stats fetches statistics about the webapps in the system, such as total count and count by type.
+func (s *IdsecIdentityWebappsService) Stats() (*webappsmodels.IdsecIdentityWebappsStats, error) {
 	s.Logger.Info("Getting webapps stats")
-	pages, err := s.ListWebapps()
+	pages, err := s.List()
 	if err != nil {
 		return nil, err
 	}

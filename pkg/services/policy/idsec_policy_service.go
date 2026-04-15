@@ -18,7 +18,6 @@ type IdsecPolicyPolicyPage = common.IdsecPage[policycommonmodels.IdsecPolicyComm
 
 // IdsecPolicyService represents the Policy service.
 type IdsecPolicyService struct {
-	services.IdsecService
 	*services.IdsecBaseService
 	baseService *policy.IdsecPolicyBaseService
 }
@@ -133,4 +132,16 @@ func (s *IdsecPolicyService) PoliciesStats() (*policycommonmodels.IdsecPolicySta
 // ServiceConfig returns the service configuration for IdsecPolicyService.
 func (s *IdsecPolicyService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
+}
+
+// AddExtraContextField adds a custom context field to telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyService) AddExtraContextField(name, shortName, value string) error {
+	return s.baseService.AddExtraContextField(name, shortName, value)
+}
+
+// ClearExtraContext removes all extra context fields from telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyService) ClearExtraContext() error {
+	return s.baseService.ClearExtraContext()
 }

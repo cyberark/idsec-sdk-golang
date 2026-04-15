@@ -94,10 +94,8 @@ type IdsecPCloudSafeMembersPage = common.IdsecPage[safesmodels.IdsecPCloudSafeMe
 
 // IdsecPCloudSafesService is the service for managing pCloud Safes.
 type IdsecPCloudSafesService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecPCloudSafesService creates a new instance of IdsecPCloudSafesService.
@@ -113,18 +111,26 @@ func NewIdsecPCloudSafesService(authenticators ...auth.IdsecAuth) (*IdsecPCloudS
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudSafesService.refreshPCloudSafesAuth, commonpcloud.DefaultPCloudRetryStrategy())
+
+	ispBaseService, err := services.NewIdsecISPBaseServiceWithRetry(
+		ispAuth,
+		"privilegecloud",
+		".",
+		"passwordvault",
+		pcloudSafesService.refreshPCloudSafesAuth,
+		commonpcloud.DefaultPCloudRetryStrategy(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	pcloudSafesService.client = client
-	pcloudSafesService.ispAuth = ispAuth
+
 	pcloudSafesService.IdsecBaseService = baseService
+	pcloudSafesService.IdsecISPBaseService = ispBaseService
 	return pcloudSafesService, nil
 }
 
 func (s *IdsecPCloudSafesService) refreshPCloudSafesAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -154,7 +160,7 @@ func (s *IdsecPCloudSafesService) listSafesWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.client.Get(context.Background(), safesURL, query)
+			response, err := s.ISPClient().Get(context.Background(), safesURL, query)
 			if err != nil {
 				s.Logger.Error("Failed to list safes: %v", err)
 				return
@@ -242,7 +248,7 @@ func (s *IdsecPCloudSafesService) listSafeMembersWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.client.Get(context.Background(), fmt.Sprintf(safeMembersURL, safeID), query)
+			response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(safeMembersURL, safeID), query)
 			if err != nil {
 				s.Logger.Error("Failed to list safe members: %v", err)
 				return
@@ -309,9 +315,9 @@ func (s *IdsecPCloudSafesService) listSafeMembersWithFilters(
 	return results, nil
 }
 
-// ListSafes returns a channel of IdsecPCloudSafesPage containing all safes.
+// List returns a channel of IdsecPCloudSafesPage containing all safes.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20List%20Safes.htm?
-func (s *IdsecPCloudSafesService) ListSafes() (<-chan *IdsecPCloudSafesPage, error) {
+func (s *IdsecPCloudSafesService) List() (<-chan *IdsecPCloudSafesPage, error) {
 	return s.listSafesWithFilters(
 		"",
 		"",
@@ -320,9 +326,9 @@ func (s *IdsecPCloudSafesService) ListSafes() (<-chan *IdsecPCloudSafesPage, err
 	)
 }
 
-// ListSafesBy returns a channel of IdsecPCloudSafesPage containing safes filtered by the given filters.
+// ListBy returns a channel of IdsecPCloudSafesPage containing safes filtered by the given filters.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20List%20Safes.htm?
-func (s *IdsecPCloudSafesService) ListSafesBy(safesFilters *safesmodels.IdsecPCloudSafesFilters) (<-chan *IdsecPCloudSafesPage, error) {
+func (s *IdsecPCloudSafesService) ListBy(safesFilters *safesmodels.IdsecPCloudSafesFilters) (<-chan *IdsecPCloudSafesPage, error) {
 	return s.listSafesWithFilters(
 		safesFilters.Search,
 		safesFilters.Sort,
@@ -331,9 +337,9 @@ func (s *IdsecPCloudSafesService) ListSafesBy(safesFilters *safesmodels.IdsecPCl
 	)
 }
 
-// ListSafeMembers returns a channel of IdsecPCloudSafeMembersPage containing all safe members.
+// ListMembers returns a channel of IdsecPCloudSafeMembersPage containing all safe members.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Members.htm
-func (s *IdsecPCloudSafesService) ListSafeMembers(listSafeMembers *safesmodels.IdsecPCloudListSafeMembers) (<-chan *IdsecPCloudSafeMembersPage, error) {
+func (s *IdsecPCloudSafesService) ListMembers(listSafeMembers *safesmodels.IdsecPCloudListSafeMembers) (<-chan *IdsecPCloudSafeMembersPage, error) {
 	return s.listSafeMembersWithFilters(
 		listSafeMembers.SafeID,
 		"",
@@ -344,9 +350,9 @@ func (s *IdsecPCloudSafesService) ListSafeMembers(listSafeMembers *safesmodels.I
 	)
 }
 
-// ListSafeMembersBy returns a channel of IdsecPCloudSafeMembersPage containing safe members filtered by the given filters.
+// ListMembersBy returns a channel of IdsecPCloudSafeMembersPage containing safe members filtered by the given filters.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Members.htm
-func (s *IdsecPCloudSafesService) ListSafeMembersBy(safeMembersFilters *safesmodels.IdsecPCloudSafeMembersFilters) (<-chan *IdsecPCloudSafeMembersPage, error) {
+func (s *IdsecPCloudSafesService) ListMembersBy(safeMembersFilters *safesmodels.IdsecPCloudSafeMembersFilters) (<-chan *IdsecPCloudSafeMembersPage, error) {
 	return s.listSafeMembersWithFilters(
 		safeMembersFilters.SafeID,
 		safeMembersFilters.Search,
@@ -357,15 +363,15 @@ func (s *IdsecPCloudSafesService) ListSafeMembersBy(safeMembersFilters *safesmod
 	)
 }
 
-// Safe retrieves a safe by its ID.
+// Get retrieves a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20Get%20Safes%20Details.htm
-func (s *IdsecPCloudSafesService) Safe(getSafe *safesmodels.IdsecPCloudGetSafe) (*safesmodels.IdsecPCloudSafe, error) {
+func (s *IdsecPCloudSafesService) Get(getSafe *safesmodels.IdsecPCloudGetSafe) (*safesmodels.IdsecPCloudSafe, error) {
 	s.Logger.Info("Retrieving safe [%s] - [%s]", getSafe.SafeID, getSafe.SafeName)
 	if getSafe.SafeID == "" && getSafe.SafeName == "" {
 		return nil, fmt.Errorf("either safe ID or safe name must be provided")
 	}
 	if getSafe.SafeID == "" && getSafe.SafeName != "" {
-		safesPages, err := s.ListSafesBy(&safesmodels.IdsecPCloudSafesFilters{
+		safesPages, err := s.ListBy(&safesmodels.IdsecPCloudSafesFilters{
 			Search: getSafe.SafeName,
 			Limit:  1,
 		})
@@ -384,7 +390,7 @@ func (s *IdsecPCloudSafesService) Safe(getSafe *safesmodels.IdsecPCloudGetSafe) 
 			return nil, fmt.Errorf("safe with name '%s' not found", getSafe.SafeName)
 		}
 	}
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(safeURL, getSafe.SafeID), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(safeURL, getSafe.SafeID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -413,11 +419,11 @@ func (s *IdsecPCloudSafesService) Safe(getSafe *safesmodels.IdsecPCloudGetSafe) 
 	return &safe, nil
 }
 
-// SafeMember retrieves a safe member by its safe ID and member name.
+// GetMember retrieves a safe member by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Member.htm
-func (s *IdsecPCloudSafesService) SafeMember(getSafeMember *safesmodels.IdsecPCloudGetSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
+func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPCloudGetSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Retrieving safe member [%s] [%s]", getSafeMember.SafeID, getSafeMember.MemberName)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(safeMemberURL, getSafeMember.SafeID, getSafeMember.MemberName), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(safeMemberURL, getSafeMember.SafeID, getSafeMember.MemberName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -453,9 +459,9 @@ func (s *IdsecPCloudSafesService) SafeMember(getSafeMember *safesmodels.IdsecPCl
 	return &safeMember, nil
 }
 
-// AddSafe adds a new safe.
+// Create adds a new safe.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Safe.htm
-func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSafe) (*safesmodels.IdsecPCloudSafe, error) {
+func (s *IdsecPCloudSafesService) Create(addSafe *safesmodels.IdsecPCloudAddSafe) (*safesmodels.IdsecPCloudSafe, error) {
 	s.Logger.Info("Adding safe [%s]", addSafe.SafeName)
 	addSafeJSON, err := common.SerializeJSONCamel(addSafe)
 	if err != nil {
@@ -477,7 +483,7 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 		// If both retention values are set, remove the versions one as only one can be set
 		delete(addSafeJSON, "numberOfVersionsRetention")
 	}
-	response, err := s.client.Post(context.Background(), safesURL, addSafeJSON)
+	response, err := s.ISPClient().Post(context.Background(), safesURL, addSafeJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -489,14 +495,14 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 	}(response.Body)
 	if response.StatusCode == http.StatusConflict {
 		s.Logger.Info("Safe [%s] already exists, retrieving existing safe", addSafe.SafeName)
-		safe, err := s.Safe(&safesmodels.IdsecPCloudGetSafe{
+		safe, err := s.Get(&safesmodels.IdsecPCloudGetSafe{
 			SafeName: addSafe.SafeName,
 		})
 		if err != nil {
 			// For some reason, the safe creation returned conflict but the safe is not found when retrieving it
 			// So we try again with a post to create
 			s.Logger.Info("Safe [%s] not found after conflict, retrying safe creation", addSafe.SafeName)
-			response, err = s.client.Post(context.Background(), safesURL, addSafeJSON)
+			response, err = s.ISPClient().Post(context.Background(), safesURL, addSafeJSON)
 			if err != nil {
 				return nil, err
 			}
@@ -529,9 +535,9 @@ func (s *IdsecPCloudSafesService) AddSafe(addSafe *safesmodels.IdsecPCloudAddSaf
 	return &safe, nil
 }
 
-// AddSafeMember adds a new member to a safe.
+// AddMember adds a new member to a safe.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Safe%20Member.htm
-func (s *IdsecPCloudSafesService) AddSafeMember(addSafeMember *safesmodels.IdsecPCloudAddSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
+func (s *IdsecPCloudSafesService) AddMember(addSafeMember *safesmodels.IdsecPCloudAddSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Adding safe member [%s] [%s]", addSafeMember.SafeID, addSafeMember.MemberName)
 	if addSafeMember.PermissionSet == "" && addSafeMember.Permissions == nil {
 		addSafeMember.PermissionSet = safesmodels.ReadOnly
@@ -552,7 +558,7 @@ func (s *IdsecPCloudSafesService) AddSafeMember(addSafeMember *safesmodels.Idsec
 	}
 	delete(addSafeMemberJSON, "permissionSet")
 	delete(addSafeMemberJSON, "safeId")
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(safeMembersURL, addSafeMember.SafeID), addSafeMemberJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(safeMembersURL, addSafeMember.SafeID), addSafeMemberJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -588,11 +594,11 @@ func (s *IdsecPCloudSafesService) AddSafeMember(addSafeMember *safesmodels.Idsec
 	return &safeMember, nil
 }
 
-// DeleteSafe deletes a safe by its ID.
+// Delete deletes a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Safe.htm
-func (s *IdsecPCloudSafesService) DeleteSafe(deleteSafe *safesmodels.IdsecPCloudDeleteSafe) error {
+func (s *IdsecPCloudSafesService) Delete(deleteSafe *safesmodels.IdsecPCloudDeleteSafe) error {
 	s.Logger.Info("Deleting safe [%s]", deleteSafe.SafeID)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(safeURL, deleteSafe.SafeID), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(safeURL, deleteSafe.SafeID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -608,11 +614,11 @@ func (s *IdsecPCloudSafesService) DeleteSafe(deleteSafe *safesmodels.IdsecPCloud
 	return nil
 }
 
-// DeleteSafeMember deletes a member from a safe by its safe ID and member name.
+// DeleteMember deletes a member from a safe by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Safe%20Member.htm
-func (s *IdsecPCloudSafesService) DeleteSafeMember(deleteSafeMember *safesmodels.IdsecPCloudDeleteSafeMember) error {
+func (s *IdsecPCloudSafesService) DeleteMember(deleteSafeMember *safesmodels.IdsecPCloudDeleteSafeMember) error {
 	s.Logger.Info("Deleting safe member [%s] [%s]", deleteSafeMember.SafeID, deleteSafeMember.MemberName)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(safeMemberURL, deleteSafeMember.SafeID, deleteSafeMember.MemberName), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(safeMemberURL, deleteSafeMember.SafeID, deleteSafeMember.MemberName), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -628,9 +634,9 @@ func (s *IdsecPCloudSafesService) DeleteSafeMember(deleteSafeMember *safesmodels
 	return nil
 }
 
-// UpdateSafe updates a safe by its ID.
+// Update updates a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Update%20Safe.htm
-func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloudUpdateSafe) (*safesmodels.IdsecPCloudSafe, error) {
+func (s *IdsecPCloudSafesService) Update(updateSafe *safesmodels.IdsecPCloudUpdateSafe) (*safesmodels.IdsecPCloudSafe, error) {
 	s.Logger.Info("Updating safe [%s]", updateSafe.SafeID)
 	updateSafeJSON, err := common.SerializeJSONCamel(updateSafe)
 	if err != nil {
@@ -638,13 +644,13 @@ func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloud
 	}
 	delete(updateSafeJSON, "safeId")
 	if len(updateSafeJSON) == 0 {
-		return s.Safe(&safesmodels.IdsecPCloudGetSafe{SafeID: updateSafe.SafeID})
+		return s.Get(&safesmodels.IdsecPCloudGetSafe{SafeID: updateSafe.SafeID})
 	}
 	if _, ok := updateSafeJSON["numberOfDaysRetention"]; ok {
 		// If both retention values are set, remove the versions one as only one can be set
 		delete(updateSafeJSON, "numberOfVersionsRetention")
 	}
-	response, err := s.client.Put(context.Background(), fmt.Sprintf(safeURL, updateSafe.SafeID), updateSafeJSON)
+	response, err := s.ISPClient().Put(context.Background(), fmt.Sprintf(safeURL, updateSafe.SafeID), updateSafeJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -673,9 +679,9 @@ func (s *IdsecPCloudSafesService) UpdateSafe(updateSafe *safesmodels.IdsecPCloud
 	return &safe, nil
 }
 
-// UpdateSafeMember updates a member of a safe by its safe ID and member name.
+// UpdateMember updates a member of a safe by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Update%20Safe%20Member.htm
-func (s *IdsecPCloudSafesService) UpdateSafeMember(updateSafeMember *safesmodels.IdsecPCloudUpdateSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
+func (s *IdsecPCloudSafesService) UpdateMember(updateSafeMember *safesmodels.IdsecPCloudUpdateSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Updating safe member [%s] [%s]", updateSafeMember.SafeID, updateSafeMember.MemberName)
 	if updateSafeMember.PermissionSet != "" || updateSafeMember.Permissions != nil {
 		if updateSafeMember.PermissionSet != safesmodels.Custom {
@@ -694,9 +700,9 @@ func (s *IdsecPCloudSafesService) UpdateSafeMember(updateSafeMember *safesmodels
 	delete(updateSafeMemberJSON, "memberName")
 	delete(updateSafeMemberJSON, "permissionSet")
 	if len(updateSafeMemberJSON) == 0 {
-		return s.SafeMember(&safesmodels.IdsecPCloudGetSafeMember{SafeID: updateSafeMember.SafeID, MemberName: updateSafeMember.MemberName})
+		return s.GetMember(&safesmodels.IdsecPCloudGetSafeMember{SafeID: updateSafeMember.SafeID, MemberName: updateSafeMember.MemberName})
 	}
-	response, err := s.client.Put(context.Background(), fmt.Sprintf(safeMemberURL, updateSafeMember.SafeID, updateSafeMember.MemberName), updateSafeMemberJSON)
+	response, err := s.ISPClient().Put(context.Background(), fmt.Sprintf(safeMemberURL, updateSafeMember.SafeID, updateSafeMember.MemberName), updateSafeMemberJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -732,10 +738,10 @@ func (s *IdsecPCloudSafesService) UpdateSafeMember(updateSafeMember *safesmodels
 	return &safeMember, nil
 }
 
-// SafesStats retrieves statistics about safes.
-func (s *IdsecPCloudSafesService) SafesStats() (*safesmodels.IdsecPCloudSafesStats, error) {
+// Stats retrieves statistics about safes.
+func (s *IdsecPCloudSafesService) Stats() (*safesmodels.IdsecPCloudSafesStats, error) {
 	s.Logger.Info("Retrieving safes stats")
-	safesChan, err := s.ListSafes()
+	safesChan, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -760,10 +766,10 @@ func (s *IdsecPCloudSafesService) SafesStats() (*safesmodels.IdsecPCloudSafesSta
 	return &safesStats, nil
 }
 
-// SafeMembersStats retrieves statistics about safe members for a specific safe.
-func (s *IdsecPCloudSafesService) SafeMembersStats(getSafeMembersStats *safesmodels.IdsecPCloudGetSafeMembersStats) (*safesmodels.IdsecPCloudSafeMembersStats, error) {
+// MembersStats retrieves statistics about safe members for a specific safe.
+func (s *IdsecPCloudSafesService) MembersStats(getSafeMembersStats *safesmodels.IdsecPCloudGetSafeMembersStats) (*safesmodels.IdsecPCloudSafeMembersStats, error) {
 	s.Logger.Info("Retrieving safe members stats [%s]", getSafeMembersStats.SafeID)
-	safeMembersChan, err := s.ListSafeMembers(&safesmodels.IdsecPCloudListSafeMembers{SafeID: getSafeMembersStats.SafeID})
+	safeMembersChan, err := s.ListMembers(&safesmodels.IdsecPCloudListSafeMembers{SafeID: getSafeMembersStats.SafeID})
 	if err != nil {
 		return nil, err
 	}
@@ -791,10 +797,10 @@ func (s *IdsecPCloudSafesService) SafeMembersStats(getSafeMembersStats *safesmod
 	return &safeMembersStats, nil
 }
 
-// SafesMembersStats retrieves statistics about safe members for all safes.
-func (s *IdsecPCloudSafesService) SafesMembersStats() (*safesmodels.IdsecPCloudSafesMembersStats, error) {
+// AllMembersStats retrieves statistics about safe members for all safes.
+func (s *IdsecPCloudSafesService) AllMembersStats() (*safesmodels.IdsecPCloudSafesMembersStats, error) {
 	s.Logger.Info("Retrieving safes members stats")
-	safesChan, err := s.ListSafes()
+	safesChan, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -809,7 +815,7 @@ func (s *IdsecPCloudSafesService) SafesMembersStats() (*safesmodels.IdsecPCloudS
 			wg.Add(1)
 			go func(safe *safesmodels.IdsecPCloudSafe) {
 				defer wg.Done()
-				safeMembersStats, err := s.SafeMembersStats(&safesmodels.IdsecPCloudGetSafeMembersStats{SafeID: safe.SafeID})
+				safeMembersStats, err := s.MembersStats(&safesmodels.IdsecPCloudGetSafeMembersStats{SafeID: safe.SafeID})
 				if err != nil {
 					once.Do(func() {
 						firstErr = err

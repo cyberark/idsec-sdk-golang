@@ -3,7 +3,7 @@ package sshca
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	siasshcaactions "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca/actions"
+	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca/actions"
 )
 
 // ServiceConfig is the configuration for the IdsecSIASSHCAService.
@@ -11,14 +11,8 @@ var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "sia-ssh-ca",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
-	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
-		actions.IdsecServiceActionTypeCLI: {
-			siasshcaactions.CLIAction,
-		},
-		actions.IdsecServiceActionTypeTerraformResource: {
-			siasshcaactions.TerraformActionSSHPublicKeyResource,
-		},
-	},
+	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
+	ActionSchemas:              svcactions.ActionToSchemaMap,
 }
 
 // ServiceGenerator is the function that creates a new instance of the SIA SSH CA service.

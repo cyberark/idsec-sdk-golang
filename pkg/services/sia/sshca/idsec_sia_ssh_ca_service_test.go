@@ -117,11 +117,11 @@ func createTestService() *IdsecSIASSHCAService {
 	return service
 }
 
-// TestGenerateNewCA tests the GenerateNewCA method.
+// TestGenerateNewCa tests the GenerateNewCa method.
 //
 // This test validates the ability to generate a new CA key version through the API.
 // It tests both successful generation and various error conditions.
-func TestGenerateNewCA(t *testing.T) {
+func TestGenerateNewCa(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockStatusCode   int
@@ -167,7 +167,7 @@ func TestGenerateNewCA(t *testing.T) {
 				return NewMockResponse(tt.mockStatusCode, tt.mockBody), nil
 			}
 
-			err := service.GenerateNewCA()
+			err := service.GenerateNewCa()
 
 			if tt.expectedError {
 				if err == nil {

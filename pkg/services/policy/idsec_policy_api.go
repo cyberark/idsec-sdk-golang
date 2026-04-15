@@ -4,6 +4,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db"
+	groupaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 )
 
@@ -11,6 +12,7 @@ import (
 type IdsecPolicyAPI struct {
 	policy      *IdsecPolicyService
 	cloudaccess *cloudaccess.IdsecPolicyCloudAccessService
+	groupaccess *groupaccess.IdsecPolicyGroupAccessService
 	db          *db.IdsecPolicyDBService
 	vm          *vm.IdsecPolicyVMService
 }
@@ -26,6 +28,10 @@ func NewIdsecPolicyAPI(ispAuth *auth.IdsecISPAuth) (*IdsecPolicyAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	groupAccessService, err := groupaccess.NewIdsecPolicyGroupAccessService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	dbService, err := db.NewIdsecPolicyDBService(baseIspAuth)
 	if err != nil {
 		return nil, err
@@ -37,6 +43,7 @@ func NewIdsecPolicyAPI(ispAuth *auth.IdsecISPAuth) (*IdsecPolicyAPI, error) {
 	return &IdsecPolicyAPI{
 		policy:      policyService,
 		cloudaccess: cloudAccessService,
+		groupaccess: groupAccessService,
 		db:          dbService,
 		vm:          vmService,
 	}, nil
@@ -50,6 +57,11 @@ func (api *IdsecPolicyAPI) Policy() *IdsecPolicyService {
 // CloudAccess returns the IdsecPolicyCloudAccessService instance from the IdsecPolicyAPI.
 func (api *IdsecPolicyAPI) CloudAccess() *cloudaccess.IdsecPolicyCloudAccessService {
 	return api.cloudaccess
+}
+
+// GroupAccess returns the IdsecPolicyGroupAccessService instance from the IdsecPolicyAPI.
+func (api *IdsecPolicyAPI) GroupAccess() *groupaccess.IdsecPolicyGroupAccessService {
+	return api.groupaccess
 }
 
 // Db returns the IdsecPolicyDBService instance from the IdsecPolicyAPI.

@@ -20,7 +20,6 @@ type IdsecPolicyVMPolicyPage = common.IdsecPage[models.IdsecPolicyVMAccessPolicy
 
 // IdsecPolicyVMService represents the Infrastructure VM service.
 type IdsecPolicyVMService struct {
-	services.IdsecService
 	*services.IdsecBaseService
 	baseService *policycommon.IdsecPolicyBaseService
 }
@@ -48,23 +47,23 @@ func NewIdsecPolicyVMService(authenticators ...auth.IdsecAuth) (*IdsecPolicyVMSe
 	return policyVMService, nil
 }
 
-// AddPolicy adds a new policy with the given information.
-func (s *IdsecPolicyVMService) AddPolicy(addPolicy *models.IdsecPolicyVMAccessPolicy) (*models.IdsecPolicyVMAccessPolicy, error) {
-	s.Logger.Info("Adding new policy [%s]", addPolicy.Metadata.Name)
-	addPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeVM
-	if addPolicy.Metadata.PolicyTags == nil {
-		addPolicy.Metadata.PolicyTags = make([]string, 0)
+// CreatePolicy creates a new policy with the given information.
+func (s *IdsecPolicyVMService) CreatePolicy(createPolicy *models.IdsecPolicyVMAccessPolicy) (*models.IdsecPolicyVMAccessPolicy, error) {
+	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
+	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeVM
+	if createPolicy.Metadata.PolicyTags == nil {
+		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}
-	policyType := reflect.TypeOf(addPolicy)
-	addPolicySerialized, err := addPolicy.Serialize()
+	policyType := reflect.TypeOf(createPolicy)
+	createPolicySerialized, err := createPolicy.Serialize()
 	if err != nil {
 		return nil, err
 	}
-	addPolicyJSON := common.ConvertToCamelCase(addPolicySerialized, &policyType)
+	createPolicyJSON := common.ConvertToCamelCase(createPolicySerialized, &policyType)
 	if err != nil {
 		return nil, err
 	}
-	policyResp, err := s.baseService.BaseAddPolicy(addPolicyJSON.(map[string]interface{}))
+	policyResp, err := s.baseService.BaseCreatePolicy(createPolicyJSON.(map[string]interface{}))
 	if err != nil {
 		return nil, err
 	}
@@ -205,4 +204,16 @@ func (s *IdsecPolicyVMService) PoliciesStats() (*policycommonmodels.IdsecPolicyS
 // ServiceConfig returns the service configuration for IdsecPolicyVMService.
 func (s *IdsecPolicyVMService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
+}
+
+// AddExtraContextField adds a custom context field to telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyVMService) AddExtraContextField(name, shortName, value string) error {
+	return s.baseService.AddExtraContextField(name, shortName, value)
+}
+
+// ClearExtraContext removes all extra context fields from telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyVMService) ClearExtraContext() error {
+	return s.baseService.ClearExtraContext()
 }

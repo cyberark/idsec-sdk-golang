@@ -57,10 +57,8 @@ var ignoredMessageIDs = []string{
 
 // IdsecIdentityPoliciesService is the service for managing identity policies.
 type IdsecIdentityPoliciesService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth            *auth.IdsecISPAuth
-	client             *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 	RolesService       *roles.IdsecIdentityRolesService
 	AuthProfileService *authprofiles.IdsecIdentityAuthProfilesService
 
@@ -80,23 +78,27 @@ func NewIdsecIdentityPoliciesService(authenticators ...auth.IdsecAuth) (*IdsecId
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityPoliciesService.refreshIdentityPoliciesAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityPoliciesService.refreshIdentityPoliciesAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
-	identityPoliciesService.client = client
-	identityPoliciesService.ispAuth = ispAuth
 	identityPoliciesService.IdsecBaseService = baseService
+	identityPoliciesService.IdsecISPBaseService = ispBaseService
 	identityPoliciesService.RolesService, err = roles.NewIdsecIdentityRolesService(ispAuth)
 	if err != nil {
 		return nil, err
@@ -112,11 +114,11 @@ func (s *IdsecIdentityPoliciesService) postOperation() func(ctx context.Context,
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityPoliciesService) refreshIdentityPoliciesAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -173,8 +175,8 @@ func (s *IdsecIdentityPoliciesService) listPolicyLinks() ([]map[string]interface
 	return policyLinks, revStamp.(string), nil
 }
 
-// CreatePolicy creates a new identity policy.
-func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.IdsecIdentityCreatePolicy) (*policymodels.IdsecIdentityPolicy, error) {
+// Create creates a new identity policy.
+func (s *IdsecIdentityPoliciesService) Create(createPolicy *policymodels.IdsecIdentityCreatePolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Creating a new identity policy")
 	if createPolicy.AuthProfileName == "" {
 		if createPolicy.Settings == nil || createPolicy.Settings["/Core/Authentication/AuthenticationRulesDefaultProfileId"] == nil {
@@ -213,7 +215,7 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 	// Resolve auth profile in parallel
 	go func() {
 		if createPolicy.AuthProfileName != "" {
-			profile, err := s.AuthProfileService.AuthProfile(&authprofilesmodels.IdsecIdentityGetAuthProfile{
+			profile, err := s.AuthProfileService.Get(&authprofilesmodels.IdsecIdentityGetAuthProfile{
 				AuthProfileName: createPolicy.AuthProfileName,
 			})
 			authProfileChan <- authProfileResult{profile: profile, err: err}
@@ -227,7 +229,7 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 		roleIDs := []string{}
 		var resErr error
 		for _, roleName := range createPolicy.RoleNames {
-			role, err := s.RolesService.Role(&rolesmodels.IdsecIdentityGetRole{
+			role, err := s.RolesService.Get(&rolesmodels.IdsecIdentityGetRole{
 				RoleName: roleName,
 			})
 			if err != nil {
@@ -362,20 +364,20 @@ func (s *IdsecIdentityPoliciesService) CreatePolicy(createPolicy *policymodels.I
 				} else {
 					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
 				}
-				return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+				return s.Get(&policymodels.IdsecIdentityGetPolicy{
 					PolicyName: createPolicy.PolicyName,
 				})
 			}
 		}
 		return nil, fmt.Errorf("failed to create identity policy - [%v]", result)
 	}
-	return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+	return s.Get(&policymodels.IdsecIdentityGetPolicy{
 		PolicyName: createPolicy.PolicyName,
 	})
 }
 
-// UpdatePolicy updates an existing identity policy.
-func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.IdsecIdentityUpdatePolicy) (*policymodels.IdsecIdentityPolicy, error) {
+// Update updates an existing identity policy.
+func (s *IdsecIdentityPoliciesService) Update(updatePolicy *policymodels.IdsecIdentityUpdatePolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Updating identity policy")
 
 	isActive := true
@@ -408,7 +410,7 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 
 	// Fetch existing policy in parallel
 	go func() {
-		policy, err := s.Policy(&policymodels.IdsecIdentityGetPolicy{
+		policy, err := s.Get(&policymodels.IdsecIdentityGetPolicy{
 			PolicyName: updatePolicy.PolicyName,
 		})
 		existingPolicyChan <- existingPolicyResult{policy: policy, err: err}
@@ -423,7 +425,7 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 	// Resolve auth profile if provided
 	go func() {
 		if updatePolicy.AuthProfileName != "" {
-			profile, err := s.AuthProfileService.AuthProfile(&authprofilesmodels.IdsecIdentityGetAuthProfile{
+			profile, err := s.AuthProfileService.Get(&authprofilesmodels.IdsecIdentityGetAuthProfile{
 				AuthProfileName: updatePolicy.AuthProfileName,
 			})
 			authProfileChan <- authProfileResult{profile: profile, err: err}
@@ -444,7 +446,7 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 
 			for i, roleName := range updatePolicy.RoleNames {
 				go func(index int, name string) {
-					role, err := s.RolesService.Role(&rolesmodels.IdsecIdentityGetRole{
+					role, err := s.RolesService.Get(&rolesmodels.IdsecIdentityGetRole{
 						RoleName: name,
 					})
 					if err != nil {
@@ -650,7 +652,7 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 				} else {
 					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
 				}
-				return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+				return s.Get(&policymodels.IdsecIdentityGetPolicy{
 					PolicyName: updatePolicy.PolicyName,
 				})
 			}
@@ -666,22 +668,22 @@ func (s *IdsecIdentityPoliciesService) UpdatePolicy(updatePolicy *policymodels.I
 			}
 			policyNames[i] = policySet[len("/Policy/"):]
 		}
-		_, err := s.SetPoliciesOrder(&policymodels.IdsecIdentitySetPoliciesOrder{
+		_, err := s.SetOrder(&policymodels.IdsecIdentitySetPoliciesOrder{
 			PoliciesOrder: policyNames,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to set identity policy order after update - [%v]", err)
 		}
 	}
-	return s.Policy(&policymodels.IdsecIdentityGetPolicy{
+	return s.Get(&policymodels.IdsecIdentityGetPolicy{
 		PolicyName: updatePolicy.PolicyName,
 	})
 }
 
-// UpdateDefaultPolicy updates the default identity policy. This is a convenience method that calls UpdatePolicy with the policy name set to "Default Policy".
-func (s *IdsecIdentityPoliciesService) UpdateDefaultPolicy(updatePolicy *policymodels.IdsecIdentityUpdateDefaultPolicy) (*policymodels.IdsecIdentityPolicy, error) {
+// UpdateDefault updates the default identity policy. This is a convenience method that calls Update with the policy name set to "Default Policy".
+func (s *IdsecIdentityPoliciesService) UpdateDefault(updatePolicy *policymodels.IdsecIdentityUpdateDefaultPolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Updating default identity policy")
-	return s.UpdatePolicy(&policymodels.IdsecIdentityUpdatePolicy{
+	return s.Update(&policymodels.IdsecIdentityUpdatePolicy{
 		PolicyName:      "Default Policy",
 		PolicyStatus:    updatePolicy.PolicyStatus,
 		Description:     updatePolicy.Description,
@@ -693,8 +695,8 @@ func (s *IdsecIdentityPoliciesService) UpdateDefaultPolicy(updatePolicy *policym
 	})
 }
 
-// DeletePolicy deletes an identity policy.
-func (s *IdsecIdentityPoliciesService) DeletePolicy(deletePolicy *policymodels.IdsecIdentityDeletePolicy) error {
+// Delete deletes an identity policy.
+func (s *IdsecIdentityPoliciesService) Delete(deletePolicy *policymodels.IdsecIdentityDeletePolicy) error {
 	s.Logger.Debug("Deleting identity policy")
 	policySet := deletePolicy.PolicyName
 	if !strings.HasPrefix(policySet, "/Policy/") {
@@ -737,8 +739,8 @@ func (s *IdsecIdentityPoliciesService) DeletePolicy(deletePolicy *policymodels.I
 	return nil
 }
 
-// Policy retrieves an identity policy by its ID.
-func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdentityGetPolicy) (*policymodels.IdsecIdentityPolicy, error) {
+// Get retrieves an identity policy by its ID.
+func (s *IdsecIdentityPoliciesService) Get(getPolicy *policymodels.IdsecIdentityGetPolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Retrieving identity policy")
 
 	policySet := getPolicy.PolicyName
@@ -876,7 +878,7 @@ func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdent
 
 		for i, roleID := range roleIDs {
 			go func(index int, id string) {
-				role, err := s.RolesService.Role(&rolesmodels.IdsecIdentityGetRole{
+				role, err := s.RolesService.Get(&rolesmodels.IdsecIdentityGetRole{
 					RoleID: id,
 				})
 				if err != nil {
@@ -918,7 +920,7 @@ func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdent
 			return
 		}
 
-		authProfile, err := s.AuthProfileService.AuthProfile(&authprofilesmodels.IdsecIdentityGetAuthProfile{
+		authProfile, err := s.AuthProfileService.Get(&authprofilesmodels.IdsecIdentityGetAuthProfile{
 			AuthProfileID: authProfileID,
 		})
 		if err != nil {
@@ -955,8 +957,8 @@ func (s *IdsecIdentityPoliciesService) Policy(getPolicy *policymodels.IdsecIdent
 	return policyInfo, nil
 }
 
-// ListPolicies lists all identity policies with optional filtering.
-func (s *IdsecIdentityPoliciesService) ListPolicies() ([]*policymodels.IdsecIdentityPolicyInfo, error) {
+// List lists all identity policies with optional filtering.
+func (s *IdsecIdentityPoliciesService) List() ([]*policymodels.IdsecIdentityPolicyInfo, error) {
 	policyLinks, _, err := s.listPolicyLinks()
 	if err != nil {
 		return nil, err
@@ -986,9 +988,9 @@ func (s *IdsecIdentityPoliciesService) ListPolicies() ([]*policymodels.IdsecIden
 	return policies, nil
 }
 
-// ListPoliciesBy lists identity policies based on provided filters.
-func (s *IdsecIdentityPoliciesService) ListPoliciesBy(filters *policymodels.IdsecIdentityPoliciesFilters) ([]*policymodels.IdsecIdentityPolicyInfo, error) {
-	allPolicies, err := s.ListPolicies()
+// ListBy lists identity policies based on provided filters.
+func (s *IdsecIdentityPoliciesService) ListBy(filters *policymodels.IdsecIdentityPoliciesFilters) ([]*policymodels.IdsecIdentityPolicyInfo, error) {
+	allPolicies, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -1021,15 +1023,15 @@ func (s *IdsecIdentityPoliciesService) ListPoliciesBy(filters *policymodels.Idse
 
 func (s *IdsecIdentityPoliciesService) returnFilteredOrders(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
 	if policiesOrder.ReturnAllPoliciesOrders {
-		return s.PoliciesOrder(&policymodels.IdsecIdentityGetPoliciesOrder{})
+		return s.GetOrder(&policymodels.IdsecIdentityGetPoliciesOrder{})
 	}
-	return s.PoliciesOrder(&policymodels.IdsecIdentityGetPoliciesOrder{
+	return s.GetOrder(&policymodels.IdsecIdentityGetPoliciesOrder{
 		PoliciesOrder: policiesOrder.PoliciesOrder,
 	})
 }
 
-// SetPoliciesOrder sets the order of identity policies based on the provided order of policy names. Policies that are not included in the provided order will be appended at the end in their existing order. The method ensures that the provided order is valid and corresponds to existing policies. If the operation is successful, the new order will be reflected in subsequent list operations.
-func (s *IdsecIdentityPoliciesService) SetPoliciesOrder(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
+// SetOrder sets the order of identity policies based on the provided order of policy names. Policies that are not included in the provided order will be appended at the end in their existing order. The method ensures that the provided order is valid and corresponds to existing policies. If the operation is successful, the new order will be reflected in subsequent list operations.
+func (s *IdsecIdentityPoliciesService) SetOrder(policiesOrder *policymodels.IdsecIdentitySetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
 	s.Logger.Debug("Setting identity policies order")
 	if len(policiesOrder.PoliciesOrder) == 0 {
 		return nil, fmt.Errorf("no policies provided for setting order")
@@ -1118,8 +1120,8 @@ func (s *IdsecIdentityPoliciesService) SetPoliciesOrder(policiesOrder *policymod
 	return s.returnFilteredOrders(policiesOrder)
 }
 
-// PoliciesOrder retrieves the current order of identity policies. The order is determined based on the policy links and their priority. The method returns a list of policy names in the order they are applied, which can be used for display purposes or to verify the current configuration.
-func (s *IdsecIdentityPoliciesService) PoliciesOrder(policiesOrder *policymodels.IdsecIdentityGetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
+// GetOrder retrieves the current order of identity policies. The order is determined based on the policy links and their priority. The method returns a list of policy names in the order they are applied, which can be used for display purposes or to verify the current configuration.
+func (s *IdsecIdentityPoliciesService) GetOrder(policiesOrder *policymodels.IdsecIdentityGetPoliciesOrder) (*policymodels.IdsecIdentityPoliciesOrder, error) {
 	s.Logger.Debug("Getting identity policies order")
 	policyLinks, _, err := s.listPolicyLinks()
 	if err != nil {
@@ -1150,9 +1152,9 @@ func (s *IdsecIdentityPoliciesService) PoliciesOrder(policiesOrder *policymodels
 	return order, nil
 }
 
-// PoliciesStats retrieves statistics related to identity policies.
-func (s *IdsecIdentityPoliciesService) PoliciesStats() (*policymodels.IdsecIdentityPoliciesStats, error) {
-	allPolicies, err := s.ListPolicies()
+// Stats retrieves statistics related to identity policies.
+func (s *IdsecIdentityPoliciesService) Stats() (*policymodels.IdsecIdentityPoliciesStats, error) {
+	allPolicies, err := s.List()
 	if err != nil {
 		return nil, err
 	}

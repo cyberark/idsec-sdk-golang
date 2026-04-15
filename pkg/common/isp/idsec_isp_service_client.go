@@ -267,7 +267,7 @@ func (client *IdsecISPServiceClient) TenantID() (string, error) {
 	return "", fmt.Errorf("failed to retrieve tenant id")
 }
 
-// FromISPAuthWithRetry creates a new IdsecISPServiceClient from an IdsecISPAuth instance.
+// FromISPAuth creates a new IdsecISPServiceClient from an IdsecISPAuth instance.
 //
 // This function creates an ISP service client using authentication information from
 // an existing IdsecISPAuth instance. It extracts tenant environment information from
@@ -280,7 +280,6 @@ func (client *IdsecISPServiceClient) TenantID() (string, error) {
 //   - separator: The separator character used in URL construction
 //   - basePath: Additional base path to append to the service URL
 //   - refreshConnectionCallback: Callback function for connection refresh operations
-//   - retryStrategy: Optional retry strategy for the client
 //
 // Returns a configured IdsecISPServiceClient and any error that occurred during client
 // creation, cookie unmarshaling, or service URL resolution.
@@ -293,12 +292,11 @@ func (client *IdsecISPServiceClient) TenantID() (string, error) {
 //	    "-",
 //	    "v1",
 //	    refreshCallback,
-//	    retryStrategy,
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create client: %w", err)
 //	}
-func FromISPAuthWithRetry(
+func FromISPAuth(
 	ispAuth *auth.IdsecISPAuth,
 	serviceName string,
 	separator string,
@@ -351,45 +349,6 @@ func FromISPAuthWithRetry(
 		refreshConnectionCallback,
 		retryStrategy,
 	)
-}
-
-// FromISPAuth creates a new IdsecISPServiceClient from an IdsecISPAuth instance.
-//
-// This function creates an ISP service client using authentication information from
-// an existing IdsecISPAuth instance. It extracts tenant environment information from
-// the auth token's username or metadata, decodes and sets up cookies from the token
-// metadata, and initializes the client with the appropriate configuration.
-//
-// Parameters:
-//   - ispAuth: The IdsecISPAuth instance containing authentication information and tokens
-//   - serviceName: The name of the service to connect to
-//   - separator: The separator character used in URL construction
-//   - basePath: Additional base path to append to the service URL
-//   - refreshConnectionCallback: Callback function for connection refresh operations
-//
-// Returns a configured IdsecISPServiceClient and any error that occurred during client
-// creation, cookie unmarshaling, or service URL resolution.
-//
-// Example:
-//
-//	client, err := FromISPAuth(
-//	    ispAuth,
-//	    "api",
-//	    "-",
-//	    "v1",
-//	    refreshCallback,
-//	)
-//	if err != nil {
-//	    return fmt.Errorf("failed to create client: %w", err)
-//	}
-func FromISPAuth(
-	ispAuth *auth.IdsecISPAuth,
-	serviceName string,
-	separator string,
-	basePath string,
-	refreshConnectionCallback func(*common.IdsecClient) error,
-) (*IdsecISPServiceClient, error) {
-	return FromISPAuthWithRetry(ispAuth, serviceName, separator, basePath, refreshConnectionCallback, nil)
 }
 
 // RefreshClient refreshes the IdsecISPServiceClient with the latest authentication token and cookies.

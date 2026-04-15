@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
+	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 )
 
 // createTempProfilesDir creates a temporary directory for testing profiles
@@ -22,7 +23,20 @@ func createTempProfilesDir(t *testing.T) string {
 // createTestProfile creates a sample profile for testing
 func createTestProfile(name string) *models.IdsecProfile {
 	return &models.IdsecProfile{
-		ProfileName: name,
+		ProfileName:        name,
+		ProfileDescription: "Test profile for " + name,
+		AuthProfiles: map[string]*authmodels.IdsecAuthProfile{
+			"isp": {
+				Username:   "test@example.com",
+				AuthMethod: authmodels.Identity,
+				AuthMethodSettings: &authmodels.IdentityIdsecAuthMethodSettings{
+					IdentityURL:             "https://identity.example.com",
+					IdentityTenantSubdomain: "test",
+					IdentityMFAMethod:       "email",
+					IdentityMFAInteractive:  true,
+				},
+			},
+		},
 	}
 }
 
@@ -85,7 +99,7 @@ func TestGetProfilesFolder(t *testing.T) {
 			},
 			validateFunc: func(t *testing.T, result string) {
 				homeDir := os.Getenv("HOME")
-				expectedPath := filepath.Join(homeDir, ".idsec_profiles")
+				expectedPath := filepath.Join(homeDir, ".idsec", "profiles")
 				if result != expectedPath {
 					t.Errorf("Expected default path %s, got %s", expectedPath, result)
 				}
@@ -106,7 +120,7 @@ func TestGetProfilesFolder(t *testing.T) {
 			},
 			validateFunc: func(t *testing.T, result string) {
 				homeDir := os.Getenv("HOME")
-				expectedPath := filepath.Join(homeDir, ".idsec_profiles")
+				expectedPath := filepath.Join(homeDir, ".idsec", "profiles")
 				if result != expectedPath {
 					t.Errorf("Expected default path when env var empty %s, got %s", expectedPath, result)
 				}

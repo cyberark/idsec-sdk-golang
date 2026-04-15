@@ -34,10 +34,13 @@ TL;DR
 
 ## Enduser
 
+For CLI installation and usage documentation, see the [idsec-cli-golang repository](https://github.com/cyberark/idsec-cli-golang).
 
 SDK Usage
 =========
 One can develop using the idsec SDK using its API / class-driven design
+
+### ISP authentication
 
 Let's say we want to generate a short lived password from the code
 
@@ -94,109 +97,88 @@ func main() {
 }
 ```
 
+### Self-hosted / PVWA authentication
+
+For **self-hosted CyberArk** deployments, use **PVWA** (Password Vault Web Access) authentication. This authenticates with username and password against your PVWA instance’s REST API (`/PasswordVault/API/auth/{method}/Logon`).
+
+Provide the PVWA **base URL** (e.g. `https://pvwa.example.com`), the **login method** (`cyberark`, `ldap`, or `windows`), and the password via `IdsecSecret` (e.g. from `IDSEC_SECRET`). The resulting authenticator can be passed into `IdsecAPI` or into services such as PCloud and SIA when those are configured for PVWA.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
+	"os"
+)
+
+func main() {
+	pvwaAuth := auth.NewIdsecPVWAAuth(false)
+	token, err := pvwaAuth.Authenticate(
+		nil,
+		&authmodels.IdsecAuthProfile{
+			Username:   "AdminUser",
+			AuthMethod: authmodels.PVWA,
+			AuthMethodSettings: &authmodels.PVWAIdsecAuthMethodSettings{
+				PVWAURL:         "https://pvwa.example.com",
+				PVWALoginMethod: "cyberark", // or: ldap, windows
+			},
+		},
+		&authmodels.IdsecSecret{Secret: os.Getenv("IDSEC_SECRET")},
+		false,
+		false,
+	)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Authenticated to PVWA: %s\n", token.Endpoint)
+}
+```
+
 More examples can be found in the [examples](examples) folder
 
-Terraform Provider Integration
-===============================
+Linting
+=======
 
-## Managing Immutable Attributes
+The SDK uses [golangci-lint](https://golangci-lint.run/) for static analysis, including struct tag validation via the `tagliatelle` linter.
 
-The SDK supports defining immutable attributes for Terraform resources. Immutable attributes are fields that cannot be changed after resource creation - any attempt to modify them will cause the Terraform plan to fail with an error, preventing accidental changes to resource identity fields.
+## Running Linters
 
-### What are Immutable Attributes?
-
-Immutable attributes represent the identity of a resource. Changing these would fundamentally alter what resource is being managed, so they are protected from modification. Examples include:
-
-- Resource IDs (e.g., `entra_id`, `subscription_id`)
-- Resource names that serve as identifiers
-- Parent references (e.g., tenant IDs)
-
-### How to Define Immutable Attributes
-
-To mark attributes as immutable, add the `ImmutableAttributes` field to your Terraform action definition:
-
-```go
-var TerraformActionEntraResource = &actions.IdsecServiceTerraformResourceActionDefinition{
-    IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
-        IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-            ActionName:        "cce-azure-entra",
-            ActionDescription: "CCE Azure Entra resource",
-            ActionVersion:     1,
-            Schemas:           ActionToSchemaMap,
-        },
-        ExtraRequiredAttributes: []string{},
-        ImmutableAttributes: []string{
-            "entra_id",
-        },
-        StateSchema: &azuremodels.TfIdsecCCEAzureEntra{},
-    },
-    // ... rest of definition
-}
+```bash
+make lint
 ```
 
-### Adding Immutable Attributes to Existing Resources
+## Struct Tag Conventions
 
-1. **Identify identity fields** - Determine which fields uniquely identify the resource
-2. **Add to action definition** - Update the `ImmutableAttributes` slice in the Terraform action
-3. **Test thoroughly** - Verify that:
-   - Resource creation works
-   - Updates to non-immutable fields succeed
-   - Attempts to change immutable fields fail with clear error messages
+Struct tags follow these naming conventions:
 
-Example for a new AWS account resource:
+| Tag | Convention | Example |
+|-----|------------|---------|
+| `json` | snake_case | `json:"account_id"` |
+| `mapstructure` | snake_case | `mapstructure:"account_id"` |
+| `flag` | kebab-case | `flag:"account-id"` |
 
-```go
-var TerraformActionAWSAccountResource = &actions.IdsecServiceTerraformResourceActionDefinition{
-    IdsecServiceBaseTerraformActionDefinition: actions.IdsecServiceBaseTerraformActionDefinition{
-        // ... base definition ...
-        ImmutableAttributes: []string{
-            "account_id",      // AWS account ID cannot change
-            "account_name",    // Account name is part of identity
-        },
-        StateSchema: &awsmodels.TfIdsecCCEAWSAccount{},
-    },
-    // ... rest of definition
-}
-```
+### Exceptions
 
-### Removing Immutable Attributes
+Some struct tags intentionally deviate from these conventions because they must match external API contracts. These are marked with `//nolint:tagliatelle` comments. Common cases include:
 
-To remove immutability protection from an attribute:
+- **API response models** — json tags must match the backend API's response format (often camelCase)
+- **API request models** — json tags must match what the backend API expects
+- **Terraform/CLI input models** — mapstructure tags must match the schema used by Terraform or CLI flag parsing
 
-1. Remove the attribute name from the `ImmutableAttributes` slice
-2. Consider the impact on existing Terraform state files
-3. Document the change as a breaking change in release notes
+When adding new struct tags:
+1. Use the standard conventions above for new code
+2. If the tag must match an external API, add `//nolint:tagliatelle` with a comment explaining why
+3. Empty mapstructure tags (`mapstructure:""`) and squash directives (`mapstructure:",squash"`) are automatically excluded from linting
+4. If a model has many API-facing fields that deviate from snake_case (e.g., camelCase from the backend API), consider adding a path-based exclusion in `.golangci.yml` instead of annotating every field individually. See the existing exclusions for `cce/aws/models/` and `cce/azure/models/` as examples
 
-**Warning:** Removing immutability is a breaking change. Users who upgrade will be able to modify previously protected fields, which may lead to unexpected resource replacements.
+Terraform Provider
+==================
 
-### Best Practices
+For Terraform resource and data source development, see the [terraform-provider-idsec](https://github.com/cyberark/terraform-provider-idsec) repository. Terraform action definitions, types, and configurations are maintained in the provider repository.
 
-- **Only mark true identity fields as immutable** - Don't overuse this feature
-- **Use centralized configuration** - The `ImmutableAttributes` field keeps all immutable attributes in one place for easy maintenance
-- **Provide clear descriptions** - Document why a field is immutable in the `desc` tag
-- **Test with Terraform** - Verify the behavior in actual Terraform workflows
-- **Consider backwards compatibility** - Adding immutability to existing resources is a breaking change
-
-### Terraform User Experience
-
-When a user attempts to change an immutable attribute, they will see:
-
-```text
-Error: Immutable Attribute Cannot Be Changed
-
-  with idsec_cce_azure_entra.example,
-  on main.tf line 2, in resource "idsec_cce_azure_entra" "example":
-   2:   entra_id = "new-uuid"
-
-The attribute 'entra_id' is immutable and cannot be changed after resource creation.
-
-Current value: old-uuid
-Attempted new value: new-uuid
-
-To use a different value, you must create a new resource.
-```
-
-This prevents accidental modifications and guides users toward the correct approach.
+The SDK provides the service logic, models, and action schema maps (`ActionToSchemaMap`) that the Terraform provider imports.
 
 Telemetry
 =========
@@ -235,4 +217,4 @@ When telemetry is disabled, only application metadata is collected.
 
 This project is licensed under Apache License 2.0 - see [`LICENSE`](LICENSE.txt) for more details
 
-Copyright (c) 2025 CyberArk Software Ltd. All rights reserved.
+Copyright (c) 2026 CyberArk Software Ltd. All rights reserved.

@@ -3,42 +3,14 @@ package identity
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	identityauthprofilesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles/actions"
-	identitydirectoriesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/actions"
-	identitypoliciesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies/actions"
-	identityrolesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/actions"
-	identityusersactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/actions"
-	identitywebappsactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps/actions"
 )
-
-// CLIAction is a struct that defines the identity action for the Idsec service CLI.
-var CLIAction = &actions.IdsecServiceCLIActionDefinition{
-	IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
-		ActionName:        "identity",
-		ActionDescription: "Identity provides a single centralized interface for provisioning users and setting up the authentication for users of the Shared Services platform.",
-		ActionVersion:     1,
-	},
-	ActionAliases: []string{"idaptive", "id"},
-	Subactions: []*actions.IdsecServiceCLIActionDefinition{
-		identitydirectoriesactions.CLIAction,
-		identityrolesactions.CLIAction,
-		identityusersactions.CLIAction,
-		identityauthprofilesactions.CLIAction,
-		identitypoliciesactions.CLIAction,
-		identitywebappsactions.CLIAction,
-	},
-}
 
 // ServiceConfig is the configuration for the identity service.
 var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "identity",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
-	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
-		actions.IdsecServiceActionTypeCLI: {
-			CLIAction,
-		},
-	},
+	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
 }
 
 // Module init, registers the service configuration.

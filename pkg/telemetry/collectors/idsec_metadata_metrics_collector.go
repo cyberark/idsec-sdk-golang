@@ -25,11 +25,19 @@ const (
 //	if err != nil {
 //	    // handle error
 //	}
+//
+// extraContextField stores both the full name and value for a tool context metric.
+type extraContextField struct {
+	name  string
+	value string
+}
+
 type IdsecMetadataMetricsCollector struct {
 	route                     string
 	service                   string
 	class                     string
 	operation                 string
+	extraContextFields        map[string]extraContextField // Dynamic tool-specific context fields (shortName -> {name, value})
 	changedFromLastCollection bool
 }
 
@@ -38,6 +46,7 @@ type IdsecMetadataMetricsCollector struct {
 // Returns a pointer to the newly created IdsecMetadataMetricsCollector.
 func NewIdsecMetadataMetricsCollector() IdsecMetricsCollector {
 	return &IdsecMetadataMetricsCollector{
+		extraContextFields:        make(map[string]extraContextField),
 		changedFromLastCollection: true,
 	}
 }
@@ -119,6 +128,16 @@ func (c *IdsecMetadataMetricsCollector) CollectMetrics() (*IdsecMetrics, error) 
 			Value:     common.GetDeployEnv(),
 		},
 	)
+
+	// Add dynamic tool context fields
+	for shortName, field := range c.extraContextFields {
+		metrics.Metrics = append(metrics.Metrics, IdsecMetric{
+			Name:      field.name,
+			ShortName: shortName,
+			Value:     field.value,
+		})
+	}
+
 	c.changedFromLastCollection = false
 	return metrics, nil
 }
@@ -177,4 +196,59 @@ func (c *IdsecMetadataMetricsCollector) Class() string {
 // Operation returns the operation name for the metadata metrics.
 func (c *IdsecMetadataMetricsCollector) Operation() string {
 	return c.operation
+}
+
+// AddExtraContextField adds a tool-specific context field to the metadata metrics.
+//
+// AddExtraContextField allows tools (Terraform, CLI, SDK, etc.) to add arbitrary
+// context fields to the telemetry metadata. Tools provide both a full descriptive
+// name and a short name for efficient transmission.
+//
+// Parameters:
+//   - name: The full descriptive name for the field (e.g., "terraform_resource", "cli_command")
+//   - shortName: The short identifier for the field (e.g., "tfr", "clic")
+//   - value: The value to associate with this field
+//
+// Example:
+//
+//	collector.AddExtraContextField("terraform_resource", "tfr", "idsec_user")
+//	collector.AddExtraContextField("cli_command", "clic", "login")
+func (c *IdsecMetadataMetricsCollector) AddExtraContextField(name, shortName, value string) {
+	if c.extraContextFields == nil {
+		c.extraContextFields = make(map[string]extraContextField)
+	}
+	c.extraContextFields[shortName] = extraContextField{
+		name:  name,
+		value: value,
+	}
+	c.changedFromLastCollection = true
+}
+
+// GetExtraContextField retrieves a tool-specific context field value.
+//
+// Parameters:
+//   - shortName: The short identifier for the field to retrieve
+//
+// Returns the field value and a boolean indicating if the field exists.
+//
+// Example:
+//
+//	value, exists := collector.GetExtraContextField("tfr")
+func (c *IdsecMetadataMetricsCollector) GetExtraContextField(shortName string) (string, bool) {
+	field, exists := c.extraContextFields[shortName]
+	return field.value, exists
+}
+
+// ClearExtraContext clears all tool-specific context fields.
+//
+// ClearExtraContext removes all dynamically added tool context fields,
+// typically called after a request completes to prevent context from
+// leaking into subsequent requests.
+//
+// Example:
+//
+//	defer collector.ClearExtraContext()
+func (c *IdsecMetadataMetricsCollector) ClearExtraContext() {
+	c.extraContextFields = make(map[string]extraContextField)
+	c.changedFromLastCollection = true
 }

@@ -3,7 +3,6 @@ package cloudaccess
 import (
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -17,6 +16,7 @@ import (
 
 const (
 	policyStatusActiveRetryCount = 100
+	delayTimeInSeconds           = 3
 )
 
 // IdsecPolicyCloudAccessPolicyPage represents a page of Cloud Access policies.
@@ -24,7 +24,6 @@ type IdsecPolicyCloudAccessPolicyPage = common.IdsecPage[cloudaccessmodels.Idsec
 
 // IdsecPolicyCloudAccessService exposes Cloud Access policy operations over the shared Policy base service.
 type IdsecPolicyCloudAccessService struct {
-	services.IdsecService
 	*services.IdsecBaseService
 	baseService *policycommon.IdsecPolicyBaseService
 }
@@ -63,46 +62,25 @@ func (s *IdsecPolicyCloudAccessService) deserializeTargets(policy *cloudaccessmo
 	return policy.Targets.DeserializeTargets(policyJSON["targets"].(map[string]interface{}))
 }
 
-// AddPolicy adds a new policy with the given information.
-func (s *IdsecPolicyCloudAccessService) AddPolicy(addPolicy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy) (*cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, error) {
-	s.Logger.Info("Adding new policy [%s]", addPolicy.Metadata.Name)
-	addPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
-	if addPolicy.Metadata.PolicyTags == nil {
-		addPolicy.Metadata.PolicyTags = make([]string, 0)
+// CreatePolicy creates a new policy with the given information.
+func (s *IdsecPolicyCloudAccessService) CreatePolicy(createPolicy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy) (*cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, error) {
+	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
+	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
+	if createPolicy.Metadata.PolicyTags == nil {
+		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}
-	policyJSON, err := common.SerializeJSONCamel(addPolicy)
+	policyJSON, err := common.SerializeJSONCamel(createPolicy)
 	if err != nil {
 		return nil, err
 	}
-	err = s.serializeTargets(addPolicy, policyJSON)
+	err = s.serializeTargets(createPolicy, policyJSON)
 	if err != nil {
 		return nil, err
 	}
-	policyResp, err := s.baseService.BaseAddPolicy(policyJSON)
+	respType := reflect.TypeOf(cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{})
+	policyResp, err := s.baseService.BaseCreatePolicyAndWait(policyJSON, &respType, policyStatusActiveRetryCount, delayTimeInSeconds)
 	if err != nil {
 		return nil, err
-	}
-	retryCount := 0
-	for {
-		policy, err := s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
-			PolicyID: policyResp.PolicyID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if policy.Metadata.Status.Status == policycommonmodels.StatusTypeActive {
-			break
-		}
-		if policy.Metadata.Status.Status == policycommonmodels.StatusTypeError {
-			return nil, fmt.Errorf("policy [%s] is in error state: %s", policyResp.PolicyID, policy.Metadata.Status.Status)
-		}
-		if retryCount >= policyStatusActiveRetryCount {
-			s.Logger.Warning("Policy [%s] is not active after 100 retries, "+
-				"might indicate an issue, moving on regardless", policyResp.PolicyID)
-			return nil, fmt.Errorf("policy [%s] is in state after 100 retries: %s", policyResp.PolicyID, policy.Metadata.Status.Status)
-		}
-		time.Sleep(3 * time.Second) // wait 3 seconds before retrying
-		retryCount++
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
 		PolicyID: policyResp.PolicyID,
@@ -144,27 +122,9 @@ func (s *IdsecPolicyCloudAccessService) UpdatePolicy(updatePolicy *cloudaccessmo
 	if err != nil {
 		return nil, err
 	}
-	retryCount := 0
-	for {
-		policy, err := s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
-			PolicyID: updatePolicy.Metadata.PolicyID,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if policy.Metadata.Status.Status == policycommonmodels.StatusTypeActive {
-			break
-		}
-		if policy.Metadata.Status.Status == policycommonmodels.StatusTypeError {
-			return nil, fmt.Errorf("policy [%s] is in error state: %s", updatePolicy.Metadata.PolicyID, policy.Metadata.Status.Status)
-		}
-		if retryCount >= policyStatusActiveRetryCount {
-			s.Logger.Warning("Policy [%s] is not active after 100 retries, "+
-				"might indicate an issue, moving on regardless", updatePolicy.Metadata.PolicyID)
-			return nil, fmt.Errorf("policy [%s] is in state after 100 retries: %s", updatePolicy.Metadata.PolicyID, policy.Metadata.Status.Status)
-		}
-		time.Sleep(3 * time.Second) // wait 3 seconds before retrying
-		retryCount++
+	respType := reflect.TypeOf(cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{})
+	if err = s.baseService.BaseWaitPolicyActive(updatePolicy.Metadata.PolicyID, &respType, policyStatusActiveRetryCount, delayTimeInSeconds); err != nil {
+		return nil, err
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
 		PolicyID: updatePolicy.Metadata.PolicyID,
@@ -265,4 +225,16 @@ func (s *IdsecPolicyCloudAccessService) PoliciesStats() (*policycommonmodels.Ids
 // ServiceConfig returns the service configuration for IdsecPolicyCloudAccessService.
 func (s *IdsecPolicyCloudAccessService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
+}
+
+// AddExtraContextField adds a custom context field to telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyCloudAccessService) AddExtraContextField(name, shortName, value string) error {
+	return s.baseService.AddExtraContextField(name, shortName, value)
+}
+
+// ClearExtraContext removes all extra context fields from telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyCloudAccessService) ClearExtraContext() error {
+	return s.baseService.ClearExtraContext()
 }

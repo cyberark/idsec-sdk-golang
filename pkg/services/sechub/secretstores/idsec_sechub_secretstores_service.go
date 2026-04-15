@@ -24,15 +24,33 @@ const (
 	statesURL      = "/api/secret-stores/states"
 )
 
+// immutableFields defines the provider-specific fields that must be stripped from the
+// serialized secret store JSON map before sending an update request.
+var immutableFields = []string{
+	// AWS
+	"accountId",
+	"regionId",
+	// Azure AKV
+	"azureVaultUrl",
+	// GCP GSM
+	"gcpProjectNumber",
+	// deprecated - kept for backward compatibility with existing secret stores
+	// that might still have these fields, but will not be accepted in update requests
+	"gcpPoolProviderId",
+	"gcpWorkloadIdentityPoolId",
+	"serviceAccountEmail",
+	// HashiCorp Vault
+	"hashiVaultUrl",
+	"mountPath",
+}
+
 // IdsecSecHubSecretStoresPage is a page of IdsecSecHubSecretStore items.
 type IdsecSecHubSecretStoresPage = common.IdsecPage[secretstoresmodels.IdsecSecHubSecretStore]
 
 // IdsecSecHubSecretStoresService is the service for retrieve Secrets Hub Secret Stores
 type IdsecSecHubSecretStoresService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSecHubSecretStoresService creates a new instance of IdsecSecHubSecretStoresService.
@@ -48,18 +66,19 @@ func NewIdsecSecHubSecretStoresService(authenticators ...auth.IdsecAuth) (*Idsec
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "secretshub", ".", "", secretStoresService.refreshSecHubAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "secretshub", ".", "", secretStoresService.refreshSecHubAuth)
 	if err != nil {
 		return nil, err
 	}
-	secretStoresService.client = client
-	secretStoresService.ispAuth = ispAuth
+
 	secretStoresService.IdsecBaseService = baseService
+	secretStoresService.IdsecISPBaseService = ispBaseService
 	return secretStoresService, nil
 }
 
 func (s *IdsecSecHubSecretStoresService) refreshSecHubAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -81,7 +100,7 @@ func (s *IdsecSecHubSecretStoresService) getSecretStoresWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.client.Get(context.Background(), sechubURL, query)
+			response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
 			if err != nil {
 				s.Logger.Error("Failed to list Secret Stores: %v", err)
 				return
@@ -139,16 +158,53 @@ func (s *IdsecSecHubSecretStoresService) getSecretStoresWithFilters(
 	return results, nil
 }
 
-// ListSecretStores returns a channel of IdsecSecHubSecretStoresPage containing all Secret Stores.
-func (s *IdsecSecHubSecretStoresService) ListSecretStores() (<-chan *IdsecSecHubSecretStoresPage, error) {
+// rollbackSecretStoreUpdate rolls back a secret store to its previous state after a failed TF update.
+func (s *IdsecSecHubSecretStoresService) rollbackSecretStoreUpdate(
+	currentStore *secretstoresmodels.IdsecSecHubSecretStore,
+	stateErr error,
+) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
+	s.Logger.Info("Rolling back updated secret store [%s]", currentStore.Name)
+
+	rollbackStore, rollbackErr := s.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
+		ID:          currentStore.ID,
+		Name:        currentStore.Name,
+		Description: currentStore.Description,
+		Data:        &currentStore.Data,
+	})
+	if rollbackStore != nil {
+		rollbackStore.State = currentStore.State
+	}
+
+	if rollbackErr != nil {
+		return nil, fmt.Errorf("failed to set secret store state for TF update and rollback failed: %w (rollback error: %v)", stateErr, rollbackErr)
+	}
+
+	s.Logger.Info("Rolled back successfully secret store [%s]", currentStore.Name)
+	return rollbackStore, fmt.Errorf("failed to set secret store state for TF update: %w", stateErr)
+}
+
+// stripImmutableFields removes immutable provider-specific fields from the serialized secret store JSON map before sending an update request
+func (s *IdsecSecHubSecretStoresService) stripImmutableFields(updateJSON map[string]interface{}) {
+	data, ok := updateJSON["data"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	for _, field := range immutableFields {
+		delete(data, field)
+	}
+}
+
+// List returns a channel of IdsecSecHubSecretStoresPage containing all Secret Stores.
+func (s *IdsecSecHubSecretStoresService) List() (<-chan *IdsecSecHubSecretStoresPage, error) {
 	return s.getSecretStoresWithFilters(
 		"",
 		"",
 	)
 }
 
-// ListSecretStoresBy returns a channel of IdsecSecHubSecretsPage containing secrets filtered by the given filters.
-func (s *IdsecSecHubSecretStoresService) ListSecretStoresBy(secretStoresFilters *secretstoresmodels.IdsecSecHubSecretStoresFilters) (<-chan *IdsecSecHubSecretStoresPage, error) {
+// ListBy returns a channel of IdsecSecHubSecretStoresPage containing secret stores filtered by the given filters.
+func (s *IdsecSecHubSecretStoresService) ListBy(secretStoresFilters *secretstoresmodels.IdsecSecHubSecretStoresFilters) (<-chan *IdsecSecHubSecretStoresPage, error) {
 	var behavior string
 	if secretStoresFilters.Behavior != "" {
 		behavior = secretStoresFilters.Behavior
@@ -159,12 +215,12 @@ func (s *IdsecSecHubSecretStoresService) ListSecretStoresBy(secretStoresFilters 
 	)
 }
 
-// SecretStore returns an individual secret store.
+// Get returns an individual secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/tw80b23aww65j-get-a-secret-store
-func (s *IdsecSecHubSecretStoresService) SecretStore(
+func (s *IdsecSecHubSecretStoresService) Get(
 	getSecretStore *secretstoresmodels.IdsecSecHubGetSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
-	s.Logger.Info("Retrieving secret store [%s]", getSecretStore.SecretStoreID)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(secretStoreURL, getSecretStore.SecretStoreID), nil)
+	s.Logger.Info("Retrieving secret store [%s]", getSecretStore.ID)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(secretStoreURL, getSecretStore.ID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,12 +249,12 @@ func (s *IdsecSecHubSecretStoresService) SecretStore(
 	return &secretStore, nil
 }
 
-// SecretStoreConnStatus retrieves the connection status of a secret store.
+// ConnStatus retrieves the connection status of a secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/b7f2joyxr9ekn-get-connection-status-of-secret-store
-func (s *IdsecSecHubSecretStoresService) SecretStoreConnStatus(
+func (s *IdsecSecHubSecretStoresService) ConnStatus(
 	getSecretStoreConnStatus *secretstoresmodels.IdsecSecHubGetSecretStoreConnectionStatus) (*secretstoresmodels.IdsecSecHubGetSecretStoreConnectionStatusResponse, error) {
-	s.Logger.Info("Retrieving secret store connection status [%s]", getSecretStoreConnStatus.SecretStoreID)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(connStatusURL, getSecretStoreConnStatus.SecretStoreID), nil)
+	s.Logger.Info("Retrieving secret store connection status [%s]", getSecretStoreConnStatus.ID)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(connStatusURL, getSecretStoreConnStatus.ID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -223,9 +279,9 @@ func (s *IdsecSecHubSecretStoresService) SecretStoreConnStatus(
 	return &connStatus, nil
 }
 
-// CreateSecretStore creates a new secret store
+// Create creates a new secret store
 // https://api-docs.cyberark.com/docs/secretshub-api/99oqbphsqgomi-create-secret-store
-func (s *IdsecSecHubSecretStoresService) CreateSecretStore(secretStore *secretstoresmodels.IdsecSecHubCreateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
+func (s *IdsecSecHubSecretStoresService) Create(secretStore *secretstoresmodels.IdsecSecHubCreateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
 	s.Logger.Info("Creating secret store[%s]", secretStore.Name)
 	createSecretStoreJSON, err := common.SerializeJSONCamel(secretStore)
 	if err != nil {
@@ -235,7 +291,7 @@ func (s *IdsecSecHubSecretStoresService) CreateSecretStore(secretStore *secretst
 		delete(createSecretStoreJSON, "description")
 		createSecretStoreJSON["description"] = secretStore.Description
 	}
-	response, err := s.client.Post(context.Background(), sechubURL, createSecretStoreJSON)
+	response, err := s.ISPClient().Post(context.Background(), sechubURL, createSecretStoreJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -260,15 +316,18 @@ func (s *IdsecSecHubSecretStoresService) CreateSecretStore(secretStore *secretst
 	return &secretStoreResponse, nil
 }
 
-// UpdateSecretStore updates a secret store
+// Update updates a secret store
 // https://api-docs.cyberark.com/docs/secretshub-api/99oqbphsqgomi-create-secret-store
-func (s *IdsecSecHubSecretStoresService) UpdateSecretStore(secretStore *secretstoresmodels.IdsecSecHubUpdateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
+func (s *IdsecSecHubSecretStoresService) Update(secretStore *secretstoresmodels.IdsecSecHubUpdateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
 	s.Logger.Info("Updating secret store[%s]", secretStore.Name)
 	updateSecretStoreJSON, err := common.SerializeJSONCamel(secretStore)
 	if err != nil {
 		return nil, err
 	}
-	response, err := s.client.Patch(context.Background(), fmt.Sprintf(secretStoreURL, secretStore.SecretStoreID), updateSecretStoreJSON)
+
+	s.stripImmutableFields(updateSecretStoreJSON)
+
+	response, err := s.ISPClient().Patch(context.Background(), fmt.Sprintf(secretStoreURL, secretStore.ID), updateSecretStoreJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +338,7 @@ func (s *IdsecSecHubSecretStoresService) UpdateSecretStore(secretStore *secretst
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to udpate secret store - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to update secret store - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	secretStoreJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
@@ -293,15 +352,54 @@ func (s *IdsecSecHubSecretStoresService) UpdateSecretStore(secretStore *secretst
 	return &secretStoreResponse, nil
 }
 
-// SetSecretStoreState sets the state of a secret store.
+// UpdateTf updates a secret store using the Terraform-specific set of steps as the idsec-terraform-provider does not have the option to pass state changes per filed.
+func (s *IdsecSecHubSecretStoresService) UpdateTf(secretStore *secretstoresmodels.IdsecSecHubUpdateTfSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
+	s.Logger.Info("Updating secret store [%s] via Terraform", secretStore.Name)
+
+	currentStore, err := s.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
+		ID: secretStore.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve current secret store for TF update: %w", err)
+	}
+
+	updatedStore, err := s.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
+		ID:          secretStore.ID,
+		Name:        secretStore.Name,
+		Description: secretStore.Description,
+		Data:        secretStore.Data,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update secret store fields for TF update: %w", err)
+	}
+
+	if secretStore.State != currentStore.State {
+		action, err := StoreState(secretStore.State).toAction()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine action for TF update: %w", err)
+		}
+		err = s.SetState(&secretstoresmodels.IdsecSecHubSetSecretStoreState{
+			ID:     secretStore.ID,
+			Action: string(action),
+		})
+		if err != nil {
+			return s.rollbackSecretStoreUpdate(currentStore, err)
+		}
+		updatedStore.State = secretStore.State
+	}
+
+	return updatedStore, nil
+}
+
+// SetState sets the state of a secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/qb5o0s8br9nxg-set-secret-store-state
-func (s *IdsecSecHubSecretStoresService) SetSecretStoreState(
+func (s *IdsecSecHubSecretStoresService) SetState(
 	setSecretStoreState *secretstoresmodels.IdsecSecHubSetSecretStoreState) error {
-	s.Logger.Info("Setting secret store state [%s]", setSecretStoreState.SecretStoreID)
+	s.Logger.Info("Setting secret store state [%s]", setSecretStoreState.ID)
 	bodyMap := map[string]string{
 		"action": setSecretStoreState.Action,
 	}
-	response, err := s.client.Put(context.Background(), fmt.Sprintf(stateURL, setSecretStoreState.SecretStoreID), bodyMap)
+	response, err := s.ISPClient().Put(context.Background(), fmt.Sprintf(stateURL, setSecretStoreState.ID), bodyMap)
 	if err != nil {
 		return err
 	}
@@ -317,16 +415,16 @@ func (s *IdsecSecHubSecretStoresService) SetSecretStoreState(
 	return nil
 }
 
-// SetSecretStoresState sets the state of multiple secret stores
+// SetStates sets the state of multiple secret stores
 // https://api-docs.cyberark.com/docs/secretshub-api/hxzzult869lhk-set-state-for-multiple-secret-stores
-func (s *IdsecSecHubSecretStoresService) SetSecretStoresState(
+func (s *IdsecSecHubSecretStoresService) SetStates(
 	setSecretStoresState *secretstoresmodels.IdsecSecHubSetSecretStoresState) (*secretstoresmodels.IdsecSecHubSetSecretStoresStateResponse, error) {
 	s.Logger.Info("Setting multiple secret store states [%s] to [%s]", setSecretStoresState.SecretStoreIDs, setSecretStoresState.Action)
 	bodyMap := map[string]interface{}{
 		"action":         setSecretStoresState.Action,
 		"secretStoreIds": setSecretStoresState.SecretStoreIDs,
 	}
-	response, err := s.client.Put(context.Background(), statesURL, bodyMap)
+	response, err := s.ISPClient().Put(context.Background(), statesURL, bodyMap)
 	if err != nil {
 		return nil, err
 	}
@@ -351,11 +449,11 @@ func (s *IdsecSecHubSecretStoresService) SetSecretStoresState(
 	return &secretStoresState, nil
 }
 
-// DeleteSecretStore deletes a specified secret store based on ID
+// Delete deletes a specified secret store based on ID
 // https://api-docs.cyberark.com/docs/secretshub-api/88xyegf662fxm-delete-secret-store
-func (s *IdsecSecHubSecretStoresService) DeleteSecretStore(secretStore *secretstoresmodels.IdsecSecHubDeleteSecretStore) error {
+func (s *IdsecSecHubSecretStoresService) Delete(secretStore *secretstoresmodels.IdsecSecHubDeleteSecretStore) error {
 	s.Logger.Info("Deleting secret store")
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(secretStoreURL, secretStore.SecretStoreID), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(secretStoreURL, secretStore.ID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -371,10 +469,10 @@ func (s *IdsecSecHubSecretStoresService) DeleteSecretStore(secretStore *secretst
 	return nil
 }
 
-// SecretStoresStats retrieves statistics about secret stores.
-func (s *IdsecSecHubSecretStoresService) SecretStoresStats() (*secretstoresmodels.IdsecSecHubSecretStoresStats, error) {
+// Stats retrieves statistics about secret stores.
+func (s *IdsecSecHubSecretStoresService) Stats() (*secretstoresmodels.IdsecSecHubSecretStoresStats, error) {
 	s.Logger.Info("Retrieving secret store stats")
-	secretStoresChan, err := s.ListSecretStores()
+	secretStoresChan, err := s.List()
 	if err != nil {
 		return nil, err
 	}

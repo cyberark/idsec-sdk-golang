@@ -33,10 +33,8 @@ const (
 
 // IdsecCCEAWSService is the implementation of the CCE AWS service.
 type IdsecCCEAWSService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecCCEAWSService creates a new instance of IdsecCCEAWSService.
@@ -53,18 +51,17 @@ func NewIdsecCCEAWSService(authenticators ...auth.IdsecAuth) (*IdsecCCEAWSServic
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
 
-	client, err := isp.FromISPAuth(ispAuth, cceinternal.IspServiceName, cceinternal.IspVersion, cceinternal.IspAPIVersion, cceAWSService.refreshCCEAWSAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, cceinternal.IspServiceName, cceinternal.IspVersion, cceinternal.IspAPIVersion, cceAWSService.refreshCCEAWSAuth)
 	if err != nil {
 		return nil, err
 	}
-	cceAWSService.client = client
-	cceAWSService.ispAuth = ispAuth
 	cceAWSService.IdsecBaseService = baseService
+	cceAWSService.IdsecISPBaseService = ispBaseService
 	return cceAWSService, nil
 }
 
 func (s *IdsecCCEAWSService) refreshCCEAWSAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -151,7 +148,7 @@ func (s *IdsecCCEAWSService) tfInternalWorkspaces(input *awsmodels.TfIdsecCCEAWS
 		params["services"] = services
 	}
 
-	response, err := s.client.Get(context.Background(), workspacesURL, params)
+	response, err := s.ISPClient().Get(context.Background(), workspacesURL, params)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +281,7 @@ func (s *IdsecCCEAWSService) TfWorkspaces(input *awsmodels.TfIdsecCCEAWSGetWorks
 func (s *IdsecCCEAWSService) TfTenantServiceDetails(input *awsmodels.TfIdsecCCEAWSGetTenantServiceDetails) (*awsmodels.TfIdsecCCEAWSTenantServiceDetails, error) {
 	s.Logger.Info("Getting AWS tenant service details")
 
-	response, err := s.client.Get(context.Background(), pathTenantServiceDetailsURL, nil)
+	response, err := s.ISPClient().Get(context.Background(), pathTenantServiceDetailsURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +320,7 @@ func (s *IdsecCCEAWSService) TfAddAccount(input *awsmodels.TfIdsecCCEAWSAddAccou
 	}
 
 	// POST to add the account
-	response, err := s.client.Post(context.Background(), pathAccountAddURL, input)
+	response, err := s.ISPClient().Post(context.Background(), pathAccountAddURL, input)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +364,7 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 	// Step 1: Get current account details to determine existing services
 	s.Logger.Info("Getting AWS Account details for ID [%s]", input.ID)
 	url := fmt.Sprintf(pathAccountGetOrDeleteURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -410,13 +407,6 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 	}
 
 	s.Logger.Info("Current account services: %v", currentServiceNames)
-	s.Logger.Info("Desired account services after update: %v", func() []string {
-		names := make([]string, 0, len(desiredServicesMap))
-		for name := range desiredServicesMap {
-			names = append(names, name)
-		}
-		return names
-	}())
 
 	// Determine services to add (in desired but not in current)
 	var servicesToAdd []ccemodels.IdsecCCEServiceInput
@@ -473,6 +463,264 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 	return fullAccount, nil
 }
 
+// accountDetailsForUpdate contains the extracted account information needed for updating organization accounts.
+type accountDetailsForUpdate struct {
+	AccountID                    string   // AWS account ID (e.g., "575625562187")
+	CurrentServiceNames          []string // All service names from "services" field
+	CurrentFullyDeployedServices []string // Only services with status "Completely added"
+	ServicesWaitingForDeployment []string // Only services with status "Waiting for deployment"
+}
+
+// parseAccountServices extracts service information from the account JSON response.
+// It returns three lists:
+// - allServices: all service names from the "services" field (regardless of status)
+// - fullyDeployedServices: only services from "services_data" with status "Completely added"
+// - waitingForDeployment: only services from "services_data" with status "Waiting for deployment"
+func parseAccountServices(accountMap map[string]interface{}) (allServices []string, fullyDeployedServices []string, waitingForDeployment []string) {
+	// Get current services (all service names, regardless of status)
+	if servicesRaw, exists := accountMap["services"]; exists {
+		if servicesList, ok := servicesRaw.([]interface{}); ok {
+			for _, svc := range servicesList {
+				if svcStr, ok := svc.(string); ok {
+					allServices = append(allServices, svcStr)
+				}
+			}
+		}
+	}
+
+	// Get services_data to check deployment status
+	// Track services with "Completely added" and "Waiting for deployment" statuses
+	if servicesDataRaw, exists := accountMap["services_data"]; exists {
+		if servicesDataList, ok := servicesDataRaw.([]interface{}); ok {
+			for _, svcData := range servicesDataList {
+				if svcMap, ok := svcData.(map[string]interface{}); ok {
+					name, hasName := svcMap["name"].(string)
+					status, hasStatus := svcMap["status"].(string)
+					if hasName && hasStatus {
+						switch status {
+						case "Completely added":
+							fullyDeployedServices = append(fullyDeployedServices, name)
+						case "Waiting for deployment":
+							waitingForDeployment = append(waitingForDeployment, name)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return allServices, fullyDeployedServices, waitingForDeployment
+}
+
+// getAccountDetailsForUpdate fetches current account details and extracts organization ID, account ID, and current services.
+// This is Step 1 of the TfUpdateOrganizationAccount flow.
+func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID string) (*accountDetailsForUpdate, error) {
+	s.Logger.Info("Fetching current account details for ID [%s]", accountOnboardingID)
+	url := fmt.Sprintf(pathAccountGetOrDeleteURL, accountOnboardingID)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch current account details: %w", err)
+	}
+	defer cceinternal.CloseResponseBody(response.Body)
+
+	// Handle non-2xx status codes
+	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
+		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get account details")
+	}
+
+	accountJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize account response: %w", err)
+	}
+
+	// Extract account ID and current services from raw JSON
+	details := &accountDetailsForUpdate{}
+	if orgMap, ok := accountJSON.(map[string]interface{}); ok {
+		// Get account ID (AWS 12-digit account ID, not the onboarding ID)
+		if accID, exists := orgMap["account_id"]; exists {
+			if accIDStr, ok := accID.(string); ok {
+				details.AccountID = accIDStr
+			}
+		}
+
+		// Parse services from the account response
+		details.CurrentServiceNames, details.CurrentFullyDeployedServices, details.ServicesWaitingForDeployment = parseAccountServices(orgMap)
+	}
+
+	// Validate we got the required information
+	if details.AccountID == "" {
+		return nil, fmt.Errorf("could not determine AWS account ID for onboarding ID [%s]", accountOnboardingID)
+	}
+
+	s.Logger.Info("Account ID: [%s]", details.AccountID)
+	s.Logger.Info("Account has %d services: %d fully deployed, %d waiting for deployment",
+		len(details.CurrentServiceNames), len(details.CurrentFullyDeployedServices), len(details.ServicesWaitingForDeployment))
+	return details, nil
+}
+
+// determineServicesToAddWithStatus determines which services to add based on their deployment status.
+// Only adds services that are either:
+// - Completely new (not in currentServiceNames at all)
+// - OR have status "Waiting for deployment" (in waitingForDeployment list)
+// Services with other statuses (like "In progress", "Failed", etc.) are skipped.
+// This is Step 2 of the TfUpdateOrganizationAccount flow.
+func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
+	currentServiceNames []string,
+	waitingForDeployment []string,
+	fullyDeployed []string,
+	desiredServices []ccemodels.IdsecCCEServiceInput,
+) []ccemodels.IdsecCCEServiceInput {
+	// Build maps for efficient lookup
+	currentServicesMap := make(map[string]bool)
+	for _, serviceName := range currentServiceNames {
+		currentServicesMap[serviceName] = true
+	}
+
+	waitingMap := make(map[string]bool)
+	for _, serviceName := range waitingForDeployment {
+		waitingMap[serviceName] = true
+	}
+
+	fullyDeployedMap := make(map[string]bool)
+	for _, serviceName := range fullyDeployed {
+		fullyDeployedMap[serviceName] = true
+	}
+
+	// Determine services to add
+	var servicesToAdd []ccemodels.IdsecCCEServiceInput
+	for _, service := range desiredServices {
+		serviceName := service.ServiceName
+
+		// Skip if already fully deployed
+		if fullyDeployedMap[serviceName] {
+			s.Logger.Info("Service '%s' is already fully deployed (status: 'Completely added'), skipping", serviceName)
+			continue
+		}
+
+		// Add if completely new (not in current services at all)
+		if !currentServicesMap[serviceName] {
+			servicesToAdd = append(servicesToAdd, service)
+			s.Logger.Info("Service '%s' is NEW and will be ADDED", serviceName)
+			continue
+		}
+
+		// Add if waiting for deployment
+		if waitingMap[serviceName] {
+			servicesToAdd = append(servicesToAdd, service)
+			s.Logger.Info("Service '%s' is waiting for deployment and will be RE-ADDED", serviceName)
+			continue
+		}
+
+		// Skip services with other statuses (In progress, Failed, etc.)
+		s.Logger.Info("Service '%s' has other status (not 'Completely added' or 'Waiting for deployment'), skipping", serviceName)
+	}
+
+	return servicesToAdd
+}
+
+// addServicesToOrganizationAccount adds new services to an account using the organization API endpoint.
+// This is Step 3 of the TfUpdateOrganizationAccount flow.
+func (s *IdsecCCEAWSService) addServicesToOrganizationAccount(
+	organizationID string,
+	accountID string,
+	servicesToAdd []ccemodels.IdsecCCEServiceInput,
+	serviceParameters map[string]map[string]interface{},
+) error {
+	s.Logger.Info("Adding %d new services to organization account [%s] in organization [%s]", len(servicesToAdd), accountID, organizationID)
+
+	// Use the organization API to add services to the account
+	requestBody := map[string]interface{}{
+		"accountId": accountID,
+		"services":  servicesToAdd,
+	}
+
+	// Add service parameters if provided
+	if len(serviceParameters) > 0 {
+		requestBody["serviceParameters"] = serviceParameters
+		s.Logger.Info("Including service parameters for services: %v", func() []string {
+			keys := make([]string, 0, len(serviceParameters))
+			for k := range serviceParameters {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
+
+	orgAccountURL := fmt.Sprintf(pathOrganizationAccountURL, organizationID)
+	addResponse, err := s.ISPClient().Post(context.Background(), orgAccountURL, requestBody)
+	if err != nil {
+		return fmt.Errorf("failed to add services to organization account: %w", err)
+	}
+	defer cceinternal.CloseResponseBody(addResponse.Body)
+
+	if !cceinternal.IsHTTPSuccess(addResponse.StatusCode) {
+		return cceinternal.HandleNon2xxResponse(s.Logger, addResponse.StatusCode, addResponse.Body, "failed to add services to organization account")
+	}
+
+	s.Logger.Info("Successfully added %d services", len(servicesToAdd))
+	return nil
+}
+
+// TfUpdateOrganizationAccount updates services on an AWS account that's part of an organization.
+// It only adds new services to the account. Service removal is not needed because when a service
+// is removed from the organization, it is automatically removed from all accounts in that organization.
+// This method follows the same robust pattern as TfAddOrganizationAccountSync with proper error handling and retry logic.
+// API: POST /api/aws/programmatic/organization/{id}/account
+func (s *IdsecCCEAWSService) TfUpdateOrganizationAccount(input *awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount) (*awsmodels.TfIdsecCCEAWSAccount, error) {
+	s.Logger.Info("Updating organization account [%s] in organization [%s] with desired services", input.ID, input.ParentOrganizationID)
+
+	// Step 1: Get current account details to determine AWS account ID and service deployment status
+	accountDetails, err := s.getAccountDetailsForUpdate(input.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Determine which services need to be added
+	// Only add services that are either:
+	// - Completely new (not in current services at all)
+	// - OR have status "Waiting for deployment"
+	// Services with other statuses (like "In progress", "Failed", etc.) are skipped
+	servicesToAdd := s.determineServicesToAddWithStatus(
+		accountDetails.CurrentServiceNames,
+		accountDetails.ServicesWaitingForDeployment,
+		accountDetails.CurrentFullyDeployedServices,
+		input.Services,
+	)
+
+	// Step 3: If no new services to add, skip the API call
+	if len(servicesToAdd) == 0 {
+		s.Logger.Info("No new services to add, account is already up to date")
+		// Still fetch and return current account details for consistency
+		return s.accountWithRetry(&awsmodels.TfIdsecCCEAWSGetAccount{
+			ID: input.ID,
+		})
+	}
+
+	// Step 4: Add only the NEW services using the organization API endpoint
+	s.Logger.Info("Adding %d new service(s) to account", len(servicesToAdd))
+	err = s.addServicesToOrganizationAccount(
+		input.ParentOrganizationID, // Use the org ID passed from Terraform
+		accountDetails.AccountID,
+		servicesToAdd, // Send only NEW services (delta)
+		input.ServiceParameters,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 5: Fetch and return updated account details using existing retry logic
+	s.Logger.Info("Fetching full account details for account ID [%s]", input.ID)
+	fullAccount, err := s.accountWithRetry(&awsmodels.TfIdsecCCEAWSGetAccount{
+		ID: input.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("services added successfully but failed to fetch updated account details: %w", err)
+	}
+
+	s.Logger.Info("Successfully updated organization account [%s]", input.ID)
+	return fullAccount, nil
+}
+
 // accountWithRetry wraps the Account() method with retry logic for transient failures.
 // ⚠️  DEPRECATED: This function is deprecated and should not be used.
 // ⚠️  It exists only for compatibility with Terraform provider.
@@ -516,7 +764,7 @@ func (s *IdsecCCEAWSService) accountWithRetry(input *awsmodels.TfIdsecCCEAWSGetA
 func (s *IdsecCCEAWSService) TfAccount(input *awsmodels.TfIdsecCCEAWSGetAccount) (*awsmodels.TfIdsecCCEAWSAccount, error) {
 	s.Logger.Info("Getting AWS Account details for ID [%s]", input.ID)
 	url := fmt.Sprintf(pathAccountGetOrDeleteURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -538,6 +786,20 @@ func (s *IdsecCCEAWSService) TfAccount(input *awsmodels.TfIdsecCCEAWSGetAccount)
 		return nil, err
 	}
 
+	// Extract ServiceNames from raw JSON since it has mapstructure:"-" tag
+	if accountMap, ok := accountJSON.(map[string]interface{}); ok {
+		if servicesRaw, exists := accountMap["services"]; exists {
+			if servicesList, ok := servicesRaw.([]interface{}); ok {
+				account.ServiceNames = make([]string, 0, len(servicesList))
+				for _, svc := range servicesList {
+					if svcStr, ok := svc.(string); ok {
+						account.ServiceNames = append(account.ServiceNames, svcStr)
+					}
+				}
+			}
+		}
+	}
+
 	return &account, nil
 }
 
@@ -549,7 +811,7 @@ func (s *IdsecCCEAWSService) TfDeleteAccount(input *awsmodels.TfIdsecCCEAWSDelet
 	s.Logger.Info("Deleting AWS account with ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathAccountGetOrDeleteURL, input.ID)
-	response, err := s.client.Delete(context.Background(), url, nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
@@ -577,7 +839,7 @@ func (s *IdsecCCEAWSService) TfAddAccountServices(input *awsmodels.TfIdsecCCEAWS
 		"services": input.Services,
 	}
 
-	response, err := s.client.Post(context.Background(), url, requestBody)
+	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
 	if err != nil {
 		return fmt.Errorf("failed to add services to account: %w", err)
 	}
@@ -608,7 +870,7 @@ func (s *IdsecCCEAWSService) DeleteAccountServices(input *awsmodels.TfIdsecCCEAW
 
 	s.Logger.Info("Deleting services: %v from account [%s]", input.ServiceNames, input.ID)
 
-	response, err := s.client.Delete(context.Background(), path, nil, params)
+	response, err := s.ISPClient().Delete(context.Background(), path, nil, params)
 	if err != nil {
 		return fmt.Errorf("failed to delete services from account: %w", err)
 	}
@@ -627,7 +889,7 @@ func (s *IdsecCCEAWSService) DeleteAccountServices(input *awsmodels.TfIdsecCCEAW
 func (s *IdsecCCEAWSService) ScanOrganization(input *awsmodels.IdsecCCEAWSScanOrganization) (*awsmodels.IdsecCCEAWSScanResult, error) {
 	s.Logger.Info("Triggering AWS organization discovery scan")
 
-	response, err := s.client.Post(context.Background(), pathOrganizationsScanURL, input)
+	response, err := s.ISPClient().Post(context.Background(), pathOrganizationsScanURL, input)
 	if err != nil {
 		return nil, err
 	}

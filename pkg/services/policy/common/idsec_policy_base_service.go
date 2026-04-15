@@ -3,15 +3,15 @@ package policy
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"reflect"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
-
-	"io"
-	"net/http"
-	"reflect"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
@@ -26,37 +26,38 @@ type IdsecPolicyBasePolicyPage = common.IdsecPage[map[string]interface{}]
 
 // IdsecPolicyBaseService is the base service for managing Policy policies.
 type IdsecPolicyBaseService struct {
-	logger  *common.IdsecLogger
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	logger *common.IdsecLogger
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecPolicyBaseService creates a new instance of IdsecPolicyBaseService.
 func NewIdsecPolicyBaseService(ispAuth *auth.IdsecISPAuth) (*IdsecPolicyBaseService, error) {
 	policyService := &IdsecPolicyBaseService{
-		logger:  common.GetLogger("IdsecPolicyService", common.Unknown),
-		ispAuth: ispAuth,
+		logger: common.GetLogger("IdsecPolicyService", common.Unknown),
 	}
-	client, err := isp.FromISPAuth(ispAuth, "uap", ".", "", policyService.refreshPolicyAuth)
+
+	// Create ISP base service with refresh function that references the policy service
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "uap", ".", "", policyService.refreshPolicyAuth)
 	if err != nil {
 		return nil, err
 	}
-	policyService.client = client
+
+	policyService.IdsecISPBaseService = ispBaseService
 	return policyService, nil
 }
 
 func (s *IdsecPolicyBaseService) refreshPolicyAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// BaseAddPolicy adds a new policy.
-func (s *IdsecPolicyBaseService) BaseAddPolicy(addPolicy map[string]interface{}) (*policycommonmodels.IdsecPolicyResponse, error) {
-	s.logger.Info("Adding new policy")
-	response, err := s.client.Post(context.Background(), policiesURL, addPolicy)
+// BaseCreatePolicy creates a new policy.
+func (s *IdsecPolicyBaseService) BaseCreatePolicy(createPolicy map[string]interface{}) (*policycommonmodels.IdsecPolicyResponse, error) {
+	s.logger.Info("Creating new policy")
+	response, err := s.ISPClient().Post(context.Background(), policiesURL, createPolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (s *IdsecPolicyBaseService) BaseAddPolicy(addPolicy map[string]interface{})
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to add policy - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to create policy - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	policyIDJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
@@ -84,7 +85,7 @@ func (s *IdsecPolicyBaseService) BaseAddPolicy(addPolicy map[string]interface{})
 // BasePolicy retrieves a policy by ID.
 func (s *IdsecPolicyBaseService) BasePolicy(policyID string, schema *reflect.Type) (map[string]interface{}, error) {
 	s.logger.Info("Retrieving policy [%s]", policyID)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(policyURL, policyID), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(policyURL, policyID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +108,7 @@ func (s *IdsecPolicyBaseService) BasePolicy(policyID string, schema *reflect.Typ
 // BaseUpdatePolicy updates an existing policy.
 func (s *IdsecPolicyBaseService) BaseUpdatePolicy(policyID string, updatePolicy map[string]interface{}) error {
 	s.logger.Info("Updating policy [%s]", policyID)
-	response, err := s.client.Put(context.Background(), fmt.Sprintf(policyURL, policyID), updatePolicy)
+	response, err := s.ISPClient().Put(context.Background(), fmt.Sprintf(policyURL, policyID), updatePolicy)
 	if err != nil {
 		return err
 	}
@@ -126,7 +127,7 @@ func (s *IdsecPolicyBaseService) BaseUpdatePolicy(policyID string, updatePolicy 
 // BaseDeletePolicy deletes a policy by ID.
 func (s *IdsecPolicyBaseService) BaseDeletePolicy(policyID string) error {
 	s.logger.Info("Deleting policy [%s]", policyID)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(policyURL, policyID), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(policyURL, policyID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -178,7 +179,7 @@ func (s *IdsecPolicyBaseService) BaseListPolicies(filters *policycommonmodels.Id
 
 			// Make API call
 			s.logger.Info("Requesting policies with next_token [%s] [%v]", nextToken, queryParamsJSONParams)
-			response, err := s.client.Get(context.Background(), policiesURL, queryParamsJSONParams)
+			response, err := s.ISPClient().Get(context.Background(), policiesURL, queryParamsJSONParams)
 			if err != nil {
 				s.logger.Error("Failed to list policies: %v", err)
 				return
@@ -339,4 +340,91 @@ func (s *IdsecPolicyBaseService) BasePoliciesStats(filters *policycommonmodels.I
 		}
 	}
 	return policiesStats, nil
+}
+
+// BaseWaitPolicyActive waits until the policy reaches Active status or until maxRetries is exceeded.
+//
+// Parameters:
+//   - policyID: The unique identifier of the policy to monitor.
+//   - schema: Pointer to a reflect.Type describing the policy structure for deserialization.
+//   - maxRetries: Maximum number of retries before giving up.
+//   - delaySeconds: Delay between retries in seconds.
+//
+// Returns an error if the policy enters an error state or retries are exhausted.
+func (s *IdsecPolicyBaseService) BaseWaitPolicyActive(policyID string, schema *reflect.Type, maxRetries int, delaySeconds int) error { //nolint:revive
+	if maxRetries < 0 {
+		s.logger.Error("Policy [%s] is not active after [%d] retries, might indicate an issue, moving on regardless", policyID, maxRetries)
+		return fmt.Errorf("policy [%s] is not active after [%d] retries", policyID, maxRetries)
+	}
+
+	var nonRetryableErr error
+	tries := maxRetries + 1
+
+	err := common.RetryCall(
+		func() error {
+			policy, err := s.BasePolicy(policyID, schema)
+			if err != nil {
+				nonRetryableErr = err
+				return nil
+			}
+
+			metadataJSON, ok := policy["metadata"].(map[string]interface{})
+			if !ok {
+				nonRetryableErr = fmt.Errorf("policy metadata not found for ID '%s'", policyID)
+				return nil
+			}
+
+			var metadata policycommonmodels.IdsecPolicyMetadata
+			if err = mapstructure.Decode(metadataJSON, &metadata); err != nil {
+				nonRetryableErr = err
+				return nil
+			}
+
+			status := metadata.Status.Status
+			if status == policycommonmodels.StatusTypeActive {
+				return nil
+			}
+
+			if status == policycommonmodels.StatusTypeError {
+				nonRetryableErr = fmt.Errorf("policy [%s] is in error state: %s", policyID, status)
+				return nil
+			}
+
+			return fmt.Errorf("policy [%s] is not active yet: current status [%s]", policyID, status)
+		},
+		tries,
+		delaySeconds,
+		nil,
+		1,
+		0,
+		nil,
+	)
+	if nonRetryableErr != nil {
+		return nonRetryableErr
+	}
+	if err != nil {
+		s.logger.Error("Policy [%s] is not active after [%d] retries, might indicate an issue, moving on regardless", policyID, maxRetries)
+		return fmt.Errorf("policy [%s] is not active after [%d] retries", policyID, maxRetries)
+	}
+	return nil
+}
+
+// BaseCreatePolicyAndWait creates a new policy and waits for it to become Active, up to the provided retry limit.
+//
+// Parameters:
+//   - createPolicy: Serialized policy payload map.
+//   - schema: Pointer to a reflect.Type describing the policy structure for deserialization.
+//   - maxRetries: Maximum number of retries before giving up.
+//   - delaySeconds: Delay between retries in seconds.
+//
+// Returns the IdsecPolicyResponse containing PolicyID on success and waits until active or retries exhausted.
+func (s *IdsecPolicyBaseService) BaseCreatePolicyAndWait(createPolicy map[string]interface{}, schema *reflect.Type, maxRetries int, delaySeconds int) (*policycommonmodels.IdsecPolicyResponse, error) { //nolint:revive
+	resp, err := s.BaseCreatePolicy(createPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.BaseWaitPolicyActive(resp.PolicyID, schema, maxRetries, delaySeconds); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

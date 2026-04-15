@@ -168,6 +168,18 @@ const (
 		}
 	}`
 
+	ValidateFingerprintForSSHZeroStandingJSON = `{
+		"feature_conf": {
+			"enabled": false
+		}
+	}`
+
+	ZspListJSON = `{
+		"feature_conf": {
+			"enabled": false
+		}
+	}`
+
 	EmptyResponseJSON = `{}`
 )
 
@@ -1140,7 +1152,7 @@ func TestSetRDPKeyboardLayout(t *testing.T) {
 			}
 			service.doPut = MockPutFunc(tt.mockResponse, tt.mockError)
 			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
-			_, err = service.SetRDPKeyboardLayout(tt.setting)
+			_, err = service.SetRdpKeyboardLayout(tt.setting)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1301,7 +1313,7 @@ func TestRDPTokenMfaCaching(t *testing.T) {
 				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
 			}
 			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
-			result, err := service.RDPTokenMfaCaching()
+			result, err := service.RdpTokenMfaCaching()
 
 			if tt.expectedError {
 				if err == nil {
@@ -2458,6 +2470,406 @@ func TestSetCertificateValidation_EmptySetting(t *testing.T) {
 			service.doGet = MockGetFunc(MockHTTPResponse(http.StatusOK, CertificateValidationJSON), nil)
 
 			result, err := service.SetCertificateValidation(tt.setting)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+				return
+			}
+
+			if result == nil {
+				t.Errorf("Expected result, got nil")
+			}
+		})
+	}
+}
+
+func TestValidateFingerprintForSSHZeroStanding(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockResponse   *http.Response
+		mockError      error
+		expectedResult *settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding
+		expectedError  bool
+	}{
+		{
+			name:         "success_get_validate_fingerprint",
+			mockResponse: MockHTTPResponse(http.StatusOK, ValidateFingerprintForSSHZeroStandingJSON),
+			mockError:    nil,
+			expectedResult: &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{
+				Enabled: common.Ptr(false),
+			},
+			expectedError: false,
+		},
+		{
+			name:          "error_http_request_failed",
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+		{
+			name:          "error_non_200_status",
+			mockResponse:  MockHTTPResponse(http.StatusInternalServerError, `{"error":"internal error"}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+		{
+			name:          "error_invalid_json",
+			mockResponse:  MockHTTPResponse(http.StatusOK, `{invalid json}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+		{
+			name:          "error_missing_feature_conf",
+			mockResponse:  MockHTTPResponse(http.StatusOK, SettingResponseNoFeatureConfJSON),
+			mockError:     nil,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			result, err := service.ValidateFingerprintForSshZeroStanding()
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expectedResult) {
+				t.Errorf("Expected result %+v, got %+v", tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestSetValidateFingerprintForSSHZeroStanding(t *testing.T) {
+	tests := []struct {
+		name          string
+		setting       *settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding
+		mockResponse  *http.Response
+		mockError     error
+		expectedError bool
+	}{
+		{
+			name: "success_set_validate_fingerprint_false",
+			setting: &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  MockHTTPResponse(http.StatusOK, ValidateFingerprintForSSHZeroStandingJSON),
+			mockError:     nil,
+			expectedError: false,
+		},
+		{
+			name: "success_set_validate_fingerprint_true",
+			setting: &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{
+				Enabled: common.Ptr(true),
+			},
+			mockResponse: MockHTTPResponse(http.StatusOK, `{
+				"feature_conf": {
+					"enabled": true
+				}
+			}`),
+			mockError:     nil,
+			expectedError: false,
+		},
+		{
+			name: "error_http_request_failed",
+			setting: &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+		{
+			name: "error_non_200_status",
+			setting: &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  MockHTTPResponse(http.StatusBadRequest, `{"error":"bad request"}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doPut = MockPutFunc(tt.mockResponse, tt.mockError)
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			_, err = service.SetValidateFingerprintForSshZeroStanding(tt.setting)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSetValidateFingerprintForSSHZeroStanding_EmptySetting(t *testing.T) {
+	tests := []struct {
+		name          string
+		setting       *settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding
+		expectedError bool
+	}{
+		{
+			name:          "success_empty_setting_returns_current",
+			setting:       &settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding{},
+			expectedError: false,
+		},
+		{
+			name:          "success_nil_setting_returns_current",
+			setting:       nil,
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+
+			service.doPut = MockPutFunc(nil, errors.New("should not be called"))
+			service.doGet = MockGetFunc(MockHTTPResponse(http.StatusOK, ValidateFingerprintForSSHZeroStandingJSON), nil)
+
+			result, err := service.SetValidateFingerprintForSshZeroStanding(tt.setting)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+				return
+			}
+
+			if result == nil {
+				t.Errorf("Expected result, got nil")
+			}
+		})
+	}
+}
+
+func TestZspList(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockResponse   *http.Response
+		mockError      error
+		expectedResult *settingsmodels.IdsecSIASettingsZspList
+		expectedError  bool
+	}{
+		{
+			name:         "success_get_zsp_list",
+			mockResponse: MockHTTPResponse(http.StatusOK, ZspListJSON),
+			mockError:    nil,
+			expectedResult: &settingsmodels.IdsecSIASettingsZspList{
+				Enabled: common.Ptr(false),
+			},
+			expectedError: false,
+		},
+		{
+			name:          "error_http_request_failed",
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+		{
+			name:          "error_non_200_status",
+			mockResponse:  MockHTTPResponse(http.StatusInternalServerError, `{"error":"internal error"}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+		{
+			name:          "error_invalid_json",
+			mockResponse:  MockHTTPResponse(http.StatusOK, `{invalid json}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+		{
+			name:          "error_missing_feature_conf",
+			mockResponse:  MockHTTPResponse(http.StatusOK, SettingResponseNoFeatureConfJSON),
+			mockError:     nil,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			result, err := service.ZspList()
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expectedResult) {
+				t.Errorf("Expected result %+v, got %+v", tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestSetZspList(t *testing.T) {
+	tests := []struct {
+		name          string
+		setting       *settingsmodels.IdsecSIASettingsZspList
+		mockResponse  *http.Response
+		mockError     error
+		expectedError bool
+	}{
+		{
+			name: "success_set_zsp_list_false",
+			setting: &settingsmodels.IdsecSIASettingsZspList{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  MockHTTPResponse(http.StatusOK, ZspListJSON),
+			mockError:     nil,
+			expectedError: false,
+		},
+		{
+			name: "success_set_zsp_list_true",
+			setting: &settingsmodels.IdsecSIASettingsZspList{
+				Enabled: common.Ptr(true),
+			},
+			mockResponse: MockHTTPResponse(http.StatusOK, `{
+				"feature_conf": {
+					"enabled": true
+				}
+			}`),
+			mockError:     nil,
+			expectedError: false,
+		},
+		{
+			name: "error_http_request_failed",
+			setting: &settingsmodels.IdsecSIASettingsZspList{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+		{
+			name: "error_non_200_status",
+			setting: &settingsmodels.IdsecSIASettingsZspList{
+				Enabled: common.Ptr(false),
+			},
+			mockResponse:  MockHTTPResponse(http.StatusBadRequest, `{"error":"bad request"}`),
+			mockError:     nil,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doPut = MockPutFunc(tt.mockResponse, tt.mockError)
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			_, err = service.SetZspList(tt.setting)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSetZspList_EmptySetting(t *testing.T) {
+	tests := []struct {
+		name          string
+		setting       *settingsmodels.IdsecSIASettingsZspList
+		expectedError bool
+	}{
+		{
+			name:          "success_empty_setting_returns_current",
+			setting:       &settingsmodels.IdsecSIASettingsZspList{},
+			expectedError: false,
+		},
+		{
+			name:          "success_nil_setting_returns_current",
+			setting:       nil,
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+
+			service.doPut = MockPutFunc(nil, errors.New("should not be called"))
+			service.doGet = MockGetFunc(MockHTTPResponse(http.StatusOK, ZspListJSON), nil)
+
+			result, err := service.SetZspList(tt.setting)
 
 			if tt.expectedError {
 				if err == nil {

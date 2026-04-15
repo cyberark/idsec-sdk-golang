@@ -39,6 +39,7 @@ package profiles
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -114,19 +115,19 @@ func DefaultProfilesLoader() *ProfileLoader {
 //
 // The resolution order is:
 // 1. IDSEC_PROFILES_FOLDER environment variable (if set and non-empty)
-// 2. $HOME/.idsec_profiles (default fallback)
+// 2. $HOME/.idsec/profiles (default fallback)
 //
 // Returns the absolute path to the profiles directory as a string.
 //
 // Example:
 //
 //	folder := GetProfilesFolder()
-//	// Returns "/home/user/.idsec_profiles" or custom path from environment
+//	// Returns "/home/user/.idsec/profiles" or custom path from environment
 func GetProfilesFolder() string {
 	if folder := os.Getenv("IDSEC_PROFILES_FOLDER"); folder != "" {
 		return folder
 	}
-	return filepath.Join(os.Getenv("HOME"), ".idsec_profiles")
+	return filepath.Join(os.Getenv("HOME"), ".idsec", "profiles")
 }
 
 // DefaultProfileName returns the default profile name.
@@ -250,6 +251,10 @@ func (fspl *FileSystemProfilesLoader) LoadProfile(profileName string) (*models.I
 		var profile models.IdsecProfile
 		if err := json.Unmarshal(data, &profile); err != nil {
 			return nil, err
+		}
+		// Validate that profile has exactly one authenticator (isp or pvwa)
+		if err := profile.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid profile '%s': %w", profileName, err)
 		}
 		return &profile, nil
 	}

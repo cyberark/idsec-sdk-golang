@@ -3,7 +3,7 @@ package users
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	identityusersactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/actions"
+	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users/actions"
 )
 
 // ServiceConfig is the configuration for the identity users service.
@@ -11,22 +11,8 @@ var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "identity-users",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
-	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
-		actions.IdsecServiceActionTypeCLI: {
-			identityusersactions.CLIAction,
-		},
-		actions.IdsecServiceActionTypeTerraformResource: {
-			identityusersactions.TerraformActionUserResource,
-			identityusersactions.TerraformActionUserAttributesSchemaResource,
-			identityusersactions.TerraformActionUserAttributesResource,
-		},
-		actions.IdsecServiceActionTypeTerraformDataSource: {
-			identityusersactions.TerraformActionUserDataSource,
-			identityusersactions.TerraformActionUserAttributesSchemaDataSource,
-			identityusersactions.TerraformActionUserAttributesDataSource,
-			identityusersactions.TerraformActionUserInfoDataSource,
-		},
-	},
+	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
+	ActionSchemas:              svcactions.ActionToSchemaMap,
 }
 
 // ServiceGenerator is the function that generates a new instance of the IdsecIdentityUsersService.

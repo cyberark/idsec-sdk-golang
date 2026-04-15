@@ -9,6 +9,15 @@ type IdsecSecHubSecretStoreConnectionConfig struct {
 	ConnectorPoolID string `json:"connector_pool_id,omitempty" mapstructure:"connector_pool_id,omitempty" desc:"The connector pool unique identifier used to connect PAM Self-Hosted and Secrets Hub."`
 }
 
+// IdsecSecHubSecretStoreGcpAuthentication defines the GCP authentication configuration for a secret store in the Idsec Secrets Hub.
+type IdsecSecHubSecretStoreGcpAuthentication struct {
+	GcpProjectNumber          string `json:"gcp_project_number,omitempty" mapstructure:"gcp_project_number,omitempty" flag:"gcp-project-number" desc:"GCP: The number of the GCP project where the service account is stored. If not provided, defaults to the Secret Store's gcpProjectNumber"`
+	GcpWorkloadIdentityPoolID string `json:"gcp_workload_identity_pool_id,omitempty" mapstructure:"gcp_workload_identity_pool_id,omitempty" flag:"gcp-workload-identity-pool-id" desc:"GCP: The GCP workload identity pool ID created for Secrets Hub to access the GCP Secret Manager"`
+	GcpPoolProviderID         string `json:"gcp_pool_provider_id,omitempty" mapstructure:"gcp_pool_provider_id,omitempty" flag:"gcp-pool-provider-id" desc:"GCP: The GCP pool provider ID created for Secrets Hub to access the GCP Secret Manager"`
+	ServiceAccountEmail       string `json:"service_account_email,omitempty" mapstructure:"service_account_email,omitempty" flag:"gcp-service-account-email" desc:"GCP: The service account email created for Secrets Hub to access the GCP Secret Manager"`
+	AuthenticationMethod      string `json:"authentication_method,omitempty" mapstructure:"authentication_method,omitempty" flag:"gcp-authentication-method" desc:"GCP: GCP authentication method to use" default:"TENANT_ROLE" choices:"TENANT_ROLE,GLOBAL_ROLE_EXTERNAL_ID"`
+}
+
 // IdsecSecHubSecretStoreData defines the data structure for a secret store in the Idsec Secrets Hub.
 type IdsecSecHubSecretStoreData struct {
 	// AWS ASM Specific Fields
@@ -16,19 +25,22 @@ type IdsecSecHubSecretStoreData struct {
 	AccountID    string `json:"account_id,omitempty" mapstructure:"account_id,omitempty"`
 	RegionID     string `json:"region_id,omitempty" mapstructure:"region_id,omitempty"`
 	// GCP GSM Specific Fields
-	GcpProjectName            string `json:"gcp_project_name,omitempty" mapstructure:"gcp_project_name,omitempty" desc:"The name of the GCP project where the GCP Secret Manager is stored"`
-	GcpProjectNumber          string `json:"gcp_project_number,omitempty" mapstructure:"gcp_project_number,omitempty" desc:"The number of the GCP project where the GCP Secret Manager is stored"`
-	GcpWorkloadIdentityPoolID string `json:"gcp_workload_identity_pool_id,omitempty" mapstructure:"gcp_workload_identity_pool_id,omitempty" desc:"The GCP workload identity pool ID created for Secrets Hub to access the GCP Secret Manager"`
-	GcpPoolProviderID         string `json:"gcp_pool_provider_id,omitempty" mapstructure:"gcp_pool_provider_id,omitempty" desc:"The GCP pool provider ID created for Secrets Hub to access the GCP Secret Manager"`
-	ServiceAccountEmail       string `json:"service_account_email,omitempty" mapstructure:"service_account_email,omitempty" desc:"The service account email created for Secrets Hub to access the GCP Secret Manager"`
-	// Hashi Vault Specific Fields
-	HashiVaultURL    string `json:"hashi_vault_url,omitempty" mapstructure:"hashi_vault_url,omitempty" desc:"The URL of the HashiCorp Vault"`
-	EnginePath       string `json:"engine_path,omitempty" mapstructure:"engine_path,omitempty" desc:"The path of the engine in HashiCorp Vault"`
-	EngineType       string `json:"engine_type,omitempty" mapstructure:"engine_type,omitempty" desc:"The type of the engine in HashiCorp Vault. Valid values: KV, PKI, SSH"`
-	EngineAPIVersion string `json:"engine_api_version,omitempty" mapstructure:"engine_api_version,omitempty" desc:"The API version of the engine in HashiCorp Vault. Valid values: 1, 2"`
+	GcpProjectName            string                                   `json:"gcp_project_name,omitempty" mapstructure:"gcp_project_name,omitempty" desc:"The name of the GCP project where the GCP Secret Manager is stored"`
+	GcpProjectNumber          string                                   `json:"gcp_project_number,omitempty" mapstructure:"gcp_project_number,omitempty" desc:"The number of the GCP project where the GCP Secret Manager is stored"`
+	GcpWorkloadIdentityPoolID string                                   `json:"gcp_workload_identity_pool_id,omitempty" mapstructure:"gcp_workload_identity_pool_id,omitempty" desc:"The GCP workload identity pool ID created for Secrets Hub to access the GCP Secret Manager"`
+	GcpPoolProviderID         string                                   `json:"gcp_pool_provider_id,omitempty" mapstructure:"gcp_pool_provider_id,omitempty" desc:"The GCP pool provider ID created for Secrets Hub to access the GCP Secret Manager"`
+	ServiceAccountEmail       string                                   `json:"service_account_email,omitempty" mapstructure:"service_account_email,omitempty" desc:"The service account email created for Secrets Hub to access the GCP Secret Manager"`
+	GcpAuthentication         *IdsecSecHubSecretStoreGcpAuthentication `json:"gcp_authentication,omitempty" mapstructure:"gcp_authentication,omitempty" desc:"GCP: The GCP authentication configuration for the secret store"`
+	// HashiCorp Specific Fields
+	HashiVaultURL      string `json:"hashi_vault_url,omitempty" mapstructure:"hashi_vault_url,omitempty" desc:"The URL of the HashiCorp Vault"`
+	MountPath          string `json:"mount_path,omitempty" mapstructure:"mount_path,omitempty" desc:"The mount path of the engine in HashiCorp Vault"`
+	EngineType         string `json:"engine_type,omitempty" mapstructure:"engine_type,omitempty" desc:"The type of the engine in HashiCorp Vault. Valid values: KV, PKI, SSH"`
+	EngineAPIVersion   string `json:"engine_api_version,omitempty" mapstructure:"engine_api_version,omitempty" desc:"The API version of the engine in HashiCorp Vault. Valid values: 1, 2"`
+	AuthenticationPath string `json:"authentication_path,omitempty" mapstructure:"authentication_path,omitempty" desc:"The authentication path in HashiCorp Vault"`
 	// Privilege Cloud and Self-Hosted Specific Fields
+	Password        string `json:"password,omitempty" mapstructure:"password,omitempty" desc:"SELF HOSTED: The password of the user in PAM 'SecretsHub'" flag:"sh-password"`
 	URL             string `json:"url,omitempty" mapstructure:"url,omitempty"`
-	UserName        string `json:"user_name,omitempty" mapstructure:"user_name,omitempty" desc:"The user used for Secrets Hub to get secrets from PAM source. Should be 'SecretsHub'. This user should be created by REST API in PAM"`
+	UserName        string `json:"username,omitempty" mapstructure:"username,omitempty" desc:"The user used for Secrets Hub to get secrets from PAM source. Should be 'SecretsHub'. This user should be created by REST API in PAM"`
 	ConnectorID     string `json:"connector_id,omitempty" mapstructure:"connector_id,omitempty" desc:"The connector unique identifier used to connect Secrets Hub and the Cloud Vendor."`
 	ConnectorPoolID string `json:"connector_pool_id,omitempty" mapstructure:"connector_pool_id,omitempty" desc:"The connector pool unique identifier used to connect PAM Self-Hosted and Secrets Hub."`
 	// Azure AKV Specific Fields
@@ -41,8 +53,10 @@ type IdsecSecHubSecretStoreData struct {
 	// Common Fields
 	// Used by AWS and HashiCorp Vault
 	RoleName string `json:"role_name,omitempty" mapstructure:"role_name,omitempty"`
-	// Used by Azure, GCP, and HashiCorp Vault
+	// Used by Azure and HashiCorp Vault
 	ConnectionConfig *IdsecSecHubSecretStoreConnectionConfig `json:"connection_config,omitempty" mapstructure:"connection_config,omitempty"`
+	// Used by AWS and Azure
+	AuthenticationMethod string `json:"authentication_method,omitempty" mapstructure:"authentication_method,omitempty" flag:"authentication-method" desc:"Provider-specific authentication method to use"`
 }
 
 // IdsecSecHubSecretStoreScan defines the scan status of a secret store in the Idsec Secrets Hub.
@@ -53,21 +67,28 @@ type IdsecSecHubSecretStoreScan struct {
 	FinishedAt string `json:"finished_at,omitempty" mapstructure:"finished_at,omitempty" desc:"The date and time the scan ended. Example: 2023-07-06T15:45:00.103000"`
 }
 
+type IdsecSecHubSecretStoreStoreStatus struct {
+	Status  string `json:"status" mapstructure:"status" validate:"required" desc:"The status of the secret store (SUCCESS, FAILED)"`
+	Message string `json:"message" mapstructure:"message,omitempty" validate:"required" desc:"More information on the secret store status."`
+}
+
 // IdsecSecHubSecretStore defines the structure for a secret store in the Idsec Secrets Hub.
 type IdsecSecHubSecretStore struct {
-	ID                 string                     `json:"id" mapstructure:"id" desc:"The unique identifier of the secret store" validate:"required"`
-	Type               string                     `json:"type" mapstructure:"type" desc:"The type of secret store (PAM_PCLOUD,PAM_SELF_HOSTED,AWS_ASM,AZURE_AKV,GCP_GSM,HASHI_HCV)" validate:"required"`
-	Behaviors          []string                   `json:"behaviors" mapstructure:"behaviors" desc:"Whether the secret store is used as a source or a target. There can be only one source secret store per tenant. Valid values: SECRETS_SOURCE, SECRETS_TARGET"`
-	CreatedAt          string                     `json:"created_at" mapstructure:"created_at" desc:"The secret store creation date." validate:"required"`
-	CreatedBy          string                     `json:"created_by" mapstructure:"created_by" desc:"The user who created the secret store." validate:"required"`
-	Data               IdsecSecHubSecretStoreData `json:"data" mapstructure:"data" desc:"Data related to the secret store as defined in the cloud platform." validate:"required"`
-	Description        string                     `json:"description,omitempty" mapstructure:"description,omitempty" desc:"A description of the secret store."`
-	Name               string                     `json:"name" mapstructure:"name" desc:"The secret store name." validate:"required"`
-	UpdatedAt          string                     `json:"updated_at" mapstructure:"updated_at" desc:"The last date the secret store was updated" validate:"required"`
-	UpdatedBy          string                     `json:"updated_by" mapstructure:"updated_by" desc:"The last user to update the secret store." validate:"required"`
-	CreationDetails    string                     `json:"creation_details,omitempty" mapstructure:"creation_details,omitempty" desc:"Allowed Values: Secrets Hub, Connect Cloud Environment"`
-	OrganizationID     string                     `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty"`
-	Scan               IdsecSecHubSecretStoreScan `json:"scan" mapstructure:"scan"`
-	TotalPoliciesCount int                        `json:"total_policies_count,omitempty" mapstructure:"total_policies_count,omitempty" desc:"The total amount of policies in the secret store"`
-	TotalSecretsCount  int                        `json:"total_secrets_count,omitempty" mapstructure:"total_secrets_count,omitempty" desc:"The total amount of secrets in the secret store"`
+	ID                 string                            `json:"id" mapstructure:"id" desc:"The unique identifier of the secret store" validate:"required"`
+	Type               string                            `json:"type" mapstructure:"type" desc:"The type of secret store (PAM_PCLOUD,PAM_SELF_HOSTED,AWS_ASM,AZURE_AKV,GCP_GSM,HASHICORP_VAULT)" validate:"required"`
+	Behaviors          []string                          `json:"behaviors" mapstructure:"behaviors" desc:"Whether the secret store is used as a source or a target. There can be only one source secret store per tenant. Valid values: SECRETS_SOURCE, SECRETS_TARGET"`
+	CreatedAt          string                            `json:"created_at" mapstructure:"created_at" desc:"The secret store creation date." validate:"required"`
+	CreatedBy          string                            `json:"created_by" mapstructure:"created_by" desc:"The user who created the secret store." validate:"required"`
+	Data               IdsecSecHubSecretStoreData        `json:"data" mapstructure:"data" desc:"Data related to the secret store as defined in the cloud platform." validate:"required"`
+	Description        string                            `json:"description,omitempty" mapstructure:"description,omitempty" desc:"A description of the secret store."`
+	Name               string                            `json:"name" mapstructure:"name" desc:"The secret store name." validate:"required"`
+	UpdatedAt          string                            `json:"updated_at" mapstructure:"updated_at" desc:"The last date the secret store was updated" validate:"required"`
+	UpdatedBy          string                            `json:"updated_by" mapstructure:"updated_by" desc:"The last user to update the secret store." validate:"required"`
+	CreationDetails    string                            `json:"creation_details,omitempty" mapstructure:"creation_details,omitempty" desc:"Allowed Values: Secrets Hub, Connect Cloud Environment"`
+	OrganizationID     string                            `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty"`
+	Scan               IdsecSecHubSecretStoreScan        `json:"scan" mapstructure:"scan"`
+	StoreStatus        IdsecSecHubSecretStoreStoreStatus `json:"store_status" mapstructure:"store_status"`
+	State              string                            `json:"state,omitempty" mapstructure:"state" desc:"The secret store state. Valid values: INITIALIZING,ENABLED,DISABLED,DELETING"`
+	TotalPoliciesCount int                               `json:"total_policies_count,omitempty" mapstructure:"total_policies_count,omitempty" desc:"The total amount of policies in the secret store"`
+	TotalSecretsCount  int                               `json:"total_secrets_count,omitempty" mapstructure:"total_secrets_count,omitempty" desc:"The total amount of secrets in the secret store"`
 }

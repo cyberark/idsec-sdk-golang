@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
@@ -413,5 +414,302 @@ func TestIdsecProfile_RoundTrip(t *testing.T) {
 	if len(unmarshaledProfile.AuthProfiles) != len(originalProfile.AuthProfiles) {
 		t.Errorf("AuthProfiles count mismatch after round trip: expected %d, got %d",
 			len(originalProfile.AuthProfiles), len(unmarshaledProfile.AuthProfiles))
+	}
+}
+
+func TestIdsecProfile_Validate(t *testing.T) {
+	tests := []struct {
+		name          string
+		profile       *IdsecProfile
+		expectedError bool
+		errorContains string
+		validateFunc  func(t *testing.T, err error)
+	}{
+		{
+			name: "error_empty_auth_profiles",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles:       map[string]*auth.IdsecAuthProfile{},
+			},
+			expectedError: true,
+			errorContains: "profile must have at least one auth profile configured",
+		},
+		{
+			name: "error_nil_auth_profiles_map",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles:       nil,
+			},
+			expectedError: true,
+			errorContains: "profile must have at least one auth profile configured",
+		},
+		{
+			name: "error_unsupported_auth_method_direct",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"ap": {
+						Username:           "u",
+						AuthMethod:         auth.Direct,
+						AuthMethodSettings: &auth.DirectIdsecAuthMethodSettings{},
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "unsupported auth method",
+		},
+		{
+			name: "error_unsupported_auth_method_other",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"other": {
+						Username:           "u",
+						AuthMethod:         auth.Other,
+						AuthMethodSettings: nil,
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "unsupported auth method",
+		},
+		{
+			name: "success_one_isp_one_pvwa",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"isp": {
+						Username:           "u1",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+					"pvwa": {
+						Username:   "u2",
+						AuthMethod: auth.PVWA,
+						AuthMethodSettings: &auth.PVWAIdsecAuthMethodSettings{
+							PVWAURL:         "https://pvwa.example.com",
+							PVWALoginMethod: auth.PVWALoginMethodCyberArk,
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "success_single_identity",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"default": {
+						Username:           "u@example.com",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "success_single_identity_service_user",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"svc": {
+						Username:   "u@example.com",
+						AuthMethod: auth.IdentityServiceUser,
+						AuthMethodSettings: &auth.IdentityServiceUserIdsecAuthMethodSettings{
+							IdentityURL:                      "https://id.example.com",
+							IdentityTenantSubdomain:          "t",
+							IdentityAuthorizationApplication: "app",
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "success_single_pvwa",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"pvwa": {
+						Username:   "admin",
+						AuthMethod: auth.PVWA,
+						AuthMethodSettings: &auth.PVWAIdsecAuthMethodSettings{
+							PVWAURL:         "https://pvwa.example.com",
+							PVWALoginMethod: auth.PVWALoginMethodCyberArk,
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "success_all_default",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"a": {
+						Username:           "u",
+						AuthMethod:         auth.Default,
+						AuthMethodSettings: &auth.DefaultIdsecAuthMethodSettings{},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "error_multiple_identity",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"a": {
+						Username:           "u1@example.com",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+					"b": {
+						Username:           "u2@example.com",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "profile can include only 1 ISP authenticator",
+		},
+		{
+			name: "error_multiple_pvwa",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"a": {
+						Username:   "u1",
+						AuthMethod: auth.PVWA,
+						AuthMethodSettings: &auth.PVWAIdsecAuthMethodSettings{
+							PVWAURL:         "https://a.example.com",
+							PVWALoginMethod: auth.PVWALoginMethodCyberArk,
+						},
+					},
+					"b": {
+						Username:   "u2",
+						AuthMethod: auth.PVWA,
+						AuthMethodSettings: &auth.PVWAIdsecAuthMethodSettings{
+							PVWAURL:         "https://b.example.com",
+							PVWALoginMethod: auth.PVWALoginMethodLDAP,
+						},
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "profile can include only 1 PVWA authenticator",
+		},
+		{
+			name: "success_nil_entry_skipped",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"identity": {
+						Username:           "u@example.com",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+					"nil": nil,
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "error_identity_and_identity_service_user",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"id": {
+						Username:           "u1@example.com",
+						AuthMethod:         auth.Identity,
+						AuthMethodSettings: &auth.IdentityIdsecAuthMethodSettings{},
+					},
+					"svc": {
+						Username:   "u2@example.com",
+						AuthMethod: auth.IdentityServiceUser,
+						AuthMethodSettings: &auth.IdentityServiceUserIdsecAuthMethodSettings{
+							IdentityURL:                      "https://id.example.com",
+							IdentityTenantSubdomain:          "t",
+							IdentityAuthorizationApplication: "app",
+						},
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "profile can include only 1 ISP authenticator",
+		},
+		{
+			name: "error_multiple_identity_service_user",
+			profile: &IdsecProfile{
+				ProfileName:        "p",
+				ProfileDescription: "d",
+				AuthProfiles: map[string]*auth.IdsecAuthProfile{
+					"svc1": {
+						Username:   "u1@example.com",
+						AuthMethod: auth.IdentityServiceUser,
+						AuthMethodSettings: &auth.IdentityServiceUserIdsecAuthMethodSettings{
+							IdentityURL:                      "https://id1.example.com",
+							IdentityTenantSubdomain:          "t1",
+							IdentityAuthorizationApplication: "app1",
+						},
+					},
+					"svc2": {
+						Username:   "u2@example.com",
+						AuthMethod: auth.IdentityServiceUser,
+						AuthMethodSettings: &auth.IdentityServiceUserIdsecAuthMethodSettings{
+							IdentityURL:                      "https://id2.example.com",
+							IdentityTenantSubdomain:          "t2",
+							IdentityAuthorizationApplication: "app2",
+						},
+					},
+				},
+			},
+			expectedError: true,
+			errorContains: "profile can include only 1 ISP authenticator",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.profile.Validate()
+
+			if tt.expectedError {
+				if err == nil {
+					t.Error("Expected error, got nil")
+					return
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorContains, err.Error())
+				}
+				if tt.validateFunc != nil {
+					tt.validateFunc(t, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+		})
 	}
 }

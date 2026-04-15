@@ -399,7 +399,7 @@ func TestImport(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ImportWebapp(tt.importWebapp)
+			result, err := service.Import(tt.importWebapp)
 
 			if tt.expectedError {
 				if err == nil {
@@ -521,7 +521,7 @@ func TestGet(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.Webapp(tt.getWebapp)
+			result, err := service.Get(tt.getWebapp)
 
 			if tt.expectedError {
 				if err == nil {
@@ -674,7 +674,7 @@ func TestUpdate(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpdateWebapp(tt.updateWebapp)
+			result, err := service.Update(tt.updateWebapp)
 
 			if tt.expectedError {
 				if err == nil {
@@ -793,7 +793,7 @@ func TestDelete(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			err = service.DeleteWebapp(tt.deleteWebapp)
+			err = service.Delete(tt.deleteWebapp)
 
 			if tt.expectedError {
 				if err == nil {
@@ -855,7 +855,7 @@ func TestList(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			pages, err := service.ListWebapps()
+			pages, err := service.List()
 
 			if tt.expectedError {
 				if err == nil {
@@ -936,7 +936,7 @@ func TestListBy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			pages, err := service.ListWebappsBy(tt.filters)
+			pages, err := service.ListBy(tt.filters)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1054,7 +1054,7 @@ func TestGetPermissions(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.WebappPermissions(tt.getPermissions)
+			result, err := service.GetPermissions(tt.getPermissions)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1217,7 +1217,7 @@ func TestSetPermissions(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.SetWebappPermissions(tt.setPermissions)
+			result, err := service.SetPermissions(tt.setPermissions)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1284,7 +1284,7 @@ func TestListTemplates(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			pages, err := service.ListWebappTemplates()
+			pages, err := service.ListTemplates()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1357,7 +1357,7 @@ func TestListTemplatesBy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			pages, err := service.ListWebappTemplatesBy(tt.filters)
+			pages, err := service.ListTemplatesBy(tt.filters)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1442,7 +1442,7 @@ func TestListCustomTemplates(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ListWebappCustomTemplates()
+			result, err := service.ListCustomTemplates()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1532,7 +1532,7 @@ func TestListCustomTemplatesBy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ListWebappCustomTemplatesBy(tt.filters)
+			result, err := service.ListCustomTemplatesBy(tt.filters)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1617,7 +1617,7 @@ func TestListTemplatesCategories(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ListWebappTemplatesCategories()
+			result, err := service.ListTemplatesCategories()
 
 			if tt.expectedError {
 				if err == nil {
@@ -1710,7 +1710,7 @@ func TestGetTemplate(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.WebappTemplate(tt.getTemplate)
+			result, err := service.GetTemplate(tt.getTemplate)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1798,7 +1798,7 @@ func TestGetCustomTemplate(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.WebappCustomTemplate(tt.getCustomTemplate)
+			result, err := service.GetCustomTemplate(tt.getCustomTemplate)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1854,7 +1854,7 @@ func TestStats(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.WebappStats()
+			result, err := service.Stats()
 
 			if tt.expectedError {
 				if err == nil {

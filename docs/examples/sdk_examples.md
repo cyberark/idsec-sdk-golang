@@ -83,8 +83,8 @@ import (
 	"fmt"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
-	vmsecretsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/vm/models"
-	targetsetsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/targetsets/models"
+	vmsecretsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm/models"
+	targetsetsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacestargetsets/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia"
 	"os"
 )
@@ -208,8 +208,7 @@ func main() {
 		panic(err)
 	}
 }
-````
-
+```
 
 ## CMGR example
 
@@ -220,11 +219,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
-	cmgrmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr"
-	"os"
+	networksmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks/models"
+	identifiersmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolidentifiers/models"
+	poolsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/pools/models"
 )
 
 func main() {
@@ -249,20 +251,20 @@ func main() {
 		panic(err)
 	}
 
-	// Configure a network, pool and identifiers
-	cmgrService, err := cmgr.NewIdsecCmgrService(ispAuth.(*auth.IdsecISPAuth))
+	// Configure a network, pool and identifiers using the CMGR API
+	cmgrAPI, err := cmgr.NewIdsecCmgrAPI(ispAuth.(*auth.IdsecISPAuth))
 	if err != nil {
 		panic(err)
 	}
-	network, err := cmgrService.AddNetwork(&cmgrmodels.IdsecCmgrAddNetwork{Name: "tlv"})
+	network, err := cmgrAPI.Networks().Create(&networksmodels.IdsecCmgrAddNetwork{Name: "tlv"})
 	if err != nil {
 		panic(err)
 	}
-	pool, err := cmgrService.AddPool(&cmgrmodels.IdsecCmgrAddPool{Name: "tlvpool", AssignedNetworkIDs: []string{network.NetworkID}})
+	pool, err := cmgrAPI.Pools().Create(&poolsmodels.IdsecCmgrAddPool{Name: "tlvpool", AssignedNetworkIDs: []string{network.NetworkID}})
 	if err != nil {
 		panic(err)
 	}
-	identifier, err := cmgrService.AddPoolIdentifier(&cmgrmodels.IdsecCmgrAddPoolSingleIdentifier{PoolID: pool.PoolID, Type: cmgrmodels.GeneralFQDN, Value: "mymachine.tlv.com"})
+	identifier, err := cmgrAPI.PoolIdentifiers().Create(&identifiersmodels.IdsecCmgrAddPoolSingleIdentifier{PoolID: pool.PoolID, Type: identifiersmodels.GeneralFQDN, Value: "mymachine.tlv.com"})
 	if err != nil {
 		panic(err)
 	}
@@ -314,7 +316,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	accountsChan, err := pcloudAPI.Accounts().ListAccounts()
+	accountsChan, err := pcloudAPI.Accounts().List()
 	if err != nil {
 		panic(err)
 	}
@@ -369,7 +371,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	identitiesChan, err := identityAPI.Directories().ListDirectoriesEntities(&directoriesmodels.IdsecIdentityListDirectoriesEntities{})
+	identitiesChan, err := identityAPI.Directories().ListEntities(&directoriesmodels.IdsecIdentityListDirectoriesEntities{})
 	if err != nil {
 		panic(err)
 	}
@@ -387,10 +389,12 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/sm"
-	"os"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessions"
+	sessionsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessions/models"
 )
 
 func main() {
@@ -415,15 +419,15 @@ func main() {
 		panic(err)
 	}
 
-	SMAPI, err := sm.NewIdsecSMService(ispAuth.(*auth.IdsecISPAuth))
+	sessionsService, err := sessions.NewIdsecSMSessionsService(ispAuth)
 	if err != nil {
 		panic(err)
 	}
-	filter := &IdsecSMSessionsFilter{
+	filter := &sessionsmodels.IdsecSMSessionsFilter{
 		Search: "status IN Active",
 	}
 	// Get all active sessions
-	activeSessions, err := SMAPI.CountSessionsBy(filter)
+	activeSessions, err := sessionsService.CountBy(filter)
 	if err != nil {
 		panic(err)
 	}
@@ -447,7 +451,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
 	policycommomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 	policydbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db/models"
-	dbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db/models"
+	dbmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb/models"
 )
 
 func main() {
@@ -476,7 +480,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	policy, err := policyAPI.Db().AddPolicy(
+	policy, err := policyAPI.Db().CreatePolicy(
 		&policydbmodels.IdsecPolicyDBAccessPolicy{
 			IdsecPolicyInfraCommonAccessPolicy: policycommomodels.IdsecPolicyInfraCommonAccessPolicy{
 				IdsecPolicyCommonAccessPolicy: policycommomodels.IdsecPolicyCommonAccessPolicy{
@@ -581,7 +585,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	policy, err := policyAPI.VM().AddPolicy(
+	policy, err := policyAPI.VM().CreatePolicy(
 		&policyvmmodels.IdsecPolicyVMAccessPolicy{
 			IdsecPolicyInfraCommonAccessPolicy: policycommomodels.IdsecPolicyInfraCommonAccessPolicy{
 				IdsecPolicyCommonAccessPolicy: policycommomodels.IdsecPolicyCommonAccessPolicy{
@@ -692,7 +696,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	policy, err := policyAPI.CloudAccess().AddPolicy(
+	policy, err := policyAPI.CloudAccess().CreatePolicy(
 		&policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{
 			IdsecPolicyCommonAccessPolicy: commonpolicymodels.IdsecPolicyCommonAccessPolicy{
 				Metadata: commonpolicymodels.IdsecPolicyMetadata{
@@ -873,7 +877,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud"
-	platformsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms/models"
+	targetplatformsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/targetplatforms/models"
 )
 
 func main() {
@@ -903,8 +907,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	importedPlatform, err := pcloudAPI.Platforms().ImportTargetPlatform(
-		&platformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: "/path/to/platform.zip"},
+	importedPlatform, err := pcloudAPI.TargetPlatforms().Import(
+		&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: "/path/to/platform.zip"},
 	)
 	if err != nil {
 		panic(err)
@@ -1030,11 +1034,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	user, err := identityAPI.Users().CreateUser(&usersmodels.IdsecIdentityCreateUser{Username: "myuser"})
+	user, err := identityAPI.Users().Create(&usersmodels.IdsecIdentityCreateUser{Username: "myuser"})
 	if err != nil {
 		panic(err)
 	}
-	userSchema, err := identityAPI.Users().UpsertUserAttributesSchema(&usersmodels.IdsecIdentityUpsertUserAttributesSchema{
+	userSchema, err := identityAPI.Users().UpsertAttributesSchema(&usersmodels.IdsecIdentityUpsertUserAttributesSchema{
 		Columns: []usersmodels.IdsecIdentityUserAttributesSchemaColumn{
 			{Name: "department_attr1", Type: "string", Description: "Department attribute 1"},
 			{Name: "location_attr2", Type: "string", Description: "Location attribute 2"},
@@ -1043,7 +1047,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	userAttributes, err := identityAPI.Users().UpsertUserAttributes(&usersmodels.IdsecIdentityUpsertUserAttributes{
+	userAttributes, err := identityAPI.Users().UpsertAttributes(&usersmodels.IdsecIdentityUpsertUserAttributes{
 		UserID: user.UserID,
 		Attributes: map[string]string{
 			"department_attr1": "engineering",

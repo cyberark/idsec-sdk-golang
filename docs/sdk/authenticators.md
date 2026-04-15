@@ -31,12 +31,16 @@ These are the different types of authenticator types and auth methods:
 
 ## Authenticator types
 
-Currently, IdsecISPAuth is the only supported authenticator type, which is derived from the IdsecAuth interface and accepts the `Identity` (default) and `IdentityServiceUser` auth methods.
+Two authenticator types are supported, both derived from the IdsecAuth interface:
+
+- **IdsecISPAuth** – for CyberArk Identity Security Platform (ISP / cloud). Accepts the `Identity` (default) and `IdentityServiceUser` auth methods.
+- **IdsecPVWAAuth** – for self-hosted CyberArk **PVWA** (Password Vault Web Access). Accepts the `PVWA` auth method and authenticates via the PVWA REST API (`/PasswordVault/API/auth/{method}/Logon`). Use `auth.NewIdsecPVWAAuth(cacheAuthentication)`.
 
 ## Auth methods
 
 - <b>Identity</b> (`identity`) - Identity authentication to a tenant or to an application within the Identity tenant, used with the IdentityIdsecAuthMethodSettings class
 - <b>IdentityServiceUser</b> (`identity_service_user`) - Identity authentication with a service user, used with IdentityServiceUserIdsecAuthMethodSettings class
+- <b>PVWA</b> (`pvwa`) - PVWA username/password authentication for self-hosted CyberArk, used with PVWAIdsecAuthMethodSettings (PVWAURL, PVWALoginMethod: `cyberark`, `ldap`, or `windows`)
 - <b>Direct</b> (`direct`) - Direct authentication to an endpoint, used with the DirectIdsecAuthMethodSettings class
 - <b>Default</b> (`default`) - Default authenticator auth method for the authenticator
 - <b>Other</b> (`other`) - For custom implementations
@@ -44,6 +48,8 @@ Currently, IdsecISPAuth is the only supported authenticator type, which is deriv
 See [idsec_auth_method.go](https://github.com/cyberark/idsec-sdk-golang/blob/main/pkg/models/auth/idsec_auth_method.go){:target="_blank" rel="noopener"} for more information about auth methods.
 
 ## SDK authenticate example
+
+### ISP
 
 Here is an example authentication flow that implements the IdsecISPAuth class:
 
@@ -81,6 +87,50 @@ func main() {
 ```
 
 The example above initializes an instance of the IdsecISPAuth class and authenticates to the specified ISP tenant, using the `Identity` authentication type with the provided username and password.
+
+The `authenticate` method returns a token, which can usually be ignored because it is stored internally.
+
+After authenticating, the authenticator can be used to access the required services.
+
+### PVWA
+
+Here is an example authentication flow that implements the IdsecPVWAAuth class:
+
+```go
+package main
+
+import (
+	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/auth/pvwa"
+	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
+	"os"
+)
+
+func main() {
+	pvwaAuth := auth.NewIdsecPVWAAuth(false)
+	_, err := pvwaAuth.Authenticate(
+		nil,
+		&authmodels.IdsecAuthProfile{
+			Username:   "admin",
+			AuthMethod: authmodels.PVWA,
+			AuthMethodSettings: &authmodels.PVWAIdsecAuthMethodSettings{
+				PVWAURL:         "https://pvwa.example.com",
+				PVWALoginMethod: authmodels.PVWALoginMethodCyberArk,
+			},
+		},
+		&authmodels.IdsecSecret{
+			Secret: os.Getenv("IDSEC_SECRET"),
+		},
+		false,
+		false,
+	)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+The example above initializes an instance of the IdsecPVWAAuth class and authenticates to the specified PVWA instance, using the `PVWA` authentication type with the provided username, password, PVWA URL, and login method (`cyberark`, `ldap`, or `windows`).
 
 The `authenticate` method returns a token, which can usually be ignored because it is stored internally.
 

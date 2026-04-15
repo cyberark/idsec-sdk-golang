@@ -21,10 +21,8 @@ const (
 
 // IdsecSIAShortenedConnectionStringService is a struct that implements the IdsecService interface and provides functionality for shortened connection string for SIA.
 type IdsecSIAShortenedConnectionStringService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSIAShortenedConnectionStringService creates a new instance of IdsecSIAShortenedConnectionStringService with the provided authenticators.
@@ -40,18 +38,17 @@ func NewIdsecSIAShortenedConnectionStringService(authenticators ...auth.IdsecAut
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", shortenedConnectionStringService.refreshSIAAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", shortenedConnectionStringService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	shortenedConnectionStringService.client = client
-	shortenedConnectionStringService.ispAuth = ispAuth
 	shortenedConnectionStringService.IdsecBaseService = baseService
+	shortenedConnectionStringService.IdsecISPBaseService = ispBaseService
 	return shortenedConnectionStringService, nil
 }
 
 func (s *IdsecSIAShortenedConnectionStringService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -67,7 +64,7 @@ func (s *IdsecSIAShortenedConnectionStringService) Generate(
 	if err != nil {
 		return nil, err
 	}
-	response, err := s.client.Post(context.Background(), generateShortenedConnectionStringURL, generateShortenedConnectionStringJSON)
+	response, err := s.ISPClient().Post(context.Background(), generateShortenedConnectionStringURL, generateShortenedConnectionStringJSON)
 	if err != nil {
 		return nil, err
 	}

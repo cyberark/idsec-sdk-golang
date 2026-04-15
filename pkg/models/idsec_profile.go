@@ -6,6 +6,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 )
@@ -78,6 +79,54 @@ func (p *IdsecProfile) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		p.AuthProfiles[key] = &authProfile
+	}
+
+	return nil
+}
+
+// Validate ensures the profile has at most one ISP authenticator and at most one PVWA authenticator.
+// ISP supports: Identity, IdentityServiceUser
+// PVWA supports: PVWA
+// Returns an error if more than one ISP authenticator or more than one PVWA authenticator is found.
+func (p *IdsecProfile) Validate() error {
+	if len(p.AuthProfiles) == 0 {
+		return fmt.Errorf("profile must have at least one auth profile configured")
+	}
+
+	// Count authenticators by type
+	ispCount := 0
+	pvwaCount := 0
+
+	for authProfileKey, authProfile := range p.AuthProfiles {
+		if authProfile == nil {
+			continue
+		}
+
+		// Determine authenticator type from AuthMethod
+		// ISP methods: Identity, IdentityServiceUser
+		// PVWA method: PVWA
+		switch authProfile.AuthMethod {
+		case auth.Identity, auth.IdentityServiceUser:
+			ispCount++
+		case auth.PVWA:
+			pvwaCount++
+		case auth.Default:
+			// Default method will be resolved by the authenticator later
+			// Skip Default for validation purposes
+			continue
+		default:
+			return fmt.Errorf("auth profile '%s' uses unsupported auth method '%s' (only ISP or PVWA methods are allowed)", authProfileKey, authProfile.AuthMethod)
+		}
+	}
+
+	// Validate that there's at most one ISP authenticator
+	if ispCount > 1 {
+		return fmt.Errorf("profile can include only 1 ISP authenticator, found %d", ispCount)
+	}
+
+	// Validate that there's at most one PVWA authenticator
+	if pvwaCount > 1 {
+		return fmt.Errorf("profile can include only 1 PVWA authenticator, found %d", pvwaCount)
 	}
 
 	return nil

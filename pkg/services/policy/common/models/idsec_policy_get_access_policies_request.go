@@ -37,11 +37,11 @@ var mapAliasToFieldName = map[string]string{
 
 // IdsecPolicyGetQueryParams represents the query parameters for retrieving access policies.
 type IdsecPolicyGetQueryParams struct {
-	Filter               string `json:"filter,omitempty" mapstructure:"filter,omitempty" flag:"filter" desc:"The filter query to apply on the policies"`
+	Filter               string `json:"filter,omitempty" mapstructure:"filter,omitempty" flag:"filter" desc:"Filter query to retrieve access policies. Supported operations: eq (except Identities which supports only contains), or, and. If you want to query on the same field, use the 'or' condition. Use the 'and' operation to filter on two fields or more. Supported field names: policyTags, identities, targetCategory, status, locationType."`
 	ShowEditablePolicies bool   `json:"show_editable_policies,omitempty" mapstructure:"show_editable_policies,omitempty" flag:"show-editable-policies" desc:"Show editable policies"`
-	Q                    string `json:"q,omitempty" mapstructure:"q,omitempty" flag:"q" desc:"Free text search on policy name or description"`
-	NextToken            string `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"The next token for pagination"`
-	Limit                int    `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of policies to return in the response"`
+	Q                    string `json:"q,omitempty" mapstructure:"q,omitempty" flag:"q" desc:"Use this for a free text search on policy name and description."`
+	NextToken            string `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"The token from the previous API response. To retrieve the next N results, use DS1_10;DS2_20. This means that the service will retrieve 10 results from DS_1 and 20 results from DS_2"`
+	Limit                int    `json:"limit" mapstructure:"limit" flag:"limit" desc:"The maximum number of access policies to return. You can request up to 50 policies."`
 }
 
 // IdsecPolicyFilters represents the supported filters for policy queries.

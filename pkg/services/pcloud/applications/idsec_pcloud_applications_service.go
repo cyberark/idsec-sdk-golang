@@ -25,10 +25,8 @@ const (
 
 // IdsecPCloudApplicationsService is the service for managing pCloud Applications.
 type IdsecPCloudApplicationsService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 
 	doGet    func(ctx context.Context, path string, params interface{}) (*http.Response, error)
 	doPost   func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -48,18 +46,26 @@ func NewIdsecPCloudApplicationsService(authenticators ...auth.IdsecAuth) (*Idsec
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudApplicationsService.refreshPCloudApplicationsAuth, commonpcloud.DefaultPCloudRetryStrategy())
+
+	ispBaseService, err := services.NewIdsecISPBaseServiceWithRetry(
+		ispAuth,
+		"privilegecloud",
+		".",
+		"passwordvault",
+		pcloudApplicationsService.refreshPCloudApplicationsAuth,
+		commonpcloud.DefaultPCloudRetryStrategy(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	pcloudApplicationsService.client = client
-	pcloudApplicationsService.ispAuth = ispAuth
+
 	pcloudApplicationsService.IdsecBaseService = baseService
+	pcloudApplicationsService.IdsecISPBaseService = ispBaseService
 	return pcloudApplicationsService, nil
 }
 
 func (s *IdsecPCloudApplicationsService) refreshPCloudApplicationsAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -70,26 +76,26 @@ func (s *IdsecPCloudApplicationsService) getOperation() func(ctx context.Context
 	if s.doGet != nil {
 		return s.doGet
 	}
-	return s.client.Get
+	return s.ISPClient().Get
 }
 
 func (s *IdsecPCloudApplicationsService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.doPost != nil {
 		return s.doPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecPCloudApplicationsService) deleteOperation() func(ctx context.Context, path string, body interface{}, params interface{}) (*http.Response, error) {
 	if s.doDelete != nil {
 		return s.doDelete
 	}
-	return s.client.Delete
+	return s.ISPClient().Delete
 }
 
-// CreateApplication creates a new pCloud application.
+// Create creates a new pCloud application.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Add%20Application.htm
-func (s *IdsecPCloudApplicationsService) CreateApplication(createApplication *applicationsmodels.IdsecPCloudCreateApplication) (*applicationsmodels.IdsecPCloudApplication, error) {
+func (s *IdsecPCloudApplicationsService) Create(createApplication *applicationsmodels.IdsecPCloudCreateApplication) (*applicationsmodels.IdsecPCloudApplication, error) {
 	s.Logger.Info("Creating pCloud application")
 	createAppJSON, err := common.SerializeJSONPascal(createApplication)
 	if err != nil {
@@ -110,12 +116,12 @@ func (s *IdsecPCloudApplicationsService) CreateApplication(createApplication *ap
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create application - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	return s.Application(&applicationsmodels.IdsecPCloudGetApplication{AppID: createApplication.AppID})
+	return s.Get(&applicationsmodels.IdsecPCloudGetApplication{AppID: createApplication.AppID})
 }
 
-// Application retrieves a pCloud application.
+// Get retrieves a pCloud application.
 // https://docs.cyberark.com/privilege-cloud-standard/latest/en/content/webservices/list%20a%20specific%20application.htm
-func (s *IdsecPCloudApplicationsService) Application(getApplication *applicationsmodels.IdsecPCloudGetApplication) (*applicationsmodels.IdsecPCloudApplication, error) {
+func (s *IdsecPCloudApplicationsService) Get(getApplication *applicationsmodels.IdsecPCloudGetApplication) (*applicationsmodels.IdsecPCloudApplication, error) {
 	s.Logger.Info("Retrieving pCloud application")
 	response, err := s.getOperation()(context.Background(), fmt.Sprintf(applicationURL, getApplication.AppID), nil)
 	if err != nil {
@@ -150,9 +156,9 @@ func (s *IdsecPCloudApplicationsService) Application(getApplication *application
 	return &application, nil
 }
 
-// DeleteApplication deletes a pCloud application.
-// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/DeleteApplication%20a%20Specific%20Application.htm
-func (s *IdsecPCloudApplicationsService) DeleteApplication(deleteApplication *applicationsmodels.IdsecPCloudDeleteApplication) error {
+// Delete deletes a pCloud application.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Delete%20a%20Specific%20Application.htm
+func (s *IdsecPCloudApplicationsService) Delete(deleteApplication *applicationsmodels.IdsecPCloudDeleteApplication) error {
 	s.Logger.Info("Deleting pCloud application")
 	response, err := s.deleteOperation()(context.Background(), fmt.Sprintf(applicationURL, deleteApplication.AppID), nil, nil)
 	if err != nil {
@@ -170,9 +176,9 @@ func (s *IdsecPCloudApplicationsService) DeleteApplication(deleteApplication *ap
 	return nil
 }
 
-// ListApplications lists all pCloud applications.
-// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/ListApplications%20Applications.htm
-func (s *IdsecPCloudApplicationsService) ListApplications() ([]*applicationsmodels.IdsecPCloudApplication, error) {
+// List lists all pCloud applications.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/List%20Applications.htm
+func (s *IdsecPCloudApplicationsService) List() ([]*applicationsmodels.IdsecPCloudApplication, error) {
 	s.Logger.Info("Listing pCloud applications")
 	response, err := s.getOperation()(context.Background(), applicationsURL, nil)
 	if err != nil {
@@ -215,11 +221,11 @@ func (s *IdsecPCloudApplicationsService) ListApplications() ([]*applicationsmode
 	return applications, nil
 }
 
-// ListApplicationsBy lists pCloud applications based on the provided filter.
+// ListBy lists pCloud applications based on the provided filter.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/List%20Applications.htm
-func (s *IdsecPCloudApplicationsService) ListApplicationsBy(filter *applicationsmodels.IdsecPCloudApplicationsFilter) ([]*applicationsmodels.IdsecPCloudApplication, error) {
+func (s *IdsecPCloudApplicationsService) ListBy(filter *applicationsmodels.IdsecPCloudApplicationsFilter) ([]*applicationsmodels.IdsecPCloudApplication, error) {
 	s.Logger.Info("Listing pCloud applications by filter")
-	applications, err := s.ListApplications()
+	applications, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -245,9 +251,9 @@ func (s *IdsecPCloudApplicationsService) ListApplicationsBy(filter *applications
 	return filteredApplications, nil
 }
 
-// CreateApplicationAuthMethod creates a new pCloud application auth method.
+// CreateAuthMethod creates a new pCloud application auth method.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Add%20Authentication.htm
-func (s *IdsecPCloudApplicationsService) CreateApplicationAuthMethod(createApplicationAuthMethod *applicationsmodels.IdsecPCloudCreateApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
+func (s *IdsecPCloudApplicationsService) CreateAuthMethod(createApplicationAuthMethod *applicationsmodels.IdsecPCloudCreateApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
 	s.Logger.Info("Creating pCloud application auth method")
 	authMethodJSON := map[string]interface{}{
 		"AuthType": createApplicationAuthMethod.AuthType,
@@ -306,7 +312,7 @@ func (s *IdsecPCloudApplicationsService) CreateApplicationAuthMethod(createAppli
 	if response.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("failed to create application auth method - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	authMethods, err := s.ListApplicationAuthMethodsBy(&applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter{
+	authMethods, err := s.ListAuthMethodsBy(&applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter{
 		AppID:     createApplicationAuthMethod.AppID,
 		AuthTypes: []string{createApplicationAuthMethod.AuthType},
 	})
@@ -321,10 +327,10 @@ func (s *IdsecPCloudApplicationsService) CreateApplicationAuthMethod(createAppli
 	return nil, fmt.Errorf("created auth method not found")
 }
 
-// ApplicationAuthMethod retrieves a pCloud application auth method.
-func (s *IdsecPCloudApplicationsService) ApplicationAuthMethod(getApplicationAuthMethod *applicationsmodels.IdsecPCloudGetApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
+// GetAuthMethod retrieves a pCloud application auth method.
+func (s *IdsecPCloudApplicationsService) GetAuthMethod(getApplicationAuthMethod *applicationsmodels.IdsecPCloudGetApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
 	s.Logger.Info("Retrieving pCloud application auth method [%v] - [%v]", getApplicationAuthMethod.AppID, getApplicationAuthMethod.AuthID)
-	appAuthMethods, err := s.ListApplicationAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: getApplicationAuthMethod.AppID})
+	appAuthMethods, err := s.ListAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: getApplicationAuthMethod.AppID})
 	if err != nil {
 		return nil, err
 	}
@@ -336,9 +342,9 @@ func (s *IdsecPCloudApplicationsService) ApplicationAuthMethod(getApplicationAut
 	return nil, fmt.Errorf("application auth method not found")
 }
 
-// DeleteApplicationAuthMethod deletes a pCloud application auth method.
+// DeleteAuthMethod deletes a pCloud application auth method.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Delete%20a%20Specific%20Authentication.htm
-func (s *IdsecPCloudApplicationsService) DeleteApplicationAuthMethod(deleteApplicationAuthMethod *applicationsmodels.IdsecPCloudDeleteApplicationAuthMethod) error {
+func (s *IdsecPCloudApplicationsService) DeleteAuthMethod(deleteApplicationAuthMethod *applicationsmodels.IdsecPCloudDeleteApplicationAuthMethod) error {
 	s.Logger.Info("Deleting pCloud application auth method")
 	response, err := s.deleteOperation()(context.Background(), fmt.Sprintf(applicationAuthMethodURL, deleteApplicationAuthMethod.AppID, deleteApplicationAuthMethod.AuthID), nil, nil)
 	if err != nil {
@@ -356,9 +362,9 @@ func (s *IdsecPCloudApplicationsService) DeleteApplicationAuthMethod(deleteAppli
 	return nil
 }
 
-// ListApplicationAuthMethods lists all auth methods for a given pCloud application.
+// ListAuthMethods lists all auth methods for a given pCloud application.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/List%20all%20Authentication%20Methods%20of%20a%20Specific%20Application.htm
-func (s *IdsecPCloudApplicationsService) ListApplicationAuthMethods(listApplicationAuthMethods *applicationsmodels.IdsecPCloudListApplicationAuthMethods) ([]*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
+func (s *IdsecPCloudApplicationsService) ListAuthMethods(listApplicationAuthMethods *applicationsmodels.IdsecPCloudListApplicationAuthMethods) ([]*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
 	s.Logger.Info("Listing pCloud application auth methods")
 	response, err := s.getOperation()(context.Background(), fmt.Sprintf(applicationAuthMethodsURL, listApplicationAuthMethods.AppID), nil)
 	if err != nil {
@@ -402,11 +408,11 @@ func (s *IdsecPCloudApplicationsService) ListApplicationAuthMethods(listApplicat
 	return authMethods, nil
 }
 
-// ListApplicationAuthMethodsBy lists pCloud application auth methods based on the provided filter.
+// ListAuthMethodsBy lists pCloud application auth methods based on the provided filter.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/List%20all%20Authentication%20Methods%20of%20a%20Specific%20Application.htm
-func (s *IdsecPCloudApplicationsService) ListApplicationAuthMethodsBy(filter *applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter) ([]*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
+func (s *IdsecPCloudApplicationsService) ListAuthMethodsBy(filter *applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter) ([]*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
 	s.Logger.Info("Listing pCloud application auth methods by filter")
-	authMethods, err := s.ListApplicationAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: filter.AppID})
+	authMethods, err := s.ListAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: filter.AppID})
 	if err != nil {
 		return nil, err
 	}
@@ -429,10 +435,10 @@ func (s *IdsecPCloudApplicationsService) ListApplicationAuthMethodsBy(filter *ap
 	return filteredAuthMethods, nil
 }
 
-// ApplicationsStats retrieves statistics about pCloud applications.
-func (s *IdsecPCloudApplicationsService) ApplicationsStats() (*applicationsmodels.IdsecPCloudApplicationsStats, error) {
+// Stats retrieves statistics about pCloud applications.
+func (s *IdsecPCloudApplicationsService) Stats() (*applicationsmodels.IdsecPCloudApplicationsStats, error) {
 	s.Logger.Info("Retrieving pCloud applications stats")
-	applications, err := s.ListApplications()
+	applications, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +452,7 @@ func (s *IdsecPCloudApplicationsService) ApplicationsStats() (*applicationsmodel
 		if app.Disabled {
 			appStats.DisabledApps = append(appStats.DisabledApps, app.AppID)
 		}
-		authMethods, err := s.ListApplicationAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: app.AppID})
+		authMethods, err := s.ListAuthMethods(&applicationsmodels.IdsecPCloudListApplicationAuthMethods{AppID: app.AppID})
 		if err != nil {
 			return nil, err
 		}

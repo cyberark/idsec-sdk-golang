@@ -216,7 +216,7 @@ func TestAddCertificate(t *testing.T) {
 				tt.addCertificate.File = filePath
 			}
 
-			_, err := service.AddCertificate(tt.addCertificate)
+			_, err := service.Create(tt.addCertificate)
 
 			if tt.expectedError {
 				if err == nil {
@@ -316,7 +316,7 @@ func TestGetCertificate(t *testing.T) {
 				return NewMockResponse(tt.mockStatusCode, tt.mockBody), nil
 			}
 
-			result, err := service.Certificate(&certificatesmodels.IdsecSIACertificatesGetCertificate{CertificateID: tt.certificateID})
+			result, err := service.Get(&certificatesmodels.IdsecSIACertificatesGetCertificate{CertificateID: tt.certificateID})
 
 			if tt.expectedError {
 				if err == nil {
@@ -433,7 +433,7 @@ func TestListCertificates(t *testing.T) {
 				return NewMockResponse(tt.mockStatusCode, tt.mockBody), nil
 			}
 
-			result, err := service.ListCertificatesBy(tt.listParams)
+			result, err := service.ListBy(tt.listParams)
 
 			if tt.expectedError {
 				if err == nil {
@@ -566,7 +566,7 @@ func TestUpdateCertificate(t *testing.T) {
 			}
 
 			tt.updateData.CertificateID = tt.certificateID
-			_, err := service.UpdateCertificate(tt.updateData)
+			_, err := service.Update(tt.updateData)
 
 			if tt.expectedError {
 				if err == nil {
@@ -658,7 +658,7 @@ func TestDeleteCertificate(t *testing.T) {
 				return NewMockResponse(tt.mockStatusCode, tt.mockBody), nil
 			}
 
-			err := service.DeleteCertificate(&certificatesmodels.IdsecSIACertificatesDeleteCertificate{CertificateID: tt.certificateID})
+			err := service.Delete(&certificatesmodels.IdsecSIACertificatesDeleteCertificate{CertificateID: tt.certificateID})
 
 			if tt.expectedError {
 				if err == nil {

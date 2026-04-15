@@ -520,6 +520,20 @@ func TestSerializeJSONCamel(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "map_with_camel_case_keys",
+			input: map[string]interface{}{
+				"firstName": "John",
+				"lastName":  "Doe",
+				"userAge":   30,
+			},
+			expected: map[string]interface{}{
+				"firstName": "John",
+				"lastName":  "Doe",
+				"userAge":   float64(30),
+			},
+			expectError: false,
+		},
+		{
 			name: "nested_structure",
 			input: map[string]interface{}{
 				"user_info": map[string]interface{}{
@@ -641,6 +655,21 @@ func TestSerializeJSONCamelSchema(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "map_with_schema",
+			input: map[string]interface{}{
+				"first_name": "John",
+				"last_name":  "Doe",
+				"age":        30,
+			},
+			schema: func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
+			expected: map[string]interface{}{
+				"firstName": "John",
+				"lastName":  "Doe",
+				"age":       float64(30),
+			},
+			expectError: false,
+		},
+		{
 			name:        "invalid_input_with_schema",
 			input:       make(chan int),
 			schema:      func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
@@ -747,13 +776,13 @@ func TestFindFieldByName(t *testing.T) {
 			result := FindFieldByName(tt.schema, tt.fieldName)
 			if tt.expectNil {
 				if result != nil {
-					t.Errorf("findFieldByName() expected nil but got %v", result)
+					t.Errorf("FindFieldByName() expected nil but got %v", result)
 				}
 			} else {
 				if result == nil {
-					t.Errorf("findFieldByName() expected field but got nil")
+					t.Errorf("FindFieldByName() expected field but got nil")
 				} else if result.Name != tt.expectName {
-					t.Errorf("findFieldByName() expected field name %s but got %s", tt.expectName, result.Name)
+					t.Errorf("FindFieldByName() expected field name %s but got %s", tt.expectName, result.Name)
 				}
 			}
 		})
@@ -779,4 +808,608 @@ func (e *errorReadCloser) Read(p []byte) (n int, err error) {
 
 func (e *errorReadCloser) Close() error {
 	return nil
+}
+
+func TestConvertToPascalCase(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		schema   *reflect.Type
+		expected interface{}
+	}{
+		{
+			name: "simple_map_with_snake_case_keys",
+			input: map[string]interface{}{
+				"first_name": "John",
+				"last_name":  "Doe",
+				"user_age":   30,
+			},
+			schema: nil,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   30,
+			},
+		},
+		{
+			name: "simple_map_with_camel_case_keys",
+			input: map[string]interface{}{
+				"firstName": "John",
+				"lastName":  "Doe",
+				"userAge":   30,
+			},
+			schema: nil,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   30,
+			},
+		},
+		{
+			name: "nested_map",
+			input: map[string]interface{}{
+				"user_info": map[string]interface{}{
+					"first_name": "John",
+					"last_name":  "Doe",
+				},
+				"account_details": map[string]interface{}{
+					"account_id": "123",
+					"is_active":  true,
+				},
+			},
+			schema: nil,
+			expected: map[string]interface{}{
+				"UserInfo": map[string]interface{}{
+					"FirstName": "John",
+					"LastName":  "Doe",
+				},
+				"AccountDetails": map[string]interface{}{
+					"AccountId": "123",
+					"IsActive":  true,
+				},
+			},
+		},
+		{
+			name: "array_of_maps",
+			input: []interface{}{
+				map[string]interface{}{
+					"first_name": "John",
+					"last_name":  "Doe",
+				},
+				map[string]interface{}{
+					"first_name": "Jane",
+					"last_name":  "Smith",
+				},
+			},
+			schema: nil,
+			expected: []interface{}{
+				map[string]interface{}{
+					"FirstName": "John",
+					"LastName":  "Doe",
+				},
+				map[string]interface{}{
+					"FirstName": "Jane",
+					"LastName":  "Smith",
+				},
+			},
+		},
+		{
+			name:     "primitive_types_unchanged",
+			input:    "hello world",
+			schema:   nil,
+			expected: "hello world",
+		},
+		{
+			name:     "number_unchanged",
+			input:    42,
+			schema:   nil,
+			expected: 42,
+		},
+		{
+			name:     "boolean_unchanged",
+			input:    true,
+			schema:   nil,
+			expected: true,
+		},
+		{
+			name:     "nil_input",
+			input:    nil,
+			schema:   nil,
+			expected: nil,
+		},
+		{
+			name: "mixed_format_keys",
+			input: map[string]interface{}{
+				"firstName":  "John",
+				"last_name":  "Doe",
+				"UserAge":    30,
+				"email-addr": "john@example.com",
+			},
+			schema: nil,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   30,
+				"EmailAddr": "john@example.com",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := ConvertToPascalCase(tt.input, tt.schema)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("ConvertToPascalCase() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSerializeJSONPascal(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       interface{}
+		expected    map[string]interface{}
+		expectError bool
+	}{
+		{
+			name: "simple_struct",
+			input: TestStruct{
+				FirstName: "John",
+				LastName:  "Doe",
+				Age:       30,
+				Metadata: map[string]interface{}{
+					"key1": "value1",
+				},
+			},
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"Age":       float64(30),
+				"Metadata": map[string]interface{}{
+					"Key1": "value1",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "map_with_snake_case_keys",
+			input: map[string]interface{}{
+				"first_name": "John",
+				"last_name":  "Doe",
+				"user_age":   30,
+			},
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name: "map_with_camel_case_keys",
+			input: map[string]interface{}{
+				"firstName": "John",
+				"lastName":  "Doe",
+				"userAge":   30,
+			},
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name: "nested_structure",
+			input: map[string]interface{}{
+				"user_info": map[string]interface{}{
+					"first_name": "John",
+					"last_name":  "Doe",
+				},
+				"account_status": "active",
+			},
+			expected: map[string]interface{}{
+				"UserInfo": map[string]interface{}{
+					"FirstName": "John",
+					"LastName":  "Doe",
+				},
+				"AccountStatus": "active",
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid_input_channel",
+			input:       make(chan int),
+			expected:    nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := SerializeJSONPascal(tt.input)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("SerializeJSONPascal() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("SerializeJSONPascal() unexpected error: %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("SerializeJSONPascal() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSerializeJSONPascalSchema(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       interface{}
+		schema      *reflect.Type
+		expected    map[string]interface{}
+		expectError bool
+	}{
+		{
+			name: "map_without_schema",
+			input: map[string]interface{}{
+				"first_name": "John",
+				"last_name":  "Doe",
+			},
+			schema: nil,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+			},
+			expectError: false,
+		},
+		{
+			name: "map_with_schema",
+			input: map[string]interface{}{
+				"first_name": "John",
+				"last_name":  "Doe",
+				"age":        30,
+			},
+			schema: func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"Age":       float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid_input_with_schema",
+			input:       make(chan int),
+			schema:      func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
+			expected:    nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := SerializeJSONPascalSchema(tt.input, tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("SerializeJSONPascalSchema() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("SerializeJSONPascalSchema() unexpected error: %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("SerializeJSONPascalSchema() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeserializeJSONPascal(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		expected    interface{}
+		expectError bool
+	}{
+		{
+			name:  "simple_json_object_with_snake_case_keys",
+			input: `{"first_name": "John", "last_name": "Doe", "user_age": 30}`,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name:  "simple_json_object_with_camel_case_keys",
+			input: `{"firstName": "John", "lastName": "Doe", "userAge": 30}`,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"UserAge":   float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name:  "nested_json_object",
+			input: `{"user_info": {"first_name": "John", "last_name": "Doe"}, "is_active": true}`,
+			expected: map[string]interface{}{
+				"UserInfo": map[string]interface{}{
+					"FirstName": "John",
+					"LastName":  "Doe",
+				},
+				"IsActive": true,
+			},
+			expectError: false,
+		},
+		{
+			name:  "json_array",
+			input: `[{"first_name": "John"}, {"first_name": "Jane"}]`,
+			expected: []interface{}{
+				map[string]interface{}{
+					"FirstName": "John",
+				},
+				map[string]interface{}{
+					"FirstName": "Jane",
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid_json",
+			input:       `{invalid json}`,
+			expected:    nil,
+			expectError: true,
+		},
+		{
+			name:        "empty_json",
+			input:       `{}`,
+			expected:    map[string]interface{}{},
+			expectError: false,
+		},
+		{
+			name:  "mixed_format_keys",
+			input: `{"firstName": "John", "last_name": "Doe", "email-addr": "john@example.com"}`,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"EmailAddr": "john@example.com",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := io.NopCloser(strings.NewReader(tt.input))
+			result, err := DeserializeJSONPascal(response)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("DeserializeJSONPascal() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("DeserializeJSONPascal() unexpected error: %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("DeserializeJSONPascal() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDeserializeJSONPascalSchema(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		schema      *reflect.Type
+		expected    interface{}
+		expectError bool
+	}{
+		{
+			name:   "json_without_schema",
+			input:  `{"first_name": "John", "last_name": "Doe"}`,
+			schema: nil,
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+			},
+			expectError: false,
+		},
+		{
+			name:   "json_with_schema",
+			input:  `{"first_name": "John", "last_name": "Doe", "age": 30}`,
+			schema: func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
+			expected: map[string]interface{}{
+				"FirstName": "John",
+				"LastName":  "Doe",
+				"Age":       float64(30),
+			},
+			expectError: false,
+		},
+		{
+			name:        "invalid_json",
+			input:       `{invalid json}`,
+			schema:      nil,
+			expected:    nil,
+			expectError: true,
+		},
+		{
+			name:        "empty_json_with_schema",
+			input:       `{}`,
+			schema:      func() *reflect.Type { t := reflect.TypeOf(TestStruct{}); return &t }(),
+			expected:    map[string]interface{}{},
+			expectError: false,
+		},
+		{
+			name:   "nested_structure_with_schema",
+			input:  `{"user_info": {"first_name": "John", "last_name": "Doe"}, "account_status": "active"}`,
+			schema: nil,
+			expected: map[string]interface{}{
+				"UserInfo": map[string]interface{}{
+					"FirstName": "John",
+					"LastName":  "Doe",
+				},
+				"AccountStatus": "active",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := io.NopCloser(strings.NewReader(tt.input))
+			result, err := DeserializeJSONPascalSchema(response, tt.schema)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("DeserializeJSONPascalSchema() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("DeserializeJSONPascalSchema() unexpected error: %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("DeserializeJSONPascalSchema() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConvertKeyToPascalCase(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "snake_case_to_pascal_case",
+			input:    "first_name",
+			expected: "FirstName",
+		},
+		{
+			name:     "camel_case_to_pascal_case",
+			input:    "firstName",
+			expected: "FirstName",
+		},
+		{
+			name:     "kebab_case_to_pascal_case",
+			input:    "first-name",
+			expected: "FirstName",
+		},
+		{
+			name:     "already_pascal_case",
+			input:    "FirstName",
+			expected: "FirstName",
+		},
+		{
+			name:     "single_word_lowercase",
+			input:    "name",
+			expected: "Name",
+		},
+		{
+			name:     "single_word_uppercase",
+			input:    "NAME",
+			expected: "Name",
+		},
+		{
+			name:     "empty_string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "multiple_underscores",
+			input:    "user_first_name",
+			expected: "UserFirstName",
+		},
+		{
+			name:     "multiple_hyphens",
+			input:    "user-first-name",
+			expected: "UserFirstName",
+		},
+		{
+			name:     "mixed_separators",
+			input:    "user_first-name",
+			expected: "UserFirstName",
+		},
+		{
+			name:     "with_spaces",
+			input:    "first name",
+			expected: "FirstName",
+		},
+		{
+			name:     "consecutive_uppercase",
+			input:    "userID",
+			expected: "UserId",
+		},
+		{
+			name:     "all_caps_with_underscores",
+			input:    "USER_FIRST_NAME",
+			expected: "UserFirstName",
+		},
+		{
+			name:     "multiple_consecutive_capitals",
+			input:    "HTTPS",
+			expected: "Https",
+		},
+		{
+			name:     "multiple_consecutive_capitals_with_separator",
+			input:    "HTTPS_URL",
+			expected: "HttpsUrl",
+		},
+		{
+			name:     "real_world_generate_oracle_tnsnames",
+			input:    "generate-oracle-tnsnames",
+			expected: "GenerateOracleTnsnames",
+		},
+		{
+			name:     "real_world_short_lived_ssh_key",
+			input:    "short-lived-ssh-key",
+			expected: "ShortLivedSshKey",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := ConvertKeyToPascalCase(tt.input)
+			if result != tt.expected {
+				t.Errorf("ConvertKeyToPascalCase() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
 }

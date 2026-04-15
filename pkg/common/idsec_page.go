@@ -40,5 +40,6 @@ package common
 //	    fmt.Printf("User: %s (ID: %s)\n", user.Name, user.ID)
 //	}
 type IdsecPage[T any] struct {
-	Items []*T `json:"items" mapstructure:"items"`
+	Items             []*T   `json:"items" mapstructure:"items"`
+	ContinuationToken string `json:"continuation_token,omitempty" mapstructure:"continuation_token,omitempty"`
 }

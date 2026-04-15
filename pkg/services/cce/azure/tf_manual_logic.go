@@ -79,7 +79,7 @@ func (s *IdsecCCEAzureService) tfAddEntra(input *azuremodels.TfIdsecCCEAzureAddE
 	requestBody[requestKeyDeploymentType] = deploymentTypeOrganization
 	requestBody[requestKeyOnboardingType] = ccemodels.TerraformProvider
 
-	response, err := s.client.Post(context.Background(), pathManualAddURL, requestBody)
+	response, err := s.ISPClient().Post(context.Background(), pathManualAddURL, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (s *IdsecCCEAzureService) tfEntra(input *azuremodels.TfIdsecCCEAzureGetEntr
 	s.Logger.Info("Getting Azure Entra tenant details for ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathManualEntraGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *IdsecCCEAzureService) tfUpdateEntra(input *azuremodels.TfIdsecCCEAzureU
 
 	// Step 1: Get current Entra tenant details to determine existing services
 	url := fmt.Sprintf(pathManualEntraGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current Entra tenant details: %w", err)
 	}
@@ -218,7 +218,7 @@ func (s *IdsecCCEAzureService) tfAddManagementGroup(input *azuremodels.TfIdsecCC
 	requestBody[requestKeyDeploymentType] = deploymentTypeFolder
 	requestBody[requestKeyOnboardingType] = ccemodels.TerraformProvider
 
-	response, err := s.client.Post(context.Background(), pathManualAddURL, requestBody)
+	response, err := s.ISPClient().Post(context.Background(), pathManualAddURL, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func (s *IdsecCCEAzureService) tfManagementGroup(input *azuremodels.TfIdsecCCEAz
 	s.Logger.Info("Getting Azure Management Group details for ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathManualMgmtGroupGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +302,7 @@ func (s *IdsecCCEAzureService) tfUpdateManagementGroup(input *azuremodels.TfIdse
 
 	// Step 1: Get current Management Group details to determine existing services
 	url := fmt.Sprintf(pathManualMgmtGroupGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current Management Group details: %w", err)
 	}
@@ -357,7 +357,7 @@ func (s *IdsecCCEAzureService) tfAddSubscription(input *azuremodels.TfIdsecCCEAz
 	requestBody[requestKeyDeploymentType] = deploymentTypeStandalone
 	requestBody[requestKeyOnboardingType] = ccemodels.TerraformProvider
 
-	response, err := s.client.Post(context.Background(), pathManualAddURL, requestBody)
+	response, err := s.ISPClient().Post(context.Background(), pathManualAddURL, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +390,7 @@ func (s *IdsecCCEAzureService) tfSubscription(input *azuremodels.TfIdsecCCEAzure
 	s.Logger.Info("Getting Azure Subscription details for ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathManualSubscriptionGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (s *IdsecCCEAzureService) tfUpdateSubscription(input *azuremodels.TfIdsecCC
 
 	// Step 1: Get current Subscription details to determine existing services
 	url := fmt.Sprintf(pathManualSubscriptionGetURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current Subscription details: %w", err)
 	}
@@ -560,7 +560,7 @@ func (s *IdsecCCEAzureService) addManualServices(id string, services []ccemodels
 		"services": services,
 	}
 
-	response, err := s.client.Post(context.Background(), url, requestBody)
+	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
 	if err != nil {
 		return err
 	}
@@ -589,7 +589,7 @@ func (s *IdsecCCEAzureService) deleteManualServices(id string, serviceNames []st
 
 	s.Logger.Info("Deleting services: %v from Azure entity [%s]", serviceNames, id)
 
-	response, err := s.client.Delete(context.Background(), basePath, nil, params)
+	response, err := s.ISPClient().Delete(context.Background(), basePath, nil, params)
 	if err != nil {
 		return fmt.Errorf("failed to delete services from Azure manual onboarding: %w", err)
 	}
@@ -609,7 +609,7 @@ func (s *IdsecCCEAzureService) deleteManual(id string) error {
 	s.Logger.Info("Deleting Azure manual onboarding [%s]", id)
 
 	url := fmt.Sprintf(pathManualDeleteURL, id)
-	response, err := s.client.Delete(context.Background(), url, nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
 	if err != nil {
 		return err
 	}

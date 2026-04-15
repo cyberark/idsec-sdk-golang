@@ -1,3 +1,4 @@
+// Package models provides request and response model types for the SIA access service.
 package models
 
 // IdsecSIAInstallConnector represents the details required to install a connector.

@@ -12,8 +12,9 @@ import (
 
 func TestTfIdentityParams_Success(t *testing.T) {
 	// Mock response for GET /api/azure/identity_params
-	// Note: The API returns the identity info directly (not wrapped in "identity_info")
+	// Note: The API returns tenantId at root level alongside service identity info
 	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b",
 		"dpa": {
 			"identity_user_id": "user-123",
 			"identity_app_id": "app-456",
@@ -47,6 +48,7 @@ func TestTfIdentityParams_Success(t *testing.T) {
 	// Assertions
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
 	require.NotNil(t, result.IdentityParams)
 	require.Contains(t, result.IdentityParams, "dpa")
 	require.Contains(t, result.IdentityParams, "sca")
@@ -65,8 +67,10 @@ func TestTfIdentityParams_Success(t *testing.T) {
 }
 
 func TestTfIdentityParams_EmptyResult(t *testing.T) {
-	// Note: The API returns the identity info directly (not wrapped in "identity_info")
-	responseJSON := `{}`
+	// Test with only tenantId, no services
+	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b"
+	}`
 
 	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
 		{
@@ -87,13 +91,15 @@ func TestTfIdentityParams_EmptyResult(t *testing.T) {
 	// Assertions
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
 	require.NotNil(t, result.IdentityParams)
 	require.Len(t, result.IdentityParams, 0)
 }
 
 func TestTfIdentityParams_SingleService(t *testing.T) {
-	// Note: The API returns the identity info directly (not wrapped in "identity_info")
+	// Test with tenantId and a single service
 	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b",
 		"dpa": {
 			"identity_user_id": "user-123",
 			"identity_app_id": "app-456",
@@ -121,6 +127,7 @@ func TestTfIdentityParams_SingleService(t *testing.T) {
 	// Assertions
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
 	require.NotNil(t, result.IdentityParams)
 	require.Len(t, result.IdentityParams, 1)
 	require.Contains(t, result.IdentityParams, "dpa")

@@ -28,10 +28,8 @@ const (
 
 // IdsecSIAK8SService is a struct that implements the IdsecService interface and provides functionality for K8S service of SIA.
 type IdsecSIAK8SService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSIAK8SService creates a new instance of IdsecSIAK8SService with the provided authenticators.
@@ -47,18 +45,19 @@ func NewIdsecSIAK8SService(authenticators ...auth.IdsecAuth) (*IdsecSIAK8SServic
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", k8sService.refreshSIAAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", k8sService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	k8sService.client = client
-	k8sService.ispAuth = ispAuth
+
 	k8sService.IdsecBaseService = baseService
+	k8sService.IdsecISPBaseService = ispBaseService
 	return k8sService, nil
 }
 
 func (s *IdsecSIAK8SService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -68,7 +67,7 @@ func (s *IdsecSIAK8SService) refreshSIAAuth(client *common.IdsecClient) error {
 // GenerateKubeconfig generates a kubeconfig file for the SIA K8S service and saves it to the specified folder.
 func (s *IdsecSIAK8SService) GenerateKubeconfig(generateKubeConfig *k8smodels.IdsecSIAK8SGenerateKubeconfig) (string, error) {
 	s.Logger.Info("Getting kubeconfig")
-	response, err := s.client.Get(context.Background(), kubeConfigGenerationURL, nil)
+	response, err := s.ISPClient().Get(context.Background(), kubeConfigGenerationURL, nil)
 	if err != nil {
 		return "", err
 	}

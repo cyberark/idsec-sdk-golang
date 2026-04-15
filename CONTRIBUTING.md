@@ -76,6 +76,7 @@ func TestExample(t *testing.T) {
 - Use descriptive test names that clearly indicate what is being tested
 
 #### Running Tests
+
 ```bash
 # Run all unit tests with coverage reporting
 make unit-test-all
@@ -165,6 +166,63 @@ func FunctionName(param1 string, param2 int, param3 *int) (ResultType, error) {
 - Include examples that can be copy-pasted and run
 - Keep documentation up-to-date with code changes
 
+### Enable Attribute
+
+The Enable attribute controls whether services and actions are available in the SDK. Use it to hide work-in-progress features from releases.
+
+#### When to Use the Enable Attribute
+
+- New services that are not ready for production
+- Experimental actions that need more testing
+- Features waiting for approval or documentation
+
+#### How to Disable a Service
+
+Set `Enabled` to `false` in the service config. The service will not be registered.
+
+```go
+var ServiceConfig = services.IdsecServiceConfig{
+    ServiceName: "my-new-service",
+    Enabled:     boolPtr(false),  // Will not be registered
+    // ...
+}
+```
+
+#### How to Disable an Action
+
+Set `Enabled` to `false` in the action definition. The action will be filtered out.
+
+```go
+var CLIAction = &actions.IdsecServiceCLIActionDefinition{
+    IdsecServiceBaseActionDefinition: actions.IdsecServiceBaseActionDefinition{
+        ActionName: "experimental-action",
+        Enabled:    boolPtr(false),  // Will be filtered out
+    },
+}
+```
+
+#### Build Flag
+
+The Enable attribute filtering is controlled by a build flag. By default, filtering is OFF and all services and actions are available.
+
+**Default build (filtering OFF):**
+```bash
+go build ./...
+```
+
+**Release build (filtering ON):**
+```bash
+go build -ldflags "-X github.com/cyberark/idsec-sdk-golang/pkg/services.releasedFeaturesOnly=true" ./...
+```
+
+When filtering is ON, services and actions with `Enabled: false` are excluded.
+
+#### Best Practices
+
+1. Default is enabled. Omit the field or set it to `nil` for normal behavior.
+2. Remove the attribute when the feature is ready. Do not leave disabled attributes in production code.
+3. The Enable attribute is checked at startup. It cannot be changed at runtime.
+4. Use the build flag to enable filtering for release builds.
 
 ## Releases
 

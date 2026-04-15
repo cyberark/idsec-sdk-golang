@@ -7,7 +7,7 @@ import (
 
 // ActionToSchemaMap defines the mapping of actions to schemas for the Infrastructure DB service.
 var ActionToSchemaMap = map[string]interface{}{
-	"add-policy":       &policydbmodels.IdsecPolicyDBAccessPolicy{},
+	"create-policy":    &policydbmodels.IdsecPolicyDBAccessPolicy{},
 	"delete-policy":    &policycommonmodels.IdsecPolicyDeletePolicyRequest{},
 	"update-policy":    &policydbmodels.IdsecPolicyDBAccessPolicy{},
 	"policy":           &policycommonmodels.IdsecPolicyGetPolicyRequest{},

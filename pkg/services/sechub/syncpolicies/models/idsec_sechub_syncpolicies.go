@@ -38,19 +38,17 @@ type IdsecSecHubPolicyStore struct {
 }
 
 // IdsecSecHubPolicyFilter represents a reference to a filter with details.
+// a filter can be ether FilterInput with data and safe name or FilterIdPolicyInputAndOutput with id
 type IdsecSecHubPolicyFilter struct {
-	ID        string                 `json:"id" mapstructure:"id" desc:"Unique identifier of the filter"`
-	Type      string                 `json:"type,omitempty" mapstructure:"type,omitempty" desc:"Type of the filter"`
-	Data      map[string]interface{} `json:"data,omitempty" mapstructure:"data,omitempty" desc:"Filter-specific data"`
-	CreatedAt string                 `json:"created_at,omitempty" mapstructure:"created_at,omitempty" desc:"Timestamp when the filter was created"`
-	UpdatedAt string                 `json:"updated_at,omitempty" mapstructure:"updated_at,omitempty" desc:"Timestamp when the filter was last updated"`
-	CreatedBy string                 `json:"created_by,omitempty" mapstructure:"created_by,omitempty" desc:"User who created the filter"`
-	UpdatedBy string                 `json:"updated_by,omitempty" mapstructure:"updated_by,omitempty" desc:"User who last updated the filter"`
+	ID   string                          `json:"id,omitempty" mapstructure:"id" desc:"Unique identifier of the filter"`
+	Type string                          `json:"type,omitempty" mapstructure:"type,omitempty" desc:"Type of the filter"`
+	Data IdsecSechubSyncPolicyFilterData `json:"data,omitempty" mapstructure:"data,omitempty" desc:"Filter-specific data"`
 }
 
 // IdsecSecHubPolicyTransformation represents a reference to a transformation.
 type IdsecSecHubPolicyTransformation struct {
-	ID string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"Unique identifier of the transformation"`
+	ID         string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"Unique identifier of the transformation"`
+	Predefined string `json:"predefined" mapstructure:"predefined" desc:"Predefined transformation to apply (password_only_plain_text,default)" flag:"predefined" choices:"password_only_plain_text,default"`
 }
 
 // IdsecSecHubPolicyState represents the current state of the policy.
@@ -68,9 +66,14 @@ type IdsecSecHubPolicyStateDetails struct {
 
 // IdsecSecHubPolicyStatus represents the status of the policy.
 type IdsecSecHubPolicyStatus struct {
-	PolicyID        string `json:"policy_id,omitempty" mapstructure:"policy_id,omitempty" desc:"ID of the policy"`
+	PolicyID        string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"ID of the policy"`
 	PolicyStatus    string `json:"policy_status,omitempty" mapstructure:"policy_status,omitempty" desc:"Status of the policy"`
 	IsRunning       bool   `json:"is_running,omitempty" mapstructure:"is_running,omitempty" desc:"Whether the policy is currently running"`
 	LastRun         string `json:"last_run,omitempty" mapstructure:"last_run,omitempty" desc:"Timestamp of the last run"`
 	LastSuccessTime string `json:"last_success_time,omitempty" mapstructure:"last_success_time,omitempty" desc:"Timestamp of the last successful run"`
+}
+
+// IdsecSechubSyncPolicyFilterData represents filter data for the sync policy.
+type IdsecSechubSyncPolicyFilterData struct {
+	SafeName string `json:"safe_name" mapstructure:"safe_name" desc:"Name of the safe to filter" validate:"required" flag:"safe-name"`
 }

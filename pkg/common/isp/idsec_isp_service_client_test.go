@@ -618,7 +618,7 @@ func TestFromISPAuth(t *testing.T) {
 			defer cleanup()
 
 			ispAuth := tt.setupISPAuth()
-			result, err := FromISPAuth(ispAuth, tt.serviceName, tt.separator, tt.basePath, nil)
+			result, err := FromISPAuth(ispAuth, tt.serviceName, tt.separator, tt.basePath, nil, nil)
 
 			if tt.expectedError {
 				if err == nil {

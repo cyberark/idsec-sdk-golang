@@ -131,7 +131,7 @@ type IdsecCCEPropertyOutput struct {
 // IdsecCCEServiceInput represents a service to be onboarded with its resources.
 // OPENAPI-CORRELATION: ServiceInput
 type IdsecCCEServiceInput struct {
-	ServiceName string                 `json:"serviceName" mapstructure:"service_name" choices:"dpa,sca,secrets_hub,cds" desc:"Name of the service to be onboarded"`
+	ServiceName string                 `json:"serviceName" mapstructure:"service_name" choices:"dpa,sca,secrets_hub,cds" desc:"Name of the service to be onboarded"` //nolint:tagliatelle
 	Resources   map[string]interface{} `json:"resources" mapstructure:"resources" desc:"Service-specific resource configuration"`
 }
 

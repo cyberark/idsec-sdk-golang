@@ -58,7 +58,10 @@ import (
 
 	aws "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	azure "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
-	cmgr "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr"
+	networks "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks"
+	poolcomponents "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolcomponents"
+	poolidentifiers "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolidentifiers"
+	pools "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/pools"
 	authprofiles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles"
 	directories "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
 	policies "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
@@ -69,12 +72,17 @@ import (
 	applications "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications"
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
+	targetplatforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/targetplatforms"
 	policy "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
 	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
 	db "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db"
+	groupaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
 	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
-	configuration "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configuration"
+	cloudconsole "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole"
+	entragroups "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups"
+	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
+	configurations "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
 	scans "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans"
 	secrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secrets"
@@ -84,16 +92,18 @@ import (
 	access "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/access"
 	certificates "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/certificates"
 	db2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
-	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
-	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/db"
-	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/vm"
+	dbstrongaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/dbstrongaccounts"
+	k8s2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
+	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsdb"
+	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm"
 	settings "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/settings"
 	shortenedconnectionstring "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/shortenedconnectionstring"
 	sshca "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca"
 	sso "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
-	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db"
-	targetsets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/targetsets"
-	sm "github.com/cyberark/idsec-sdk-golang/pkg/services/sm"
+	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb"
+	targetsets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacestargetsets"
+	sessionactivities "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessionactivities"
+	sessions "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessions"
 )
 
 // IdsecAPI wraps different API functionality of Idsec Services.
@@ -274,16 +284,55 @@ func (api *IdsecAPI) CceAzure() (*azure.IdsecCCEAzureService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) Cmgr() (*cmgr.IdsecCmgrService, error) {
-	if serviceIfs, ok := api.services[cmgr.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*cmgr.IdsecCmgrService), nil
+func (api *IdsecAPI) CmgrNetworks() (*networks.IdsecCmgrNetworksService, error) {
+	if serviceIfs, ok := api.services[networks.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*networks.IdsecCmgrNetworksService), nil
 	}
-	service, err := cmgr.ServiceGenerator(api.loadServiceAuthenticators(cmgr.ServiceConfig)...)
+	service, err := networks.ServiceGenerator(api.loadServiceAuthenticators(networks.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[cmgr.ServiceConfig.ServiceName] = &baseService
+	api.services[networks.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) CmgrPoolcomponents() (*poolcomponents.IdsecCmgrPoolComponentsService, error) {
+	if serviceIfs, ok := api.services[poolcomponents.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*poolcomponents.IdsecCmgrPoolComponentsService), nil
+	}
+	service, err := poolcomponents.ServiceGenerator(api.loadServiceAuthenticators(poolcomponents.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[poolcomponents.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) CmgrPoolidentifiers() (*poolidentifiers.IdsecCmgrPoolIdentifiersService, error) {
+	if serviceIfs, ok := api.services[poolidentifiers.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*poolidentifiers.IdsecCmgrPoolIdentifiersService), nil
+	}
+	service, err := poolidentifiers.ServiceGenerator(api.loadServiceAuthenticators(poolidentifiers.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[poolidentifiers.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) CmgrPools() (*pools.IdsecCmgrPoolsService, error) {
+	if serviceIfs, ok := api.services[pools.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*pools.IdsecCmgrPoolsService), nil
+	}
+	service, err := pools.ServiceGenerator(api.loadServiceAuthenticators(pools.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[pools.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -417,6 +466,19 @@ func (api *IdsecAPI) PcloudSafes() (*safes.IdsecPCloudSafesService, error) {
 	return service, nil
 }
 
+func (api *IdsecAPI) PcloudTargetplatforms() (*targetplatforms.IdsecPCloudTargetPlatformsService, error) {
+	if serviceIfs, ok := api.services[targetplatforms.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*targetplatforms.IdsecPCloudTargetPlatformsService), nil
+	}
+	service, err := targetplatforms.ServiceGenerator(api.loadServiceAuthenticators(targetplatforms.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[targetplatforms.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) Policy() (*policy.IdsecPolicyService, error) {
 	if serviceIfs, ok := api.services[policy.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*policy.IdsecPolicyService), nil
@@ -456,6 +518,19 @@ func (api *IdsecAPI) PolicyDb() (*db.IdsecPolicyDBService, error) {
 	return service, nil
 }
 
+func (api *IdsecAPI) PolicyGroupaccess() (*groupaccess.IdsecPolicyGroupAccessService, error) {
+	if serviceIfs, ok := api.services[groupaccess.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*groupaccess.IdsecPolicyGroupAccessService), nil
+	}
+	service, err := groupaccess.ServiceGenerator(api.loadServiceAuthenticators(groupaccess.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[groupaccess.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) PolicyVm() (*vm.IdsecPolicyVMService, error) {
 	if serviceIfs, ok := api.services[vm.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*vm.IdsecPolicyVMService), nil
@@ -482,16 +557,55 @@ func (api *IdsecAPI) Sca() (*sca.IdsecSCAService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) SechubConfiguration() (*configuration.IdsecSecHubConfigurationService, error) {
-	if serviceIfs, ok := api.services[configuration.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*configuration.IdsecSecHubConfigurationService), nil
+func (api *IdsecAPI) ScaCloudconsole() (*cloudconsole.IdsecSCACloudConsoleService, error) {
+	if serviceIfs, ok := api.services[cloudconsole.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*cloudconsole.IdsecSCACloudConsoleService), nil
 	}
-	service, err := configuration.ServiceGenerator(api.loadServiceAuthenticators(configuration.ServiceConfig)...)
+	service, err := cloudconsole.ServiceGenerator(api.loadServiceAuthenticators(cloudconsole.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[configuration.ServiceConfig.ServiceName] = &baseService
+	api.services[cloudconsole.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) ScaEntragroups() (*entragroups.IdsecSCAEntraGroupsService, error) {
+	if serviceIfs, ok := api.services[entragroups.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*entragroups.IdsecSCAEntraGroupsService), nil
+	}
+	service, err := entragroups.ServiceGenerator(api.loadServiceAuthenticators(entragroups.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[entragroups.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) ScaK8s() (*k8s.IdsecSCAK8sService, error) {
+	if serviceIfs, ok := api.services[k8s.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*k8s.IdsecSCAK8sService), nil
+	}
+	service, err := k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[k8s.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) SechubConfigurations() (*configurations.IdsecSecHubConfigurationService, error) {
+	if serviceIfs, ok := api.services[configurations.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*configurations.IdsecSecHubConfigurationService), nil
+	}
+	service, err := configurations.ServiceGenerator(api.loadServiceAuthenticators(configurations.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[configurations.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -612,20 +726,33 @@ func (api *IdsecAPI) SiaDb() (*db2.IdsecSIADBService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaK8s() (*k8s.IdsecSIAK8SService, error) {
-	if serviceIfs, ok := api.services[k8s.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s.IdsecSIAK8SService), nil
+func (api *IdsecAPI) SiaDbstrongaccounts() (*dbstrongaccounts.IdsecSIADBStrongAccountsService, error) {
+	if serviceIfs, ok := api.services[dbstrongaccounts.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*dbstrongaccounts.IdsecSIADBStrongAccountsService), nil
 	}
-	service, err := k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	service, err := dbstrongaccounts.ServiceGenerator(api.loadServiceAuthenticators(dbstrongaccounts.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[k8s.ServiceConfig.ServiceName] = &baseService
+	api.services[dbstrongaccounts.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaSecretsDb() (*dbsecrets.IdsecSIASecretsDBService, error) {
+func (api *IdsecAPI) SiaK8s() (*k8s2.IdsecSIAK8SService, error) {
+	if serviceIfs, ok := api.services[k8s2.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*k8s2.IdsecSIAK8SService), nil
+	}
+	service, err := k8s2.ServiceGenerator(api.loadServiceAuthenticators(k8s2.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[k8s2.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) SiaSecretsdb() (*dbsecrets.IdsecSIASecretsDBService, error) {
 	if serviceIfs, ok := api.services[dbsecrets.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*dbsecrets.IdsecSIASecretsDBService), nil
 	}
@@ -638,7 +765,7 @@ func (api *IdsecAPI) SiaSecretsDb() (*dbsecrets.IdsecSIASecretsDBService, error)
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaSecretsVm() (*vmsecrets.IdsecSIASecretsVMService, error) {
+func (api *IdsecAPI) SiaSecretsvm() (*vmsecrets.IdsecSIASecretsVMService, error) {
 	if serviceIfs, ok := api.services[vmsecrets.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*vmsecrets.IdsecSIASecretsVMService), nil
 	}
@@ -703,7 +830,7 @@ func (api *IdsecAPI) SiaSso() (*sso.IdsecSIASSOService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaWorkspacesDb() (*db3.IdsecSIAWorkspacesDBService, error) {
+func (api *IdsecAPI) SiaWorkspacesdb() (*db3.IdsecSIAWorkspacesDBService, error) {
 	if serviceIfs, ok := api.services[db3.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*db3.IdsecSIAWorkspacesDBService), nil
 	}
@@ -716,7 +843,7 @@ func (api *IdsecAPI) SiaWorkspacesDb() (*db3.IdsecSIAWorkspacesDBService, error)
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaWorkspacesTargetsets() (*targetsets.IdsecSIAWorkspacesTargetSetsService, error) {
+func (api *IdsecAPI) SiaWorkspacestargetsets() (*targetsets.IdsecSIAWorkspacesTargetSetsService, error) {
 	if serviceIfs, ok := api.services[targetsets.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*targetsets.IdsecSIAWorkspacesTargetSetsService), nil
 	}
@@ -729,15 +856,28 @@ func (api *IdsecAPI) SiaWorkspacesTargetsets() (*targetsets.IdsecSIAWorkspacesTa
 	return service, nil
 }
 
-func (api *IdsecAPI) Sm() (*sm.IdsecSMService, error) {
-	if serviceIfs, ok := api.services[sm.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sm.IdsecSMService), nil
+func (api *IdsecAPI) SmSessionactivities() (*sessionactivities.IdsecSMSessionActivitiesService, error) {
+	if serviceIfs, ok := api.services[sessionactivities.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*sessionactivities.IdsecSMSessionActivitiesService), nil
 	}
-	service, err := sm.ServiceGenerator(api.loadServiceAuthenticators(sm.ServiceConfig)...)
+	service, err := sessionactivities.ServiceGenerator(api.loadServiceAuthenticators(sessionactivities.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[sm.ServiceConfig.ServiceName] = &baseService
+	api.services[sessionactivities.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) SmSessions() (*sessions.IdsecSMSessionsService, error) {
+	if serviceIfs, ok := api.services[sessions.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*sessions.IdsecSMSessionsService), nil
+	}
+	service, err := sessions.ServiceGenerator(api.loadServiceAuthenticators(sessions.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[sessions.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }

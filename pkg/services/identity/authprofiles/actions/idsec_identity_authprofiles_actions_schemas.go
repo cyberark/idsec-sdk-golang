@@ -6,11 +6,11 @@ import (
 
 // ActionToSchemaMap is a map that defines the mapping between Auth Profiles action names and their corresponding schema types.
 var ActionToSchemaMap = map[string]interface{}{
-	"create-auth-profile":   &authprofilesmodels.IdsecIdentityCreateAuthProfile{},
-	"update-auth-profile":   &authprofilesmodels.IdsecIdentityUpdateAuthProfile{},
-	"delete-auth-profile":   &authprofilesmodels.IdsecIdentityDeleteAuthProfile{},
-	"auth-profile":          &authprofilesmodels.IdsecIdentityGetAuthProfile{},
-	"list-auth-profiles":    nil,
-	"list-auth-profiles-by": &authprofilesmodels.IdsecIdentityAuthProfilesFilters{},
-	"auth-profiles-stats":   nil,
+	"create":  &authprofilesmodels.IdsecIdentityCreateAuthProfile{},
+	"update":  &authprofilesmodels.IdsecIdentityUpdateAuthProfile{},
+	"delete":  &authprofilesmodels.IdsecIdentityDeleteAuthProfile{},
+	"get":     &authprofilesmodels.IdsecIdentityGetAuthProfile{},
+	"list":    nil,
+	"list-by": &authprofilesmodels.IdsecIdentityAuthProfilesFilters{},
+	"stats":   nil,
 }

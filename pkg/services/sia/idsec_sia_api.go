@@ -2,38 +2,53 @@ package sia
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/access"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/certificates"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
+	dbstrongaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/dbstrongaccounts"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
-	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/db"
-	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secrets/vm"
+	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsdb"
+	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/settings"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
-	workspacesdb "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/db"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspaces/targetsets"
+	workspacesdb "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb"
+	targetsets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacestargetsets"
 )
 
 // IdsecSIAAPI is a struct that provides access to the Idsec SIA API as a wrapped set of services.
 type IdsecSIAAPI struct {
-	ssoService          *sso.IdsecSIASSOService
-	k8sService          *k8s.IdsecSIAK8SService
-	targetSetsService   *targetsets.IdsecSIAWorkspacesTargetSetsService
-	workspacesDBService *workspacesdb.IdsecSIAWorkspacesDBService
-	vmSecretsService    *vmsecrets.IdsecSIASecretsVMService
-	dbSecretsService    *dbsecrets.IdsecSIASecretsDBService
-	accessService       *access.IdsecSIAAccessService
-	sshCaService        *sshca.IdsecSIASSHCAService
-	dbService           *db.IdsecSIADBService
-	settingsService     *settings.IdsecSIASettingsService
-	certificatesService *certificates.IdsecSIACertificatesService
+	ssoService              *sso.IdsecSIASSOService
+	k8sService              *k8s.IdsecSIAK8SService
+	targetSetsService       *targetsets.IdsecSIAWorkspacesTargetSetsService
+	workspacesDBService     *workspacesdb.IdsecSIAWorkspacesDBService
+	vmSecretsService        *vmsecrets.IdsecSIASecretsVMService
+	dbSecretsService        *dbsecrets.IdsecSIASecretsDBService
+	dbStrongAccountsService *dbstrongaccounts.IdsecSIADBStrongAccountsService
+	accessService           *access.IdsecSIAAccessService
+	sshCaService            *sshca.IdsecSIASSHCAService
+	dbService               *db.IdsecSIADBService
+	settingsService         *settings.IdsecSIASettingsService
+	certificatesService     *certificates.IdsecSIACertificatesService
 }
 
 // NewIdsecSIAAPI creates a new instance of IdsecSIAAPI with the provided IdsecISPAuth.
 func NewIdsecSIAAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSIAAPI, error) {
 	var baseIspAuth auth.IdsecAuth = ispAuth
-	ssoService, err := sso.NewIdsecSIASSOService(baseIspAuth)
+
+	// Create a shared ISP base service for services that accept it directly
+	// This allows sharing the ISP client and telemetry context
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", func(client *common.IdsecClient) error {
+		return isp.RefreshClient(client, ispAuth)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	ssoService, err := sso.NewIdsecSIASSOService(ispBaseService)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +69,10 @@ func NewIdsecSIAAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSIAAPI, error) {
 		return nil, err
 	}
 	dbSecretsService, err := dbsecrets.NewIdsecSIASecretsDBService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
+	dbStrongAccountsService, err := dbstrongaccounts.NewIdsecSIADBStrongAccountsService(baseIspAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -78,17 +97,18 @@ func NewIdsecSIAAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSIAAPI, error) {
 		return nil, err
 	}
 	return &IdsecSIAAPI{
-		ssoService:          ssoService,
-		k8sService:          k8sService,
-		targetSetsService:   targetSetsService,
-		workspacesDBService: workspaceDBService,
-		vmSecretsService:    vmSecretsService,
-		dbSecretsService:    dbSecretsService,
-		accessService:       accessService,
-		sshCaService:        sshCaService,
-		dbService:           dbService,
-		settingsService:     settingsService,
-		certificatesService: certificatesService,
+		ssoService:              ssoService,
+		k8sService:              k8sService,
+		targetSetsService:       targetSetsService,
+		workspacesDBService:     workspaceDBService,
+		vmSecretsService:        vmSecretsService,
+		dbSecretsService:        dbSecretsService,
+		dbStrongAccountsService: dbStrongAccountsService,
+		accessService:           accessService,
+		sshCaService:            sshCaService,
+		dbService:               dbService,
+		settingsService:         settingsService,
+		certificatesService:     certificatesService,
 	}, nil
 }
 
@@ -118,8 +138,14 @@ func (api *IdsecSIAAPI) SecretsVM() *vmsecrets.IdsecSIASecretsVMService {
 }
 
 // SecretsDB returns the DB Secrets service of the IdsecSIAAPI instance.
+// Deprecated: Use DBStrongAccounts() instead for strong account operations.
 func (api *IdsecSIAAPI) SecretsDB() *dbsecrets.IdsecSIASecretsDBService {
 	return api.dbSecretsService
+}
+
+// DBStrongAccounts returns the DB Strong Accounts service of the IdsecSIAAPI instance.
+func (api *IdsecSIAAPI) DBStrongAccounts() *dbstrongaccounts.IdsecSIADBStrongAccountsService {
+	return api.dbStrongAccountsService
 }
 
 // Access returns the access service of the IdsecSIAAPI instance.

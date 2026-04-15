@@ -3,9 +3,6 @@ package collectors
 import (
 	"runtime"
 	"time"
-
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/mem"
 )
 
 const (
@@ -13,12 +10,11 @@ const (
 	IdsecOSMetricsCollectorName = "os_metrics"
 )
 
-// IdsecOSMetricsCollector collects OS and system metrics using runtime and gopsutil.
+// IdsecOSMetricsCollector collects OS and system metrics using runtime.
 //
-// CollectMetrics collects OS details (name, arch, CPU count, Go version, hostname) and system metrics
-// (memory usage, disk usage, CPU percent) using gopsutil.
+// CollectMetrics collects OS details (name, arch, Go version, timezone).
 //
-// Returns IdsecMetrics containing all collected metrics, or error if any metric collection fails.
+// Returns IdsecMetrics containing all collected metrics.
 //
 // Example:
 //
@@ -36,10 +32,9 @@ func NewIdsecOSMetricsCollector() IdsecMetricsCollector {
 	return &IdsecOSMetricsCollector{}
 }
 
-// CollectMetrics collects and returns Idsec OS and system metrics.
+// CollectMetrics collects and returns Idsec OS metrics.
 //
-// Returns IdsecMetrics with metrics slice containing OS details and system metrics.
-// If any gopsutil call fails, the corresponding metric value will be "unknown".
+// Returns IdsecMetrics with metrics slice containing OS details.
 func (c *IdsecOSMetricsCollector) CollectMetrics() (*IdsecMetrics, error) {
 	metrics := &IdsecMetrics{
 		Collector: "os_metrics",
@@ -50,7 +45,6 @@ func (c *IdsecOSMetricsCollector) CollectMetrics() (*IdsecMetrics, error) {
 	// Collect OS details
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
-	cpuCount := runtime.NumCPU()
 	goVersion := runtime.Version()
 	name, _ := time.Now().Zone()
 	metrics.Metrics = append(metrics.Metrics,
@@ -65,11 +59,6 @@ func (c *IdsecOSMetricsCollector) CollectMetrics() (*IdsecMetrics, error) {
 			Value:     arch,
 		},
 		IdsecMetric{
-			Name:      "cpu_count",
-			ShortName: "cpu",
-			Value:     cpuCount,
-		},
-		IdsecMetric{
 			Name:      "go_version",
 			ShortName: "go_ver",
 			Value:     goVersion,
@@ -80,44 +69,6 @@ func (c *IdsecOSMetricsCollector) CollectMetrics() (*IdsecMetrics, error) {
 			Value:     name,
 		},
 	)
-
-	// Collect memory usage
-	vmStat, err := mem.VirtualMemory()
-	if err == nil {
-		metrics.Metrics = append(metrics.Metrics,
-			IdsecMetric{
-				Name:      "memory_total",
-				ShortName: "mem",
-				Value:     vmStat.Total,
-			},
-		)
-	} else {
-		metrics.Metrics = append(metrics.Metrics,
-			IdsecMetric{
-				Name:      "memory_total",
-				ShortName: "mem",
-				Value:     "unknown",
-			},
-		)
-	}
-	diskStat, err := disk.Usage("/")
-	if err == nil {
-		metrics.Metrics = append(metrics.Metrics,
-			IdsecMetric{
-				Name:      "disk_total",
-				ShortName: "disk",
-				Value:     diskStat.Total,
-			},
-		)
-	} else {
-		metrics.Metrics = append(metrics.Metrics,
-			IdsecMetric{
-				Name:      "disk_total",
-				ShortName: "disk",
-				Value:     "unknown",
-			},
-		)
-	}
 
 	return metrics, nil
 }

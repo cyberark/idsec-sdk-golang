@@ -7,7 +7,7 @@ import (
 
 // ActionToSchemaMap defines the mapping of actions to schemas for the Cloud Access policy service.
 var ActionToSchemaMap = map[string]interface{}{
-	"add-policy":       &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{},
+	"create-policy":    &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{},
 	"delete-policy":    &policycommonmodels.IdsecPolicyDeletePolicyRequest{},
 	"update-policy":    &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{},
 	"policy":           &policycommonmodels.IdsecPolicyGetPolicyRequest{},

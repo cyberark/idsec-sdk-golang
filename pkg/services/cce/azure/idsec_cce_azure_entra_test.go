@@ -2,7 +2,9 @@ package azure
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
@@ -15,11 +17,18 @@ import (
 
 // setupAzureService creates an IdsecCCEAzureService with the given mock ISP client.
 func setupAzureService(client *isp.IdsecISPServiceClient) *IdsecCCEAzureService {
+	ispBase := &services.IdsecISPBaseService{}
+	// Use reflection to set the private client field for testing
+	v := reflect.ValueOf(ispBase).Elem()
+	clientField := v.FieldByName("client")
+	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
+	clientField.Set(reflect.ValueOf(client))
+
 	return &IdsecCCEAzureService{
-		client: client,
 		IdsecBaseService: &services.IdsecBaseService{
 			Logger: common.GlobalLogger,
 		},
+		IdsecISPBaseService: ispBase,
 	}
 }
 
@@ -61,7 +70,7 @@ func TestTfAddEntra_Success(t *testing.T) {
 
 	// Create input
 	input := &azuremodels.TfIdsecCCEAzureAddEntra{
-		EntraID:         "12345678-1234-1234-1234-123456789012",
+		EntraID: "12345678-1234-1234-1234-123456789012",
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{
 				ServiceName: ccemodels.DPA,

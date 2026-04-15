@@ -32,11 +32,9 @@ type IdsecIdentityEntitiesPage = common.IdsecPage[directoriesmodels.IdsecIdentit
 
 // IdsecIdentityDirectoriesService is the service for managing identity directories.
 type IdsecIdentityDirectoriesService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
-	env     commonmodels.EnvObject
+	*services.IdsecISPBaseService
+	env commonmodels.EnvObject
 
 	DoGet              func(ctx context.Context, path string, params interface{}) (*http.Response, error)
 	DoPost             func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -56,28 +54,27 @@ func NewIdsecIdentityDirectoriesService(authenticators ...auth.IdsecAuth) (*Idse
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityDirectoriesService.refreshIdentityDirectoriesAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityDirectoriesService.refreshIdentityDirectoriesAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
-	awsEnvList, isExist := commonmodels.GetAwsEnvFromList()
-	if !isExist {
-		return nil, fmt.Errorf("%s env is not supported", awsEnvList.AwsEnv)
-	}
+
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
-	identityDirectoriesService.client = client
-	identityDirectoriesService.ispAuth = ispAuth
 	identityDirectoriesService.IdsecBaseService = baseService
-	identityDirectoriesService.env = awsEnvList
+	identityDirectoriesService.IdsecISPBaseService = ispBaseService
 	return identityDirectoriesService, nil
 }
 
@@ -85,33 +82,33 @@ func (s *IdsecIdentityDirectoriesService) getOperation() func(ctx context.Contex
 	if s.DoGet != nil {
 		return s.DoGet
 	}
-	return s.client.Get
+	return s.ISPClient().Get
 }
 
 func (s *IdsecIdentityDirectoriesService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityDirectoriesService) postTenantSuffixOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoTenantSuffixPost != nil {
 		return s.DoTenantSuffixPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityDirectoriesService) refreshIdentityDirectoriesAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// ListDirectories retrieves the directory services for the specified directories.
-func (s *IdsecIdentityDirectoriesService) ListDirectories(listDirectories *directoriesmodels.IdsecIdentityListDirectories) ([]*directoriesmodels.IdsecIdentityDirectory, error) {
+// List retrieves the directory services for the specified directories.
+func (s *IdsecIdentityDirectoriesService) List(listDirectories *directoriesmodels.IdsecIdentityListDirectories) ([]*directoriesmodels.IdsecIdentityDirectory, error) {
 	if len(listDirectories.Directories) == 0 {
 		listDirectories.Directories = identity.AllDirectoryTypes
 	}
@@ -157,8 +154,8 @@ func (s *IdsecIdentityDirectoriesService) ListDirectories(listDirectories *direc
 	return directories, nil
 }
 
-// ListDirectoriesEntities retrieves the entities for the specified directories.
-func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectoriesEntities *directoriesmodels.IdsecIdentityListDirectoriesEntities) (<-chan *IdsecIdentityEntitiesPage, error) {
+// ListEntities retrieves the entities for the specified directories.
+func (s *IdsecIdentityDirectoriesService) ListEntities(listDirectoriesEntities *directoriesmodels.IdsecIdentityListDirectoriesEntities) (<-chan *IdsecIdentityEntitiesPage, error) {
 	s.Logger.Info("Listing directories entities")
 	if listDirectoriesEntities.PageSize <= 0 {
 		listDirectoriesEntities.PageSize = directoriesmodels.DefaultListDirectoriesEntitiesPageSize
@@ -169,7 +166,7 @@ func (s *IdsecIdentityDirectoriesService) ListDirectoriesEntities(listDirectorie
 	if listDirectoriesEntities.MaxPageCount == 0 {
 		listDirectoriesEntities.MaxPageCount = directoriesmodels.DefaultListDirectoriesEntitiesMaxPageCount
 	}
-	directories, err := s.ListDirectories(&directoriesmodels.IdsecIdentityListDirectories{
+	directories, err := s.List(&directoriesmodels.IdsecIdentityListDirectories{
 		Directories: listDirectoriesEntities.Directories,
 	})
 	if err != nil {

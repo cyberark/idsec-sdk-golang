@@ -32,10 +32,8 @@ type azureWorkspacesAPIResponse struct {
 
 // IdsecCCEAzureService is the implementation of the CCE Azure service.
 type IdsecCCEAzureService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecCCEAzureService creates a new instance of IdsecCCEAzureService.
@@ -52,18 +50,17 @@ func NewIdsecCCEAzureService(authenticators ...auth.IdsecAuth) (*IdsecCCEAzureSe
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
 
-	client, err := isp.FromISPAuth(ispAuth, cceinternal.IspServiceName, cceinternal.IspVersion, cceinternal.IspAPIVersion, cceAzureService.refreshCCEAzureAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, cceinternal.IspServiceName, cceinternal.IspVersion, cceinternal.IspAPIVersion, cceAzureService.refreshCCEAzureAuth)
 	if err != nil {
 		return nil, err
 	}
-	cceAzureService.client = client
-	cceAzureService.ispAuth = ispAuth
 	cceAzureService.IdsecBaseService = baseService
+	cceAzureService.IdsecISPBaseService = ispBaseService
 	return cceAzureService, nil
 }
 
 func (s *IdsecCCEAzureService) refreshCCEAzureAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -208,7 +205,7 @@ func (s *IdsecCCEAzureService) tfInternalWorkspaces(input *azuremodels.TfIdsecCC
 		params["services"] = services
 	}
 
-	response, err := s.client.Get(context.Background(), pathWorkspacesURL, params)
+	response, err := s.ISPClient().Get(context.Background(), pathWorkspacesURL, params)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +330,7 @@ func (s *IdsecCCEAzureService) TfWorkspaces(input *azuremodels.TfIdsecCCEAzureGe
 func (s *IdsecCCEAzureService) TfIdentityParams(input *azuremodels.TfIdsecCCEAzureGetIdentityParams) (*azuremodels.TfIdsecCCEAzureIdentityParams, error) {
 	s.Logger.Info("Getting Azure identity parameters")
 
-	response, err := s.client.Get(context.Background(), pathIdentityParamsURL, nil)
+	response, err := s.ISPClient().Get(context.Background(), pathIdentityParamsURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -350,14 +347,40 @@ func (s *IdsecCCEAzureService) TfIdentityParams(input *azuremodels.TfIdsecCCEAzu
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Parse the response as a map (API returns the map directly at root level)
-	var paramsMap map[string]azuremodels.IdsecCCEWorkloadFederation
-	if err := json.Unmarshal(bodyBytes, &paramsMap); err != nil {
+	// Parse the response as a generic map first (tenant_id is at root level alongside service params)
+	var rawResponse map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawResponse); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal identity parameters: %w", err)
 	}
 
-	// Wrap the map in the struct
+	// Extract tenantId if present (API uses camelCase "tenantId")
+	tenantID, _ := rawResponse["tenantId"].(string)
+
+	// Extract service identity params (all keys except tenantId)
+	paramsMap := make(map[string]azuremodels.IdsecCCEWorkloadFederation)
+	for key, value := range rawResponse {
+		if key == "tenantId" {
+			continue // Skip tenantId, it's handled separately
+		}
+
+		// Marshal and unmarshal to convert interface{} to IdsecCCEWorkloadFederation
+		valueBytes, err := json.Marshal(value)
+		if err != nil {
+			s.Logger.Warning("Failed to marshal identity param for service %s: %v", key, err)
+			continue
+		}
+
+		var identityParam azuremodels.IdsecCCEWorkloadFederation
+		if err := json.Unmarshal(valueBytes, &identityParam); err != nil {
+			s.Logger.Warning("Failed to unmarshal identity param for service %s: %v", key, err)
+			continue
+		}
+		paramsMap[key] = identityParam
+	}
+
+	// Wrap the map in the struct with tenant_id
 	identityParams := &azuremodels.TfIdsecCCEAzureIdentityParams{
+		TenantID:       tenantID,
 		IdentityParams: paramsMap,
 	}
 

@@ -2,7 +2,7 @@ package sechub
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
-	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configuration"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secrets"
@@ -13,7 +13,7 @@ import (
 
 // IdsecSecHubAPI is a struct that provides access to the Idsec SecHub API as a wrapped set of services.
 type IdsecSecHubAPI struct {
-	configurationService *configuration.IdsecSecHubConfigurationService
+	configurationService *configurations.IdsecSecHubConfigurationService
 	filtersService       *filters.IdsecSecHubFiltersService
 	scansService         *scans.IdsecSecHubScansService
 	serviceInfoService   *serviceinfo.IdsecSecHubServiceInfoService
@@ -25,7 +25,7 @@ type IdsecSecHubAPI struct {
 // NewIdsecSecHubAPI creates a new instance of IdsecSecHubAPI with the provided IdsecISPAuth.
 func NewIdsecSecHubAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSecHubAPI, error) {
 	var baseIspAuth auth.IdsecAuth = ispAuth
-	configurationService, err := configuration.NewIdsecSecHubConfigurationService(baseIspAuth)
+	configurationService, err := configurations.NewIdsecSecHubConfigurationService(baseIspAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func NewIdsecSecHubAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSecHubAPI, error) {
 }
 
 // Configuration returns the configuration service of the IdsecSecHubAPI instance.
-func (api *IdsecSecHubAPI) Configuration() *configuration.IdsecSecHubConfigurationService {
+func (api *IdsecSecHubAPI) Configuration() *configurations.IdsecSecHubConfigurationService {
 	return api.configurationService
 }
 

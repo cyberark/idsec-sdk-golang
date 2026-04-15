@@ -25,10 +25,8 @@ const (
 
 // IdsecIdentityAuthProfilesService is the service for managing identity auth profiles.
 type IdsecIdentityAuthProfilesService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 
 	DoPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 }
@@ -46,24 +44,27 @@ func NewIdsecIdentityAuthProfilesService(authenticators ...auth.IdsecAuth) (*Ids
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityAuthProfilesService.refreshIdentityAuthProfilesAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityAuthProfilesService.refreshIdentityAuthProfilesAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
 
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
 	identityAuthProfilesService.IdsecBaseService = baseService
-	identityAuthProfilesService.client = client
-	identityAuthProfilesService.ispAuth = ispAuth
+	identityAuthProfilesService.IdsecISPBaseService = ispBaseService
 	return identityAuthProfilesService, nil
 }
 
@@ -71,11 +72,11 @@ func (s *IdsecIdentityAuthProfilesService) postOperation() func(ctx context.Cont
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityAuthProfilesService) refreshIdentityAuthProfilesAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -116,8 +117,8 @@ func (s *IdsecIdentityAuthProfilesService) parseAuthProfileFromMap(data map[stri
 	return authProfileModel, nil
 }
 
-// CreateAuthProfile creates a new identity auth profile.
-func (s *IdsecIdentityAuthProfilesService) CreateAuthProfile(createAuthProfile *authprofilesmodels.IdsecIdentityCreateAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
+// Create creates a new identity auth profile.
+func (s *IdsecIdentityAuthProfilesService) Create(createAuthProfile *authprofilesmodels.IdsecIdentityCreateAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	s.Logger.Debug("Creating identity auth profile")
 	createAuthProfileRequest := map[string]interface{}{
 		"settings": map[string]interface{}{
@@ -160,10 +161,10 @@ func (s *IdsecIdentityAuthProfilesService) CreateAuthProfile(createAuthProfile *
 	return s.parseAuthProfileFromMap(result["Result"].(map[string]interface{}))
 }
 
-// UpdateAuthProfile updates an existing identity auth profile.
-func (s *IdsecIdentityAuthProfilesService) UpdateAuthProfile(updateAuthProfile *authprofilesmodels.IdsecIdentityUpdateAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
+// Update updates an existing identity auth profile.
+func (s *IdsecIdentityAuthProfilesService) Update(updateAuthProfile *authprofilesmodels.IdsecIdentityUpdateAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	s.Logger.Debug("Updating identity auth profile with ID [%s]", updateAuthProfile.AuthProfileID)
-	existingAuthProfile, err := s.AuthProfile(&authprofilesmodels.IdsecIdentityGetAuthProfile{
+	existingAuthProfile, err := s.Get(&authprofilesmodels.IdsecIdentityGetAuthProfile{
 		AuthProfileID: updateAuthProfile.AuthProfileID,
 	})
 	if err != nil {
@@ -232,15 +233,15 @@ func (s *IdsecIdentityAuthProfilesService) UpdateAuthProfile(updateAuthProfile *
 	return s.parseAuthProfileFromMap(result["Result"].(map[string]interface{}))
 }
 
-// AuthProfile retrieves an identity auth profile by ID or name.
-func (s *IdsecIdentityAuthProfilesService) AuthProfile(getAuthProfile *authprofilesmodels.IdsecIdentityGetAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
+// Get retrieves an identity auth profile by ID or name.
+func (s *IdsecIdentityAuthProfilesService) Get(getAuthProfile *authprofilesmodels.IdsecIdentityGetAuthProfile) (*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	s.Logger.Debug("Retrieving identity auth profile")
 	if getAuthProfile.AuthProfileID == "" && getAuthProfile.AuthProfileName == "" {
 		return nil, fmt.Errorf("either AuthProfileID or AuthProfileName must be provided")
 	}
 	// If AuthProfileName is provided, resolve it to ID
 	if getAuthProfile.AuthProfileName != "" && getAuthProfile.AuthProfileID == "" {
-		authProfiles, err := s.ListAuthProfilesBy(&authprofilesmodels.IdsecIdentityAuthProfilesFilters{
+		authProfiles, err := s.ListBy(&authprofilesmodels.IdsecIdentityAuthProfilesFilters{
 			AuthProfileName: getAuthProfile.AuthProfileName,
 		})
 		if err != nil {
@@ -282,14 +283,14 @@ func (s *IdsecIdentityAuthProfilesService) AuthProfile(getAuthProfile *authprofi
 	return s.parseAuthProfileFromMap(result["Result"].(map[string]interface{}))
 }
 
-// DeleteAuthProfile deletes an identity auth profile by ID or name.
-func (s *IdsecIdentityAuthProfilesService) DeleteAuthProfile(deleteAuthProfile *authprofilesmodels.IdsecIdentityDeleteAuthProfile) error {
+// Delete deletes an identity auth profile by ID or name.
+func (s *IdsecIdentityAuthProfilesService) Delete(deleteAuthProfile *authprofilesmodels.IdsecIdentityDeleteAuthProfile) error {
 	s.Logger.Debug("Deleting identity auth profile with ID [%s]", deleteAuthProfile.AuthProfileID)
 	if deleteAuthProfile.AuthProfileID == "" && deleteAuthProfile.AuthProfileName == "" {
 		return fmt.Errorf("either AuthProfileID or AuthProfileName must be provided")
 	}
 	if deleteAuthProfile.AuthProfileName != "" && deleteAuthProfile.AuthProfileID == "" {
-		authProfiles, err := s.ListAuthProfilesBy(&authprofilesmodels.IdsecIdentityAuthProfilesFilters{
+		authProfiles, err := s.ListBy(&authprofilesmodels.IdsecIdentityAuthProfilesFilters{
 			AuthProfileName: deleteAuthProfile.AuthProfileName,
 		})
 		if err != nil {
@@ -328,8 +329,8 @@ func (s *IdsecIdentityAuthProfilesService) DeleteAuthProfile(deleteAuthProfile *
 	return nil
 }
 
-// ListAuthProfiles lists all identity auth profiles.
-func (s *IdsecIdentityAuthProfilesService) ListAuthProfiles() ([]*authprofilesmodels.IdsecIdentityAuthProfile, error) {
+// List lists all identity auth profiles.
+func (s *IdsecIdentityAuthProfilesService) List() ([]*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	s.Logger.Debug("Listing identity auth profiles")
 	response, err := s.postOperation()(context.Background(), listProfilesURL, map[string]interface{}{})
 	if err != nil {
@@ -379,10 +380,10 @@ func (s *IdsecIdentityAuthProfilesService) ListAuthProfiles() ([]*authprofilesmo
 	return authProfiles, nil
 }
 
-// ListAuthProfilesBy lists identity auth profiles based on provided filters.
-func (s *IdsecIdentityAuthProfilesService) ListAuthProfilesBy(filters *authprofilesmodels.IdsecIdentityAuthProfilesFilters) ([]*authprofilesmodels.IdsecIdentityAuthProfile, error) {
+// ListBy lists identity auth profiles based on provided filters.
+func (s *IdsecIdentityAuthProfilesService) ListBy(filters *authprofilesmodels.IdsecIdentityAuthProfilesFilters) ([]*authprofilesmodels.IdsecIdentityAuthProfile, error) {
 	s.Logger.Debug("Listing identity auth profiles by filters")
-	allAuthProfiles, err := s.ListAuthProfiles()
+	allAuthProfiles, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -419,10 +420,10 @@ func (s *IdsecIdentityAuthProfilesService) ListAuthProfilesBy(filters *authprofi
 	return filteredAuthProfiles, nil
 }
 
-// AuthProfilesStats retrieves statistics related to identity auth profiles.
-func (s *IdsecIdentityAuthProfilesService) AuthProfilesStats() (*authprofilesmodels.IdsecIdentityAuthProfilesStats, error) {
+// Stats retrieves statistics related to identity auth profiles.
+func (s *IdsecIdentityAuthProfilesService) Stats() (*authprofilesmodels.IdsecIdentityAuthProfilesStats, error) {
 	s.Logger.Debug("Retrieving identity auth profiles statistics")
-	allAuthProfiles, err := s.ListAuthProfiles()
+	allAuthProfiles, err := s.List()
 	if err != nil {
 		return nil, err
 	}

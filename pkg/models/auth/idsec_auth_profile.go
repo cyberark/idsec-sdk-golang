@@ -34,6 +34,8 @@ func (a *IdsecAuthProfile) UnmarshalJSON(data []byte) error {
 		settings = &IdentityServiceUserIdsecAuthMethodSettings{}
 	case Direct:
 		settings = &DirectIdsecAuthMethodSettings{}
+	case PVWA:
+		settings = &PVWAIdsecAuthMethodSettings{}
 	case Default:
 		settings = &DefaultIdsecAuthMethodSettings{}
 	default:

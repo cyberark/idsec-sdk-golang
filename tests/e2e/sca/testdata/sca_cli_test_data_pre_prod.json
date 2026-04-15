@@ -1,0 +1,63 @@
+{
+  "auth": {
+    "method": "identity",
+    "username": "automation_user@cyberark.cloud.43204",
+    "secret": "",
+    "identity_url": "https://aog5018.id.integration-cyberark.cloud"
+  },
+  "azure_cloud_console": {
+    "principal": {
+      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
+      "principal_name": "e2etestuser@cyberark.cloud.43204",
+      "principal_secret": "",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "d2562ede-74db-457e-a7b6-544e236ebb61",
+          "workspaceId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceType": "directory"
+        }
+      ]
+    }
+  },
+  "azure_entra_groups": {
+    "principal": {
+      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
+      "principal_name": "e2etestuser@cyberark.cloud.43204",
+      "principal_secret": "",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "group_id": "02454e55-5863-4ece-a633-3040530d079a",
+          "directory_id": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "group_name": "access-apis-58"
+        }
+      ]
+    }
+  },
+  "aws_cloud_console": {
+    "principal": {
+      "principal_id": "<uuid>",
+      "principal_name": "<user>@<domain>",
+      "source_directory_name": "<directory-name>",
+      "source_directory_id": "<uuid>"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "<role-id>",
+          "workspaceId": "<workspace-id>",
+          "orgId": "<org-id>",
+          "workspaceType": "<type>"
+        }
+      ]
+    }
+  }
+}

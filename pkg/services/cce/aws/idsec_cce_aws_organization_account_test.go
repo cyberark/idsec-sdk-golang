@@ -132,8 +132,8 @@ func TestAddOrganizationAccountSync_Success(t *testing.T) {
 	// Create input with sync struct
 	input := &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{
 		IdsecCCEAWSAddOrganizationAccount: awsmodels.IdsecCCEAWSAddOrganizationAccount{
-			OrganizationID: mockOrganizationOnboardingID,
-			AccountID:      mockAWSAccountID,
+			ParentOrganizationID: mockOrganizationOnboardingID,
+			AccountID:            mockAWSAccountID,
 			Services: []ccemodels.IdsecCCEServiceInput{
 				{
 					ServiceName: ccemodels.DPA,
@@ -267,8 +267,8 @@ func TestAddOrganizationAccountSync_With404AndQuickRetry(t *testing.T) {
 
 	input := &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{
 		IdsecCCEAWSAddOrganizationAccount: awsmodels.IdsecCCEAWSAddOrganizationAccount{
-			OrganizationID: mockOrganizationOnboardingID,
-			AccountID:      mockAWSAccountID,
+			ParentOrganizationID: mockOrganizationOnboardingID,
+			AccountID:            mockAWSAccountID,
 			Services: []ccemodels.IdsecCCEServiceInput{
 				{
 					ServiceName: ccemodels.DPA,
@@ -384,8 +384,8 @@ func TestAddOrganizationAccountSync_With400ScanInProgress(t *testing.T) {
 
 	input := &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{
 		IdsecCCEAWSAddOrganizationAccount: awsmodels.IdsecCCEAWSAddOrganizationAccount{
-			OrganizationID: mockOrganizationOnboardingID,
-			AccountID:      mockAWSAccountID,
+			ParentOrganizationID: mockOrganizationOnboardingID,
+			AccountID:            mockAWSAccountID,
 			Services: []ccemodels.IdsecCCEServiceInput{
 				{
 					ServiceName: ccemodels.DPA,
@@ -412,4 +412,675 @@ func TestAddOrganizationAccountSync_With400ScanInProgress(t *testing.T) {
 	require.Equal(t, 0, scanCallCount, "Expected NO scan calls (scan already in progress)")
 	require.GreaterOrEqual(t, orgCallCount, 1, "Expected at least 1 organization poll")
 	require.Equal(t, 2, addAccountCallCount, "Expected 2 calls to add account (first 400, second success)")
+}
+
+// Mock account details JSON with organization ID and services
+const mockAccountDetailsWithOrgJSON = `{
+	"id": "` + mockAccountOnboardingID + `",
+	"account_id": "` + mockAWSAccountID + `",
+	"organization_id": "` + mockOrganizationOnboardingID + `",
+	"onboarding_type": "` + mockOnboardingType + `",
+	"services": ["dpa"],
+	"services_data": [
+		{
+			"name": "dpa",
+			"status": "Completely added",
+			"errors": []
+		}
+	],
+	"status": "Completely added"
+}`
+
+// Mock account details JSON with multiple services
+const mockAccountDetailsWithMultipleServicesJSON = `{
+	"id": "` + mockAccountOnboardingID + `",
+	"account_id": "` + mockAWSAccountID + `",
+	"organization_id": "` + mockOrganizationOnboardingID + `",
+	"onboarding_type": "` + mockOnboardingType + `",
+	"services": ["dpa", "sca"],
+	"services_data": [
+		{
+			"name": "dpa",
+			"status": "Completely added",
+			"errors": []
+		},
+		{
+			"name": "sca",
+			"status": "Completely added",
+			"errors": []
+		}
+	],
+	"status": "Completely added"
+}`
+
+func TestTfUpdateOrganizationAccount_Success(t *testing.T) {
+	// Test successful update with new services to add
+	getAccountCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// Get account details - returns account with existing "dpa" service
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			// Add services to organization account
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			// Get updated account details - returns account with both "dpa" and "sca" services
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithMultipleServicesJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+	require.Equal(t, mockAWSAccountID, account.AccountID)
+	require.Equal(t, mockOnboardingType, account.OnboardingType)
+	require.Contains(t, account.ServiceNames, "dpa")
+	require.Contains(t, account.ServiceNames, "sca")
+}
+
+func TestTfUpdateOrganizationAccount_NoServicesToAdd(t *testing.T) {
+	// Test case where account already has all desired services (no update needed)
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// Get account details - returns account with both "dpa" and "sca" services
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithMultipleServicesJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions - should return account without making POST request
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+	require.Equal(t, mockAWSAccountID, account.AccountID)
+}
+
+func TestTfUpdateOrganizationAccount_AccountNotFound(t *testing.T) {
+	// Test case where account doesn't exist
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
+			},
+			StatusCode: http.StatusNotFound,
+			ResponseBody: `{
+				"code": "404",
+				"message": "Account not found"
+			}`,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.Error(t, err)
+	require.Nil(t, account)
+	require.Contains(t, err.Error(), "failed to get account details")
+}
+
+func TestTfUpdateOrganizationAccount_AccountNotInOrganization(t *testing.T) {
+	// This test verifies that an account without services_data (missing deployment status)
+	// will still work correctly by treating all services as needing to be added.
+	accountWithoutServicesDataJSON := `{
+		"id": "` + mockAccountOnboardingID + `",
+		"account_id": "` + mockAWSAccountID + `",
+		"onboarding_type": "` + mockOnboardingType + `",
+		"services": ["dpa"],
+		"status": "Completely added"
+	}`
+
+	getCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountWithoutServicesDataJSON,
+			OnRequest: func(r *http.Request) {
+				getCallCount++
+			},
+		},
+		{
+			// POST to add services (since services_data is missing, dpa is not considered fully deployed)
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+}
+
+func TestTfUpdateOrganizationAccount_FailedToAddServices(t *testing.T) {
+	// Test case where adding services fails
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode: http.StatusBadRequest,
+			ResponseBody: `{
+				"code": "400",
+				"message": "Invalid service configuration"
+			}`,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.Error(t, err)
+	require.Nil(t, account)
+	require.Contains(t, err.Error(), "failed to add services to organization account")
+}
+
+func TestTfUpdateOrganizationAccount_FailedToFetchUpdatedAccount(t *testing.T) {
+	// Test case where adding services succeeds but fetching updated account fails
+	getAccountCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// First GET - get account details
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			// Second GET - fetch updated account (fails)
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode: http.StatusInternalServerError,
+			ResponseBody: `{
+				"code": "500",
+				"message": "Internal server error"
+			}`,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.Error(t, err)
+	require.Nil(t, account)
+	require.Contains(t, err.Error(), "failed to fetch updated account details")
+}
+
+func TestTfUpdateOrganizationAccount_WithServiceParameters(t *testing.T) {
+	// Test case with service parameters
+	getAccountCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					// Verify request body contains serviceParameters
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					bodyStr := string(bodyBytes)
+					require.Contains(t, bodyStr, "serviceParameters", "Expected serviceParameters in request body")
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithMultipleServicesJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	serviceParameters := map[string]map[string]interface{}{
+		"sca": {
+			"region": "us-east-1",
+		},
+	}
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+		ServiceParameters: serviceParameters,
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+}
+
+func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
+	// Test that only services with "Waiting for deployment" status trigger re-addition
+	// Services with "Completely added" or other statuses (like "In progress") should be skipped
+	accountWithMixedServiceStatusesJSON := `{
+		"id": "` + mockAccountOnboardingID + `",
+		"account_id": "` + mockAWSAccountID + `",
+		"organization_id": "` + mockOrganizationOnboardingID + `",
+		"onboarding_type": "` + mockOnboardingType + `",
+		"services": ["dpa", "sca", "secrets_hub"],
+		"services_data": [
+			{
+				"name": "dpa",
+				"status": "Completely added",
+				"errors": []
+			},
+			{
+				"name": "sca",
+				"status": "Waiting for deployment",
+				"errors": []
+			},
+			{
+				"name": "secrets_hub",
+				"status": "In progress",
+				"errors": []
+			}
+		],
+		"status": "Partially added"
+	}`
+
+	getAccountCallCount := 0
+	postCallCount := 0
+	var capturedPostBody string
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// First GET - returns account with mixed service statuses
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountWithMixedServiceStatusesJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			// POST to add services - should only add SCA (status: "Waiting for deployment")
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					// Capture request body to verify which services are being added
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			// Second GET - returns account with all services fully deployed
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"id": "` + mockAccountOnboardingID + `",
+				"account_id": "` + mockAWSAccountID + `",
+				"organization_id": "` + mockOrganizationOnboardingID + `",
+				"onboarding_type": "` + mockOnboardingType + `",
+				"services": ["dpa", "sca", "secrets_hub"],
+				"services_data": [
+					{
+						"name": "dpa",
+						"status": "Completely added",
+						"errors": []
+					},
+					{
+						"name": "sca",
+						"status": "Completely added",
+						"errors": []
+					},
+					{
+						"name": "secrets_hub",
+						"status": "Completely added",
+						"errors": []
+					}
+				],
+				"status": "Completely added"
+			}`,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SecretsHub,
+				Resources: map[string]interface{}{
+					"SecretsHubRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/SecretsHubRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+	require.Equal(t, mockAWSAccountID, account.AccountID)
+
+	// Verify POST was called (at least one service needs to be added)
+	require.Equal(t, 1, postCallCount, "Expected POST to be called once")
+
+	// Verify the POST body contains ONLY SCA (status: "Waiting for deployment")
+	// DPA should NOT be included since it's already "Completely added"
+	// SecretsHub should NOT be included since it has "In progress" status (not "Waiting for deployment")
+	require.NotContains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should not be in POST body (already 'Completely added')")
+	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body (status: 'Waiting for deployment')")
+	require.NotContains(t, capturedPostBody, `"serviceName":"secrets_hub"`, "SecretsHub should NOT be in POST body (status: 'In progress', not 'Waiting for deployment')")
+}
+
+func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.T) {
+	// Test case where all services exist but none are "Completely added"
+	// All services should be re-added via POST
+	accountWithAllServicesWaitingJSON := `{
+		"id": "` + mockAccountOnboardingID + `",
+		"account_id": "` + mockAWSAccountID + `",
+		"organization_id": "` + mockOrganizationOnboardingID + `",
+		"onboarding_type": "` + mockOnboardingType + `",
+		"services": ["dpa", "sca"],
+		"services_data": [
+			{
+				"name": "dpa",
+				"status": "Waiting for deployment",
+				"errors": []
+			},
+			{
+				"name": "sca",
+				"status": "Waiting for deployment",
+				"errors": []
+			}
+		],
+		"status": "Waiting for deployment"
+	}`
+
+	getAccountCallCount := 0
+	postCallCount := 0
+	var capturedPostBody string
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountWithAllServicesWaitingJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithMultipleServicesJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	// Call TfUpdateOrganizationAccount
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "Expected POST to be called (all services waiting for deployment)")
+
+	// Verify both services are in the POST body (both need re-addition)
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should be in POST body")
+	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body")
 }

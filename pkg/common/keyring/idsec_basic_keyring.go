@@ -32,7 +32,7 @@ const (
 const (
 	// DefaultBasicKeyringFolder is the default folder path relative to HOME directory
 	// where the basic keyring files are stored.
-	DefaultBasicKeyringFolder = ".idsec_cache/keyring"
+	DefaultBasicKeyringFolder = ".idsec/cache/keyring"
 
 	// IdsecBasicKeyringFolderEnvVar is the environment variable name that can be used
 	// to override the default keyring folder location.

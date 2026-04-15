@@ -42,10 +42,8 @@ type IdsecPCloudAccountsPage = common.IdsecPage[accountsmodels.IdsecPCloudAccoun
 
 // IdsecPCloudAccountsService is the service for managing pCloud Accounts.
 type IdsecPCloudAccountsService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecPCloudAccountsService creates a new instance of IdsecPCloudAccountsService.
@@ -61,18 +59,26 @@ func NewIdsecPCloudAccountsService(authenticators ...auth.IdsecAuth) (*IdsecPClo
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuthWithRetry(ispAuth, "privilegecloud", ".", "passwordvault", pcloudAccountsService.refreshPCloudAccountsAuth, commonpcloud.DefaultPCloudRetryStrategy())
+
+	ispBaseService, err := services.NewIdsecISPBaseServiceWithRetry(
+		ispAuth,
+		"privilegecloud",
+		".",
+		"passwordvault",
+		pcloudAccountsService.refreshPCloudAccountsAuth,
+		commonpcloud.DefaultPCloudRetryStrategy(),
+	)
 	if err != nil {
 		return nil, err
 	}
-	pcloudAccountsService.client = client
-	pcloudAccountsService.ispAuth = ispAuth
+
 	pcloudAccountsService.IdsecBaseService = baseService
+	pcloudAccountsService.IdsecISPBaseService = ispBaseService
 	return pcloudAccountsService, nil
 }
 
 func (s *IdsecPCloudAccountsService) refreshPCloudAccountsAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -110,7 +116,7 @@ func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.client.Get(context.Background(), accountsURL, query)
+			response, err := s.ISPClient().Get(context.Background(), accountsURL, query)
 			if err != nil {
 				s.Logger.Error("Failed to list accounts: %v", err)
 				return
@@ -190,9 +196,9 @@ func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
 	return results, nil
 }
 
-// ListAccounts retrieves a list of IdsecPCloudAccount pages.
+// List retrieves a list of IdsecPCloudAccount pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
-func (s *IdsecPCloudAccountsService) ListAccounts() (<-chan *IdsecPCloudAccountsPage, error) {
+func (s *IdsecPCloudAccountsService) List() (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.listAccountsWithFilters(
 		"",
 		"",
@@ -203,9 +209,9 @@ func (s *IdsecPCloudAccountsService) ListAccounts() (<-chan *IdsecPCloudAccounts
 	)
 }
 
-// ListAccountsBy retrieves a list of IdsecPCloudAccount pages with filters.
+// ListBy retrieves a list of IdsecPCloudAccount pages with filters.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
-func (s *IdsecPCloudAccountsService) ListAccountsBy(accountsFilters *accountsmodels.IdsecPCloudAccountsFilter) (<-chan *IdsecPCloudAccountsPage, error) {
+func (s *IdsecPCloudAccountsService) ListBy(accountsFilters *accountsmodels.IdsecPCloudAccountsFilter) (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.listAccountsWithFilters(
 		accountsFilters.Search,
 		accountsFilters.SearchType,
@@ -216,11 +222,11 @@ func (s *IdsecPCloudAccountsService) ListAccountsBy(accountsFilters *accountsmod
 	)
 }
 
-// ListAccountSecretVersions retrieves a list of IdsecPCloudAccountSecretVersion.
+// ListSecretVersions retrieves a list of IdsecPCloudAccountSecretVersion.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Secrets-Get-versions.htm
-func (s *IdsecPCloudAccountsService) ListAccountSecretVersions(listAccountSecretVersions *accountsmodels.IdsecPCloudListAccountSecretVersions) ([]*accountsmodels.IdsecPCloudAccountSecretVersion, error) {
+func (s *IdsecPCloudAccountsService) ListSecretVersions(listAccountSecretVersions *accountsmodels.IdsecPCloudListAccountSecretVersions) ([]*accountsmodels.IdsecPCloudAccountSecretVersion, error) {
 	s.Logger.Info("Retrieving account secret versions [%s]", listAccountSecretVersions.AccountID)
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(accountSecretVersionsURL, listAccountSecretVersions.AccountID), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountSecretVersionsURL, listAccountSecretVersions.AccountID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -246,11 +252,11 @@ func (s *IdsecPCloudAccountsService) ListAccountSecretVersions(listAccountSecret
 	return accountSecretVersions, nil
 }
 
-// GenerateAccountCredentials generate a new random password for an existing account with policy restrictions.
+// GenerateCredentials generate a new random password for an existing account with policy restrictions.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Secrets-Generate-Password.htm
-func (s *IdsecPCloudAccountsService) GenerateAccountCredentials(generateAccountCredentials *accountsmodels.IdsecPCloudGenerateAccountCredentials) (*accountsmodels.IdsecPCloudAccountCredentials, error) {
+func (s *IdsecPCloudAccountsService) GenerateCredentials(generateAccountCredentials *accountsmodels.IdsecPCloudGenerateAccountCredentials) (*accountsmodels.IdsecPCloudAccountCredentials, error) {
 	s.Logger.Info("Generating account credentials [%s]", generateAccountCredentials.AccountID)
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(generateAccountCredentialsURL, generateAccountCredentials.AccountID), nil)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(generateAccountCredentialsURL, generateAccountCredentials.AccountID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -276,11 +282,11 @@ func (s *IdsecPCloudAccountsService) GenerateAccountCredentials(generateAccountC
 	return &accountSecret, nil
 }
 
-// VerifyAccountCredentials marks the account for password verification by CPM.
+// VerifyCredentials marks the account for password verification by CPM.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Verify-credentials-v9-10.htm
-func (s *IdsecPCloudAccountsService) VerifyAccountCredentials(verifyAccountCredentials *accountsmodels.IdsecPCloudVerifyAccountCredentials) error {
+func (s *IdsecPCloudAccountsService) VerifyCredentials(verifyAccountCredentials *accountsmodels.IdsecPCloudVerifyAccountCredentials) error {
 	s.Logger.Info("Verifying account credentials [%s]", verifyAccountCredentials.AccountID)
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(verifyAccountCredentialsURL, verifyAccountCredentials.AccountID), nil)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(verifyAccountCredentialsURL, verifyAccountCredentials.AccountID), nil)
 	if err != nil {
 		return err
 	}
@@ -296,11 +302,11 @@ func (s *IdsecPCloudAccountsService) VerifyAccountCredentials(verifyAccountCrede
 	return nil
 }
 
-// ChangeAccountCredentials marks the account for password changing immediately by CPM.
+// ChangeCredentials marks the account for password changing immediately by CPM.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Change-credentials-immediately.htm
-func (s *IdsecPCloudAccountsService) ChangeAccountCredentials(changeAccountCredentials *accountsmodels.IdsecPCloudChangeAccountCredentials) error {
+func (s *IdsecPCloudAccountsService) ChangeCredentials(changeAccountCredentials *accountsmodels.IdsecPCloudChangeAccountCredentials) error {
 	s.Logger.Info("Changing account credentials [%s]", changeAccountCredentials.AccountID)
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(changeAccountCredentialsURL, changeAccountCredentials.AccountID), nil)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(changeAccountCredentialsURL, changeAccountCredentials.AccountID), nil)
 	if err != nil {
 		return err
 	}
@@ -316,16 +322,16 @@ func (s *IdsecPCloudAccountsService) ChangeAccountCredentials(changeAccountCrede
 	return nil
 }
 
-// SetAccountNextCredentials marks the account to have its password changed to the given one via CPM.
+// SetNextCredentials marks the account to have its password changed to the given one via CPM.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/SetNextPassword.htm
-func (s *IdsecPCloudAccountsService) SetAccountNextCredentials(setAccountNextCredentials *accountsmodels.IdsecPCloudSetAccountNextCredentials) error {
+func (s *IdsecPCloudAccountsService) SetNextCredentials(setAccountNextCredentials *accountsmodels.IdsecPCloudSetAccountNextCredentials) error {
 	s.Logger.Info("Setting account next credentials [%s]", setAccountNextCredentials.AccountID)
 	setAccountNextCredentialsJSON, err := common.SerializeJSONCamel(setAccountNextCredentials)
 	if err != nil {
 		return err
 	}
 	delete(setAccountNextCredentialsJSON, "accountId")
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(setAccountNextCredentialsURL, setAccountNextCredentials.AccountID), setAccountNextCredentialsJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(setAccountNextCredentialsURL, setAccountNextCredentials.AccountID), setAccountNextCredentialsJSON)
 	if err != nil {
 		return err
 	}
@@ -341,16 +347,16 @@ func (s *IdsecPCloudAccountsService) SetAccountNextCredentials(setAccountNextCre
 	return nil
 }
 
-// UpdateAccountCredentialsInVault updates the account credentials only in the vault without changing it on the machine itself.
+// UpdateCredentialsInVault updates the account credentials only in the vault without changing it on the machine itself.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/ChangeCredentialsInVault.htm
-func (s *IdsecPCloudAccountsService) UpdateAccountCredentialsInVault(updateAccountCredentialsInVault *accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault) error {
+func (s *IdsecPCloudAccountsService) UpdateCredentialsInVault(updateAccountCredentialsInVault *accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault) error {
 	s.Logger.Info("Updating account credentials in vault [%s]", updateAccountCredentialsInVault.AccountID)
 	updateAccountCredentialsInVaultJSON, err := common.SerializeJSONCamel(updateAccountCredentialsInVault)
 	if err != nil {
 		return err
 	}
 	delete(updateAccountCredentialsInVaultJSON, "accountId")
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(updateAccountCredentialsInVaultURL, updateAccountCredentialsInVault.AccountID), updateAccountCredentialsInVaultJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(updateAccountCredentialsInVaultURL, updateAccountCredentialsInVault.AccountID), updateAccountCredentialsInVaultJSON)
 	if err != nil {
 		return err
 	}
@@ -366,11 +372,11 @@ func (s *IdsecPCloudAccountsService) UpdateAccountCredentialsInVault(updateAccou
 	return nil
 }
 
-// ReconcileAccountCredentials marks the account for reconciliation.
+// ReconcileCredentials marks the account for reconciliation.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Reconcile-account.htm
-func (s *IdsecPCloudAccountsService) ReconcileAccountCredentials(reconcileAccountCredentials *accountsmodels.IdsecPCloudReconcileAccountCredentials) error {
+func (s *IdsecPCloudAccountsService) ReconcileCredentials(reconcileAccountCredentials *accountsmodels.IdsecPCloudReconcileAccountCredentials) error {
 	s.Logger.Info("Reconciling account credentials [%s]", reconcileAccountCredentials.AccountID)
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(reconcileAccountCredentialsURL, reconcileAccountCredentials.AccountID), nil)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(reconcileAccountCredentialsURL, reconcileAccountCredentials.AccountID), nil)
 	if err != nil {
 		return err
 	}
@@ -425,15 +431,15 @@ func (s *IdsecPCloudAccountsService) parseAccountResponse(responseBody io.ReadCl
 	return &account, nil
 }
 
-// Account retrieves an IdsecPCloudAccount by its ID.
+// Get retrieves an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Get%20Account%20Details.htm?
-func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCloudGetAccount) (*accountsmodels.IdsecPCloudAccount, error) {
+func (s *IdsecPCloudAccountsService) Get(getAccount *accountsmodels.IdsecPCloudGetAccount) (*accountsmodels.IdsecPCloudAccount, error) {
 	s.Logger.Info("Retrieving account [%s] - [%s]", getAccount.AccountID, getAccount.AccountName)
 	if getAccount.AccountID == "" && getAccount.AccountName == "" {
 		return nil, fmt.Errorf("either account ID or account name must be provided")
 	}
 	if getAccount.AccountID == "" && getAccount.AccountName != "" {
-		accountsPages, err := s.ListAccountsBy(&accountsmodels.IdsecPCloudAccountsFilter{
+		accountsPages, err := s.ListBy(&accountsmodels.IdsecPCloudAccountsFilter{
 			Search: getAccount.AccountName,
 			Limit:  1,
 		})
@@ -452,7 +458,7 @@ func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCl
 			return nil, fmt.Errorf("account with name [%s] not found", getAccount.AccountName)
 		}
 	}
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(accountURL, getAccount.AccountID), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountURL, getAccount.AccountID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -468,9 +474,9 @@ func (s *IdsecPCloudAccountsService) Account(getAccount *accountsmodels.IdsecPCl
 	return s.parseAccountResponse(response.Body)
 }
 
-// AccountCredentials retrieves the credentials of an IdsecPCloudAccount by its ID.
+// GetCredentials retrieves the credentials of an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/GetPasswordValueV10.htm?
-func (s *IdsecPCloudAccountsService) AccountCredentials(getAccount *accountsmodels.IdsecPCloudGetAccountCredentials) (*accountsmodels.IdsecPCloudAccountCredentials, error) {
+func (s *IdsecPCloudAccountsService) GetCredentials(getAccount *accountsmodels.IdsecPCloudGetAccountCredentials) (*accountsmodels.IdsecPCloudAccountCredentials, error) {
 	s.Logger.Info("Retrieving account credentials [%s]", getAccount.AccountID)
 	accountCredentialsJSON, err := common.SerializeJSONCamel(getAccount)
 	if err != nil {
@@ -484,7 +490,7 @@ func (s *IdsecPCloudAccountsService) AccountCredentials(getAccount *accountsmode
 		key = titleCaser.String(key)
 		accountCredentialsJSONCamel[key] = value
 	}
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(retrieveAccountCredentialsURL, getAccount.AccountID), accountCredentialsJSONCamel)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(retrieveAccountCredentialsURL, getAccount.AccountID), accountCredentialsJSONCamel)
 	if err != nil {
 		return nil, err
 	}
@@ -508,9 +514,9 @@ func (s *IdsecPCloudAccountsService) AccountCredentials(getAccount *accountsmode
 	return &accountSecret, nil
 }
 
-// AddAccount adds a new IdsecPCloudAccount.
+// Create adds a new IdsecPCloudAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Account%20v10.htm?
-func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.IdsecPCloudAddAccount) (*accountsmodels.IdsecPCloudAccount, error) {
+func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPCloudAddAccount) (*accountsmodels.IdsecPCloudAccount, error) {
 	if addAccount.Name == "" {
 		addAccount.Name = fmt.Sprintf("%s_%s", addAccount.SafeName, addAccount.PlatformID)
 		if addAccount.Address != "" {
@@ -552,7 +558,7 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 			addAccountJSON["remoteMachinesAccess"].(map[string]interface{})["accessRestrictedToRemoteMachines"] = addAccount.AccessRestrictedToRemoteMachines
 		}
 	}
-	response, err := s.client.Post(context.Background(), accountsURL, addAccountJSON)
+	response, err := s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -564,14 +570,14 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 	}(response.Body)
 	if response.StatusCode == http.StatusConflict {
 		s.Logger.Info("Account [%s] already exists, retrieving existing account", addAccount.Name)
-		account, err := s.Account(&accountsmodels.IdsecPCloudGetAccount{
+		account, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{
 			AccountName: addAccount.Name,
 		})
 		if err != nil {
 			// For some reason, the account creation returned conflict but the account is not found when retrieving it
 			// So we try again with a post to create
 			s.Logger.Info("Account [%s] not found after conflict, retrying account creation", addAccount.Name)
-			response, err = s.client.Post(context.Background(), accountsURL, addAccountJSON)
+			response, err = s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
 			if err != nil {
 				return nil, err
 			}
@@ -591,9 +597,9 @@ func (s *IdsecPCloudAccountsService) AddAccount(addAccount *accountsmodels.Idsec
 	return s.parseAccountResponse(response.Body)
 }
 
-// UpdateAccount updates an existing IdsecPCloudAccount.
+// Update updates an existing IdsecPCloudAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/UpdateAccount%20v10.htm
-func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) (*accountsmodels.IdsecPCloudAccount, error) {
+func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) (*accountsmodels.IdsecPCloudAccount, error) {
 	s.Logger.Info("Updating account [%s]", updateAccount.AccountID)
 	updateAccountJSON, err := common.SerializeJSONCamel(updateAccount)
 	if err != nil {
@@ -634,7 +640,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 	}
 	var account *accountsmodels.IdsecPCloudAccount
 	if len(operations) == 0 {
-		pcloudAccount, err := s.Account(&accountsmodels.IdsecPCloudGetAccount{
+		pcloudAccount, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{
 			AccountID: updateAccount.AccountID,
 		})
 		if err != nil {
@@ -642,7 +648,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 		}
 		account = pcloudAccount
 	} else {
-		response, err := s.client.Patch(context.Background(), fmt.Sprintf(accountURL, updateAccount.AccountID), operations)
+		response, err := s.ISPClient().Patch(context.Background(), fmt.Sprintf(accountURL, updateAccount.AccountID), operations)
 		if err != nil {
 			return nil, err
 		}
@@ -661,7 +667,7 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 		}
 	}
 	if updateAccount.Secret != "" {
-		err = s.UpdateAccountCredentialsInVault(&accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault{
+		err = s.UpdateCredentialsInVault(&accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault{
 			AccountID:      updateAccount.AccountID,
 			NewCredentials: updateAccount.Secret,
 		})
@@ -672,11 +678,11 @@ func (s *IdsecPCloudAccountsService) UpdateAccount(updateAccount *accountsmodels
 	return account, nil
 }
 
-// DeleteAccount deletes an existing account.
+// Delete deletes an existing account.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Account.htm
-func (s *IdsecPCloudAccountsService) DeleteAccount(deleteAccount *accountsmodels.IdsecPCloudDeleteAccount) error {
+func (s *IdsecPCloudAccountsService) Delete(deleteAccount *accountsmodels.IdsecPCloudDeleteAccount) error {
 	s.Logger.Info("Deleting account [%s]", deleteAccount.AccountID)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(accountURL, deleteAccount.AccountID), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(accountURL, deleteAccount.AccountID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -692,16 +698,16 @@ func (s *IdsecPCloudAccountsService) DeleteAccount(deleteAccount *accountsmodels
 	return nil
 }
 
-// LinkAccount links an account
+// Link links an account
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/WebServices/Link-account.htm
-func (s *IdsecPCloudAccountsService) LinkAccount(linkAccount *accountsmodels.IdsecPCloudLinkAccount) error {
+func (s *IdsecPCloudAccountsService) Link(linkAccount *accountsmodels.IdsecPCloudLinkAccount) error {
 	s.Logger.Info("Linking account [%v]", linkAccount)
 	linkAccountJSON, err := common.SerializeJSONCamel(linkAccount)
 	if err != nil {
 		return err
 	}
 	delete(linkAccountJSON, "account_id")
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(linkAccountURL, linkAccount.AccountID), linkAccountJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(linkAccountURL, linkAccount.AccountID), linkAccountJSON)
 	if err != nil {
 		return err
 	}
@@ -717,11 +723,11 @@ func (s *IdsecPCloudAccountsService) LinkAccount(linkAccount *accountsmodels.Ids
 	return nil
 }
 
-// UnlinkAccount unlinks an account
+// Unlink unlinks an account
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/WebServices/Link-account-unlink.htm
-func (s *IdsecPCloudAccountsService) UnlinkAccount(unlinkAccount *accountsmodels.IdsecPCloudUnlinkAccount) error {
+func (s *IdsecPCloudAccountsService) Unlink(unlinkAccount *accountsmodels.IdsecPCloudUnlinkAccount) error {
 	s.Logger.Info("Unlinking account [%s] index [%s]", unlinkAccount.AccountID, unlinkAccount.ExtraPasswordIndex)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(unlinkAccountURL, unlinkAccount.AccountID, unlinkAccount.ExtraPasswordIndex), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(unlinkAccountURL, unlinkAccount.AccountID, unlinkAccount.ExtraPasswordIndex), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -737,10 +743,10 @@ func (s *IdsecPCloudAccountsService) UnlinkAccount(unlinkAccount *accountsmodels
 	return nil
 }
 
-// AccountsStats retrieves the statistics of IdsecPCloudAccounts.
-func (s *IdsecPCloudAccountsService) AccountsStats() (*accountsmodels.IdsecPCloudAccountsStats, error) {
+// Stats retrieves the statistics of IdsecPCloudAccounts.
+func (s *IdsecPCloudAccountsService) Stats() (*accountsmodels.IdsecPCloudAccountsStats, error) {
 	s.Logger.Info("Retrieving accounts stats")
-	accountsChan, err := s.ListAccounts()
+	accountsChan, err := s.List()
 	if err != nil {
 		return nil, err
 	}

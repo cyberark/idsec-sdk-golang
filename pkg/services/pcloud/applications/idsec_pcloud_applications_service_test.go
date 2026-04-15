@@ -198,7 +198,7 @@ func TestCreateApplication(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.CreateApplication(tt.createApplication)
+			result, err := service.Create(tt.createApplication)
 
 			if tt.expectedError {
 				if err == nil {
@@ -268,7 +268,7 @@ func TestApplication(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.Application(tt.getApplication)
+			result, err := service.Get(tt.getApplication)
 
 			if tt.expectedError {
 				if err == nil {
@@ -336,7 +336,7 @@ func TestDeleteApplication(t *testing.T) {
 			}
 			service.doDelete = MockDeleteFunc(tt.mockDeleteResp, tt.mockDeleteError)
 
-			err = service.DeleteApplication(tt.deleteApplication)
+			err = service.Delete(tt.deleteApplication)
 
 			if tt.expectedError {
 				if err == nil {
@@ -391,7 +391,7 @@ func TestListApplications(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.ListApplications()
+			result, err := service.List()
 
 			if tt.expectedError {
 				if err == nil {
@@ -471,7 +471,7 @@ func TestListApplicationsBy(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.ListApplicationsBy(tt.filter)
+			result, err := service.ListBy(tt.filter)
 
 			if tt.expectedError {
 				if err == nil {
@@ -606,7 +606,7 @@ func TestCreateApplicationAuthMethod(t *testing.T) {
 				service.doGet = MockGetFunc(tt.mockGetResponse, nil)
 			}
 
-			result, err := service.CreateApplicationAuthMethod(tt.createAuthMethod)
+			result, err := service.CreateAuthMethod(tt.createAuthMethod)
 
 			if tt.expectedError {
 				if err == nil {
@@ -679,7 +679,7 @@ func TestGetAuthMethod(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.ApplicationAuthMethod(tt.getAuthMethod)
+			result, err := service.GetAuthMethod(tt.getAuthMethod)
 
 			if tt.expectedError {
 				if err == nil {
@@ -750,7 +750,7 @@ func TestDeleteApplicationAuthMethod(t *testing.T) {
 			}
 			service.doDelete = MockDeleteFunc(tt.mockDeleteResp, tt.mockDeleteError)
 
-			err = service.DeleteApplicationAuthMethod(tt.deleteAuthMethod)
+			err = service.DeleteAuthMethod(tt.deleteAuthMethod)
 
 			if tt.expectedError {
 				if err == nil {
@@ -816,7 +816,7 @@ func TestListApplicationAuthMethods(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.ListApplicationAuthMethods(tt.listAuthMethods)
+			result, err := service.ListAuthMethods(tt.listAuthMethods)
 
 			if tt.expectedError {
 				if err == nil {
@@ -888,7 +888,7 @@ func TestListApplicationAuthMethodsBy(t *testing.T) {
 			}
 			service.doGet = MockGetFunc(tt.mockGetResponse, tt.mockGetError)
 
-			result, err := service.ListApplicationAuthMethodsBy(tt.filter)
+			result, err := service.ListAuthMethodsBy(tt.filter)
 
 			if tt.expectedError {
 				if err == nil {
@@ -954,7 +954,7 @@ func TestApplicationsStats(t *testing.T) {
 				return MockHTTPResponse(http.StatusOK, EmptyAuthMethodsResponseJSON), nil
 			}
 
-			result, err := service.ApplicationsStats()
+			result, err := service.Stats()
 
 			if tt.expectedError {
 				if err == nil {

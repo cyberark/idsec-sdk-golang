@@ -5,4 +5,5 @@ const (
 	CategoryTypeCloudConsole = "Cloud console"
 	CategoryTypeVM           = "VM"
 	CategoryTypeDB           = "DB"
+	CategoryTypeGroupAccess  = "Groups"
 )

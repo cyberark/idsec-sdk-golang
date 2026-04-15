@@ -129,7 +129,7 @@ const (
 	}`
 )
 
-func TestCreateAuthProfile(t *testing.T) {
+func TestCreate(t *testing.T) {
 	tests := []struct {
 		name              string
 		createAuthProfile *authprofilesmodels.IdsecIdentityCreateAuthProfile
@@ -239,7 +239,7 @@ func TestCreateAuthProfile(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			result, err := service.CreateAuthProfile(tt.createAuthProfile)
+			result, err := service.Create(tt.createAuthProfile)
 
 			if tt.expectedError {
 				if err == nil {
@@ -266,7 +266,7 @@ func TestCreateAuthProfile(t *testing.T) {
 	}
 }
 
-func TestUpdateAuthProfile(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	tests := []struct {
 		name              string
 		updateAuthProfile *authprofilesmodels.IdsecIdentityUpdateAuthProfile
@@ -384,7 +384,7 @@ func TestUpdateAuthProfile(t *testing.T) {
 				service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 			}
 
-			result, err := service.UpdateAuthProfile(tt.updateAuthProfile)
+			result, err := service.Update(tt.updateAuthProfile)
 
 			if tt.expectedError {
 				if err == nil {
@@ -405,7 +405,7 @@ func TestUpdateAuthProfile(t *testing.T) {
 	}
 }
 
-func TestAuthProfile(t *testing.T) {
+func TestGet(t *testing.T) {
 	tests := []struct {
 		name             string
 		getAuthProfile   *authprofilesmodels.IdsecIdentityGetAuthProfile
@@ -469,7 +469,7 @@ func TestAuthProfile(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			result, err := service.AuthProfile(tt.getAuthProfile)
+			result, err := service.Get(tt.getAuthProfile)
 
 			if tt.expectedError {
 				if err == nil {
@@ -493,7 +493,7 @@ func TestAuthProfile(t *testing.T) {
 	}
 }
 
-func TestDeleteAuthProfile(t *testing.T) {
+func TestDelete(t *testing.T) {
 	tests := []struct {
 		name              string
 		deleteAuthProfile *authprofilesmodels.IdsecIdentityDeleteAuthProfile
@@ -549,7 +549,7 @@ func TestDeleteAuthProfile(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			err = service.DeleteAuthProfile(tt.deleteAuthProfile)
+			err = service.Delete(tt.deleteAuthProfile)
 
 			if tt.expectedError {
 				if err == nil {
@@ -565,7 +565,7 @@ func TestDeleteAuthProfile(t *testing.T) {
 	}
 }
 
-func TestListAuthProfiles(t *testing.T) {
+func TestList(t *testing.T) {
 	tests := []struct {
 		name                string
 		mockPostResponse    *http.Response
@@ -617,7 +617,7 @@ func TestListAuthProfiles(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			result, err := service.ListAuthProfiles()
+			result, err := service.List()
 
 			if tt.expectedError {
 				if err == nil {
@@ -638,7 +638,7 @@ func TestListAuthProfiles(t *testing.T) {
 	}
 }
 
-func TestListAuthProfilesBy(t *testing.T) {
+func TestListBy(t *testing.T) {
 	tests := []struct {
 		name                string
 		filters             *authprofilesmodels.IdsecIdentityAuthProfilesFilters
@@ -686,7 +686,7 @@ func TestListAuthProfilesBy(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			result, err := service.ListAuthProfilesBy(tt.filters)
+			result, err := service.ListBy(tt.filters)
 
 			if tt.expectedError {
 				if err == nil {
@@ -707,7 +707,7 @@ func TestListAuthProfilesBy(t *testing.T) {
 	}
 }
 
-func TestAuthProfilesStats(t *testing.T) {
+func TestStats(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -751,7 +751,7 @@ func TestAuthProfilesStats(t *testing.T) {
 			}
 			service.DoPost = MockPostFunc(tt.mockPostResponse, tt.mockPostError)
 
-			result, err := service.AuthProfilesStats()
+			result, err := service.Stats()
 
 			if tt.expectedError {
 				if err == nil {

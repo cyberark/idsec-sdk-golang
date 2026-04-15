@@ -50,10 +50,8 @@ type IdsecIdentityUsersPage = common.IdsecPage[usersmodels.IdsecIdentityUser]
 
 // IdsecIdentityUsersService is the service for managing identity users.
 type IdsecIdentityUsersService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth            *auth.IdsecISPAuth
-	client             *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 	DirectoriesService *directories.IdsecIdentityDirectoriesService
 
 	DoPost               func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -74,24 +72,27 @@ func NewIdsecIdentityUsersService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityUsersService.refreshIdentityUsersAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityUsersService.refreshIdentityUsersAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
 
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
-	identityUsersService.client = client
-	identityUsersService.ispAuth = ispAuth
 	identityUsersService.IdsecBaseService = baseService
+	identityUsersService.IdsecISPBaseService = ispBaseService
 	identityUsersService.DirectoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
 	if err != nil {
 		return nil, err
@@ -103,25 +104,25 @@ func (s *IdsecIdentityUsersService) postOperation() func(ctx context.Context, pa
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityUsersService) redrockQueryPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoRedrockQueryPost != nil {
 		return s.DoRedrockQueryPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityUsersService) userAttributesPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoUserAttributesPost != nil {
 		return s.DoUserAttributesPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityUsersService) refreshIdentityUsersAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -174,8 +175,8 @@ func (s *IdsecIdentityUsersService) setUserState(userID string, state string) er
 	return nil
 }
 
-// CreateUser creates a new user in the identity service.
-func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIdentityCreateUser) (*usersmodels.IdsecIdentityUser, error) {
+// Create creates a new user in the identity service.
+func (s *IdsecIdentityUsersService) Create(createUser *usersmodels.IdsecIdentityCreateUser) (*usersmodels.IdsecIdentityUser, error) {
 	if createUser.Username == "" {
 		return nil, fmt.Errorf("username is required")
 	}
@@ -295,7 +296,7 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 		}
 		s.Logger.Info("User state set to [%s] successfully", createUser.State)
 	}
-	user, err := s.User(&usersmodels.IdsecIdentityGetUser{UserID: userID})
+	user, err := s.Get(&usersmodels.IdsecIdentityGetUser{UserID: userID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve created user details - [%v]", err)
 	}
@@ -303,8 +304,8 @@ func (s *IdsecIdentityUsersService) CreateUser(createUser *usersmodels.IdsecIden
 	return user, nil
 }
 
-// UpdateUser updates an existing user in the identity service.
-func (s *IdsecIdentityUsersService) UpdateUser(updateUser *usersmodels.IdsecIdentityUpdateUser) (*usersmodels.IdsecIdentityUser, error) {
+// Update updates an existing user in the identity service.
+func (s *IdsecIdentityUsersService) Update(updateUser *usersmodels.IdsecIdentityUpdateUser) (*usersmodels.IdsecIdentityUser, error) {
 	s.Logger.Info("Updating identity user [%s]", updateUser.UserID)
 	updateMap := make(map[string]interface{})
 	if updateUser.Username != "" {
@@ -387,11 +388,11 @@ func (s *IdsecIdentityUsersService) UpdateUser(updateUser *usersmodels.IdsecIden
 		}
 		s.Logger.Info("User state updated to [%s] successfully", updateUser.State)
 	}
-	return s.User(&usersmodels.IdsecIdentityGetUser{UserID: updateUser.UserID})
+	return s.Get(&usersmodels.IdsecIdentityGetUser{UserID: updateUser.UserID})
 }
 
-// DeleteUser deletes an existing user in the identity service.
-func (s *IdsecIdentityUsersService) DeleteUser(deleteUser *usersmodels.IdsecIdentityDeleteUser) error {
+// Delete deletes an existing user in the identity service.
+func (s *IdsecIdentityUsersService) Delete(deleteUser *usersmodels.IdsecIdentityDeleteUser) error {
 	s.Logger.Info("Deleting identity user [%s]", deleteUser.Username)
 	if deleteUser.Username == "" && deleteUser.UserID == "" {
 		return fmt.Errorf("userID or username is required")
@@ -491,7 +492,7 @@ func (s *IdsecIdentityUsersService) userMgmtAttributes(directoryServiceID string
 }
 
 // User retrieves the user by username.
-func (s *IdsecIdentityUsersService) User(user *usersmodels.IdsecIdentityGetUser) (*usersmodels.IdsecIdentityUser, error) {
+func (s *IdsecIdentityUsersService) Get(user *usersmodels.IdsecIdentityGetUser) (*usersmodels.IdsecIdentityUser, error) {
 	s.Logger.Info("Getting identity user by name [%s]", user.Username)
 	if user.Username == "" && user.UserID == "" {
 		return nil, fmt.Errorf("username or userID is required")
@@ -577,7 +578,7 @@ func (s *IdsecIdentityUsersService) User(user *usersmodels.IdsecIdentityGetUser)
 		mgmtChan <- mgmtResult{attributes: attrs, err: err}
 	}()
 	go func() {
-		attrs, err := s.UserAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: userID})
+		attrs, err := s.GetAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: userID})
 		customChan <- customResult{attributes: attrs, err: err}
 	}()
 
@@ -738,9 +739,9 @@ func (s *IdsecIdentityUsersService) listUsers(pageSize int, limit int, pageNumbe
 	return output, nil
 }
 
-// ListUsers retrieves users with pagination using channels.
+// List retrieves users with pagination using channels.
 //
-// ListUsers queries the identity service for users matching the provided criteria
+// List queries the identity service for users matching the provided criteria
 // and returns a channel that yields pages of users. The function supports pagination
 // with configurable page size and limits.
 //
@@ -752,7 +753,7 @@ func (s *IdsecIdentityUsersService) listUsers(pageSize int, limit int, pageNumbe
 //
 // Example:
 //
-//	pages, err := service.ListUsers(&usersmodels.IdsecIdentityListUsers{
+//	pages, err := service.List(&usersmodels.IdsecIdentityListUsers{
 //	    Search: "john",
 //	    PageSize: 100,
 //	})
@@ -764,13 +765,13 @@ func (s *IdsecIdentityUsersService) listUsers(pageSize int, limit int, pageNumbe
 //	        fmt.Printf("User: %s\n", user.Username)
 //	    }
 //	}
-func (s *IdsecIdentityUsersService) ListUsers() (<-chan *IdsecIdentityUsersPage, error) {
+func (s *IdsecIdentityUsersService) List() (<-chan *IdsecIdentityUsersPage, error) {
 	return s.listUsers(defaultPageSize, defaultLimit, 1, -1, "")
 }
 
-// ListUsersBy retrieves users based on the provided filters with pagination using channels.
+// ListBy retrieves users based on the provided filters with pagination using channels.
 //
-// ListUsersBy queries the identity service for users matching the provided filters
+// ListBy queries the identity service for users matching the provided filters
 // and returns a channel that yields pages of users. The function supports pagination
 // with configurable page size, limits, and search criteria.
 //
@@ -783,7 +784,7 @@ func (s *IdsecIdentityUsersService) ListUsers() (<-chan *IdsecIdentityUsersPage,
 //
 // Example:
 //
-//	pages, err := service.ListUsersBy(&usersmodels.IdsecIdentityUserFilters{
+//	pages, err := service.ListBy(&usersmodels.IdsecIdentityUserFilters{
 //	    Search: "john",
 //	    PageSize: 100,
 //	    Limit: 500,
@@ -798,14 +799,14 @@ func (s *IdsecIdentityUsersService) ListUsers() (<-chan *IdsecIdentityUsersPage,
 //	        fmt.Printf("User: %s\n", user.Username)
 //	    }
 //	}
-func (s *IdsecIdentityUsersService) ListUsersBy(userFilters *usersmodels.IdsecIdentityUserFilters) (<-chan *IdsecIdentityUsersPage, error) {
+func (s *IdsecIdentityUsersService) ListBy(userFilters *usersmodels.IdsecIdentityUserFilters) (<-chan *IdsecIdentityUsersPage, error) {
 	return s.listUsers(userFilters.PageSize, userFilters.Limit, userFilters.PageNumber, userFilters.MaxPageCount, userFilters.Search)
 }
 
-// ResetUserPassword resets the password for an existing user in the identity service.
-func (s *IdsecIdentityUsersService) ResetUserPassword(resetUserPassword *usersmodels.IdsecIdentityResetUserPassword) error {
+// ResetPassword resets the password for an existing user in the identity service.
+func (s *IdsecIdentityUsersService) ResetPassword(resetUserPassword *usersmodels.IdsecIdentityResetUserPassword) error {
 	s.Logger.Info("Resetting identity user password [%s]", resetUserPassword.Username)
-	user, err := s.User(&usersmodels.IdsecIdentityGetUser{Username: resetUserPassword.Username})
+	user, err := s.Get(&usersmodels.IdsecIdentityGetUser{Username: resetUserPassword.Username})
 	if err != nil {
 		return err
 	}
@@ -837,8 +838,8 @@ func (s *IdsecIdentityUsersService) ResetUserPassword(resetUserPassword *usersmo
 	return nil
 }
 
-// UserInfo retrieves the user info from the identity service.
-func (s *IdsecIdentityUsersService) UserInfo() (*usersmodels.IdsecIdentityUserInfo, error) {
+// Info retrieves the user info from the identity service.
+func (s *IdsecIdentityUsersService) Info() (*usersmodels.IdsecIdentityUserInfo, error) {
 	s.Logger.Info("Getting identity user info")
 	userInfoMap := map[string]interface{}{
 		"Scopes": []string{"userInfo"},
@@ -868,10 +869,10 @@ func (s *IdsecIdentityUsersService) UserInfo() (*usersmodels.IdsecIdentityUserIn
 	return &userInfo, nil
 }
 
-// UsersStats retrieves statistics about users in the identity service.
-func (s *IdsecIdentityUsersService) UsersStats() (*usersmodels.IdsecIdentityUsersStats, error) {
+// Stats retrieves statistics about users in the identity service.
+func (s *IdsecIdentityUsersService) Stats() (*usersmodels.IdsecIdentityUsersStats, error) {
 	s.Logger.Info("Getting identity users stats")
-	pages, err := s.ListUsers()
+	pages, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -901,7 +902,7 @@ func (s *IdsecIdentityUsersService) UsersStats() (*usersmodels.IdsecIdentityUser
 //	for _, column := range columns {
 //	    fmt.Printf("Column: %s (Type: %s)\n", column.Name, column.Type)
 //	}
-func (s *IdsecIdentityUsersService) UserAttributesSchema() (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
+func (s *IdsecIdentityUsersService) AttributesSchema() (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
 	s.Logger.Info("Getting user attribute schema")
 	getSchemaBody := map[string]interface{}{
 		"Table": "users",
@@ -985,14 +986,14 @@ func (s *IdsecIdentityUsersService) UserAttributesSchema() (*usersmodels.IdsecId
 //	        },
 //	    },
 //	})
-func (s *IdsecIdentityUsersService) UpsertUserAttributesSchema(createSchemaColumns *usersmodels.IdsecIdentityUpsertUserAttributesSchema) (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
+func (s *IdsecIdentityUsersService) UpsertAttributesSchema(createSchemaColumns *usersmodels.IdsecIdentityUpsertUserAttributesSchema) (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
 	s.Logger.Info("Upserting user attribute schema")
 
 	if len(createSchemaColumns.Columns) == 0 {
 		return nil, fmt.Errorf("at least one column is required")
 	}
 
-	existingSchema, err := s.UserAttributesSchema()
+	existingSchema, err := s.AttributesSchema()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get existing schema: %w", err)
 	}
@@ -1043,7 +1044,7 @@ func (s *IdsecIdentityUsersService) UpsertUserAttributesSchema(createSchemaColum
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to upsert user attribute schema - [%v]", result)
 	}
-	return s.UserAttributesSchema()
+	return s.AttributesSchema()
 }
 
 // DeleteUserAttributesSchema deletes user attribute schema columns from the identity service.
@@ -1062,7 +1063,7 @@ func (s *IdsecIdentityUsersService) UpsertUserAttributesSchema(createSchemaColum
 //	err := service.DeleteAttributesSchema(&usersmodels.IdsecIdentityDeleteUserAttributesSchemaColumns{
 //	    ColumnNames: []string{"CustomAtt_1", "CustomAtt_2"},
 //	})
-func (s *IdsecIdentityUsersService) DeleteUserAttributesSchema(deleteSchemaColumns *usersmodels.IdsecIdentityDeleteUserAttributesSchema) (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
+func (s *IdsecIdentityUsersService) DeleteAttributesSchema(deleteSchemaColumns *usersmodels.IdsecIdentityDeleteUserAttributesSchema) (*usersmodels.IdsecIdentityUserAttributesSchema, error) {
 	s.Logger.Info("Deleting user attribute schema")
 	columnNames := make([]string, 0)
 	if deleteSchemaColumns.ColumnNames != nil {
@@ -1077,7 +1078,7 @@ func (s *IdsecIdentityUsersService) DeleteUserAttributesSchema(deleteSchemaColum
 		return nil, fmt.Errorf("at least one column name is required")
 	}
 
-	existingSchema, err := s.UserAttributesSchema()
+	existingSchema, err := s.AttributesSchema()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get existing schema: %w", err)
 	}
@@ -1124,7 +1125,7 @@ func (s *IdsecIdentityUsersService) DeleteUserAttributesSchema(deleteSchemaColum
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to delete user attribute schema - [%v]", result)
 	}
-	return s.UserAttributesSchema()
+	return s.AttributesSchema()
 }
 
 // UserAttributes retrieves user attributes for a given user ID from the identity service.
@@ -1149,7 +1150,7 @@ func (s *IdsecIdentityUsersService) DeleteUserAttributesSchema(deleteSchemaColum
 //	for key, value := range attributes.Attributes {
 //	    fmt.Printf("Attribute: %s = %v\n", key, value)
 //	}
-func (s *IdsecIdentityUsersService) UserAttributes(getUserAttributes *usersmodels.IdsecIdentityGetUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
+func (s *IdsecIdentityUsersService) GetAttributes(getUserAttributes *usersmodels.IdsecIdentityGetUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
 	s.Logger.Info("Getting identity user attributes for user [%s]", getUserAttributes.UserID)
 	attributesMap := map[string]interface{}{
 		"Table": "users",
@@ -1217,9 +1218,9 @@ func (s *IdsecIdentityUsersService) UserAttributes(getUserAttributes *usersmodel
 //	for key, value := range updatedAttributes.Attributes {
 //	    fmt.Printf("Attribute: %s = %v\n", key, value)
 //	}
-func (s *IdsecIdentityUsersService) UpsertUserAttributes(upsertUserAttributes *usersmodels.IdsecIdentityUpsertUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
+func (s *IdsecIdentityUsersService) UpsertAttributes(upsertUserAttributes *usersmodels.IdsecIdentityUpsertUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
 	s.Logger.Info("Upserting identity user attributes for user [%s]", upsertUserAttributes.UserID)
-	existingAttributes, err := s.UserAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: upsertUserAttributes.UserID})
+	existingAttributes, err := s.GetAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: upsertUserAttributes.UserID})
 	if err != nil {
 		return nil, err
 	}
@@ -1255,7 +1256,7 @@ func (s *IdsecIdentityUsersService) UpsertUserAttributes(upsertUserAttributes *u
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to upsert user attributes - [%v]", result)
 	}
-	return s.UserAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: upsertUserAttributes.UserID})
+	return s.GetAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: upsertUserAttributes.UserID})
 }
 
 // DeleteUserAttributes deletes user attributes for a given user ID in the identity service.
@@ -1281,9 +1282,9 @@ func (s *IdsecIdentityUsersService) UpsertUserAttributes(upsertUserAttributes *u
 //	for key, value := range updatedAttributes.Attributes {
 //	    fmt.Printf("Attribute: %s = %v\n", key, value)
 //	}
-func (s *IdsecIdentityUsersService) DeleteUserAttributes(deleteUserAttributes *usersmodels.IdsecIdentityDeleteUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
+func (s *IdsecIdentityUsersService) DeleteAttributes(deleteUserAttributes *usersmodels.IdsecIdentityDeleteUserAttributes) (*usersmodels.IdsecIdentityUserAttributes, error) {
 	s.Logger.Info("Deleting identity user attributes for user [%s]", deleteUserAttributes.UserID)
-	existingAttributes, err := s.UserAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: deleteUserAttributes.UserID})
+	existingAttributes, err := s.GetAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: deleteUserAttributes.UserID})
 	if err != nil {
 		return nil, err
 	}
@@ -1322,7 +1323,7 @@ func (s *IdsecIdentityUsersService) DeleteUserAttributes(deleteUserAttributes *u
 	if res, ok := result["success"].(bool); !ok || !res {
 		return nil, fmt.Errorf("failed to delete user attributes - [%v]", result)
 	}
-	return s.UserAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: deleteUserAttributes.UserID})
+	return s.GetAttributes(&usersmodels.IdsecIdentityGetUserAttributes{UserID: deleteUserAttributes.UserID})
 }
 
 // ServiceConfig returns the service configuration for the IdsecIdentityUsersService.

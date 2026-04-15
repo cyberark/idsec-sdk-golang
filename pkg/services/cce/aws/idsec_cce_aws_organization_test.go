@@ -113,6 +113,12 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 				"errors": []
 			}
 		],
+		"parameters": {
+			"sca": {
+				"ssoEnabled": true,
+				"ssoRegion": "us-east-1"
+			}
+		},
 		"display_name": "Test Organization",
 		"status": "Completely added"
 	}`
@@ -160,6 +166,17 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 	require.Equal(t, "Completely added", result.ServicesData[0].Status)
 	require.Equal(t, "sca", result.ServicesData[1].Name)
 	require.Equal(t, "Completely added", result.ServicesData[1].Status)
+
+	// Verify parameters field (keys are snake_case due to DeserializeJSONSnake)
+	require.NotNil(t, result.Parameters, "Parameters should not be nil")
+	require.Contains(t, result.Parameters, "sca", "Parameters should contain 'sca' key")
+	scaParams, ok := result.Parameters["sca"]
+	require.True(t, ok, "Should be able to get 'sca' parameters")
+	require.NotNil(t, scaParams, "SCA parameters map should not be nil")
+
+	// Note: DeserializeJSONSnake converts camelCase to snake_case
+	require.Equal(t, true, scaParams["sso_enabled"])
+	require.Equal(t, "us-east-1", scaParams["sso_region"])
 }
 
 func TestOrganizationDatasource_ErrorPropagation(t *testing.T) {
@@ -193,10 +210,15 @@ func TestAddOrganization_Success(t *testing.T) {
 				"organization_id": "o-abc123def456",
 				"onboarding_type": "programmatic",
 				"region": "us-east-1",
-				"service_names": ["dpa"],
+				"service_names": ["dpa", "sca"],
 				"services_data": [
 					{
 						"name": "dpa",
+						"status": "Completely added",
+						"errors": []
+					},
+					{
+						"name": "sca",
 						"status": "Completely added",
 						"errors": []
 					}
@@ -211,7 +233,7 @@ func TestAddOrganization_Success(t *testing.T) {
 	service := setupAWSService(client)
 	displayName := "Test Organization"
 
-	// Call the AddOrganization function
+	// Call the AddOrganization function with DPA (no params) and SCA (with serviceParameters)
 	result, err := service.TfAddOrganization(&awsmodels.TfIdsecCCEAWSAddOrganization{
 		OrganizationRootID:  "r-abc123",
 		ManagementAccountID: "123456789012",
@@ -222,6 +244,18 @@ func TestAddOrganization_Success(t *testing.T) {
 				Resources: map[string]interface{}{
 					"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole",
 				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRole",
+				},
+			},
+		},
+		ServiceParameters: map[string]map[string]interface{}{
+			"sca": {
+				"ssoEnabled": true,
+				"ssoRegion":  "us-east-1",
 			},
 		},
 		OrganizationDisplayName:    displayName,
@@ -447,4 +481,126 @@ func TestUpdateOrganization_ErrorPropagation(t *testing.T) {
 		})
 		return err
 	})
+}
+
+func TestUpdateOrganization_WithServiceParameters(t *testing.T) {
+	region := "us-east-1"
+	displayName := "Test Organization"
+	status := ccemodels.CompletelyAdded
+
+	// First response: GET current organization with only DPA
+	currentOrganizationJSON := `{
+		"id": "org123abc456def789",
+		"organization_root_id": "r-abc123",
+		"management_account_id": "123456789012",
+		"organization_id": "o-abc123def456",
+		"onboarding_type": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["dpa"],
+		"services_data": [
+			{
+				"name": "dpa",
+				"status": "Completely added",
+				"errors": []
+			}
+		],
+		"display_name": "Test Organization",
+		"status": "Completely added"
+	}`
+
+	// Second response: POST add SCA service with parameters
+	addServicesResponse := `{}`
+
+	// Third response: GET updated organization with DPA and SCA
+	updatedOrganizationJSON := `{
+		"id": "org123abc456def789",
+		"organization_root_id": "r-abc123",
+		"management_account_id": "123456789012",
+		"organization_id": "o-abc123def456",
+		"onboarding_type": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["dpa", "sca"],
+		"services_data": [
+			{
+				"name": "dpa",
+				"status": "Completely added",
+				"errors": []
+			},
+			{
+				"name": "sca",
+				"status": "Completely added",
+				"errors": []
+			}
+		],
+		"display_name": "Test Organization",
+		"status": "Completely added"
+	}`
+
+	getCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				// Match first GET request to organization endpoint
+				if r.Method == "GET" && strings.Contains(r.URL.Path, "org123abc456def789") && getCallCount == 0 {
+					getCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: currentOrganizationJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				// Match POST to services endpoint (adding SCA with parameters)
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: addServicesResponse,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				// Match subsequent GET requests
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "org123abc456def789") && getCallCount > 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: updatedOrganizationJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Call UpdateOrganization - keeping DPA (no params), adding SCA with serviceParameters
+	result, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID: "org123abc456def789",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]any{
+					"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]any{
+					"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRole",
+				},
+			},
+		},
+		ServiceParameters: map[string]map[string]interface{}{
+			"sca": {
+				"ssoEnabled": true,
+				"ssoRegion":  "us-east-1",
+			},
+		},
+	})
+
+	// Assertions
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "org123abc456def789", result.ID)
+	require.Equal(t, region, result.Region)
+	require.Equal(t, displayName, result.DisplayName)
+	require.Equal(t, status, result.Status)
 }

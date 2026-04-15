@@ -197,7 +197,7 @@ const (
 	}`
 )
 
-func TestCreatePolicy(t *testing.T) {
+func TestCreate(t *testing.T) {
 	tests := []struct {
 		name               string
 		createPolicy       *policymodels.IdsecIdentityCreatePolicy
@@ -403,7 +403,7 @@ func TestCreatePolicy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.CreatePolicy(tt.createPolicy)
+			result, err := service.Create(tt.createPolicy)
 
 			if tt.expectedError {
 				if err == nil {
@@ -424,7 +424,7 @@ func TestCreatePolicy(t *testing.T) {
 	}
 }
 
-func TestUpdatePolicy(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	tests := []struct {
 		name               string
 		updatePolicy       *policymodels.IdsecIdentityUpdatePolicy
@@ -590,7 +590,7 @@ func TestUpdatePolicy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.UpdatePolicy(tt.updatePolicy)
+			result, err := service.Update(tt.updatePolicy)
 
 			if tt.expectedError {
 				if err == nil {
@@ -611,7 +611,7 @@ func TestUpdatePolicy(t *testing.T) {
 	}
 }
 
-func TestDeletePolicy(t *testing.T) {
+func TestDelete(t *testing.T) {
 	tests := []struct {
 		name             string
 		deletePolicy     *policymodels.IdsecIdentityDeletePolicy
@@ -690,7 +690,7 @@ func TestDeletePolicy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			err = service.DeletePolicy(tt.deletePolicy)
+			err = service.Delete(tt.deletePolicy)
 
 			if tt.expectedError {
 				if err == nil {
@@ -706,7 +706,7 @@ func TestDeletePolicy(t *testing.T) {
 	}
 }
 
-func TestPolicy(t *testing.T) {
+func TestGet(t *testing.T) {
 	tests := []struct {
 		name               string
 		getPolicy          *policymodels.IdsecIdentityGetPolicy
@@ -827,7 +827,7 @@ func TestPolicy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.Policy(tt.getPolicy)
+			result, err := service.Get(tt.getPolicy)
 
 			if tt.expectedError {
 				if err == nil {
@@ -848,7 +848,7 @@ func TestPolicy(t *testing.T) {
 	}
 }
 
-func TestListPolicies(t *testing.T) {
+func TestList(t *testing.T) {
 	tests := []struct {
 		name                string
 		mockPostResponse    *http.Response
@@ -917,7 +917,7 @@ func TestListPolicies(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ListPolicies()
+			result, err := service.List()
 
 			if tt.expectedError {
 				if err == nil {
@@ -938,7 +938,7 @@ func TestListPolicies(t *testing.T) {
 	}
 }
 
-func TestListPoliciesBy(t *testing.T) {
+func TestListBy(t *testing.T) {
 	tests := []struct {
 		name                string
 		filters             *policymodels.IdsecIdentityPoliciesFilters
@@ -1022,7 +1022,7 @@ func TestListPoliciesBy(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.ListPoliciesBy(tt.filters)
+			result, err := service.ListBy(tt.filters)
 
 			if tt.expectedError {
 				if err == nil {
@@ -1043,7 +1043,7 @@ func TestListPoliciesBy(t *testing.T) {
 	}
 }
 
-func TestPoliciesStats(t *testing.T) {
+func TestStats(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockPostResponse *http.Response
@@ -1110,7 +1110,7 @@ func TestPoliciesStats(t *testing.T) {
 				tt.setupMock(service)
 			}
 
-			result, err := service.PoliciesStats()
+			result, err := service.Stats()
 
 			if tt.expectedError {
 				if err == nil {

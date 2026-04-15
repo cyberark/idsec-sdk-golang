@@ -9,9 +9,9 @@ type IdsecSecHubSetSecretStoresState struct {
 // IdsecSecHubSetSecretStoresStateResults represents the individual object for each secret store for which
 // the secret store state was set
 type IdsecSecHubSetSecretStoresStateResults struct {
-	SecretStoreID string `json:"secret_store_id" mapstructure:"secret_store_id"`
-	Result        string `json:"result" mapstructure:"result"`
-	ErrorMessage  string `json:"error_message" mapstructure:"error_message"`
+	ID           string `json:"id" mapstructure:"id"`
+	Result       string `json:"result" mapstructure:"result"`
+	ErrorMessage string `json:"error_message" mapstructure:"error_message"`
 }
 
 // IdsecSecHubSetSecretStoresStateResponse is the outer object which contains the indvidual secret store state

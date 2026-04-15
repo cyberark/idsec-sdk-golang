@@ -5,9 +5,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/mem"
 )
 
 func TestNewIdsecOSMetricsCollector(t *testing.T) {
@@ -46,49 +43,13 @@ func TestIdsecOSMetricsCollector_CollectMetrics(t *testing.T) {
 	}{
 		{
 			name:             "success_collects_all_os_metrics",
-			expectedMinCount: 5, // os_name, arch, cpu_count, go_version, timezone
+			expectedMinCount: 4, // os_name, arch, go_version, timezone
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				if metrics.Collector != "os_metrics" {
 					t.Errorf("Expected collector name 'os_metrics', got '%s'", metrics.Collector)
 				}
 				if metrics.ShortName != "om" {
 					t.Errorf("Expected short name 'om', got '%s'", metrics.ShortName)
-				}
-			},
-		},
-		{
-			name:             "success_includes_memory_total_metric",
-			expectedMinCount: 5,
-			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
-				memMetric := findMetricByName(metrics.Metrics, "memory_total")
-				if memMetric == nil {
-					t.Error("Expected to find 'memory_total' metric")
-				} else {
-					if memMetric.ShortName != "mem" {
-						t.Errorf("Expected memory_total short name 'mem', got '%s'", memMetric.ShortName)
-					}
-					// Memory value could be uint64 or "unknown"
-					if memMetric.Value == nil {
-						t.Error("Expected memory_total to have non-nil value")
-					}
-				}
-			},
-		},
-		{
-			name:             "success_includes_disk_total_metric",
-			expectedMinCount: 5,
-			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
-				diskMetric := findMetricByName(metrics.Metrics, "disk_total")
-				if diskMetric == nil {
-					t.Error("Expected to find 'disk_total' metric")
-				} else {
-					if diskMetric.ShortName != "disk" {
-						t.Errorf("Expected disk_total short name 'disk', got '%s'", diskMetric.ShortName)
-					}
-					// Disk value could be uint64 or "unknown"
-					if diskMetric.Value == nil {
-						t.Error("Expected disk_total to have non-nil value")
-					}
 				}
 			},
 		},
@@ -160,21 +121,6 @@ func TestIdsecOSMetricsCollector_CollectMetrics_AllMetricsPresent(t *testing.T) 
 			},
 		},
 		{
-			name:               "success_cpu_count_metric_present",
-			expectedMetricName: "cpu_count",
-			expectedShortName:  "cpu",
-			validateValue: func(t *testing.T, value interface{}) {
-				cpuCount, ok := value.(int)
-				if !ok {
-					t.Error("Expected cpu_count to be int")
-					return
-				}
-				if cpuCount != runtime.NumCPU() {
-					t.Errorf("Expected cpu_count to be %d, got %d", runtime.NumCPU(), cpuCount)
-				}
-			},
-		},
-		{
 			name:               "success_go_version_metric_present",
 			expectedMetricName: "go_version",
 			expectedShortName:  "go_ver",
@@ -202,48 +148,6 @@ func TestIdsecOSMetricsCollector_CollectMetrics_AllMetricsPresent(t *testing.T) 
 				expectedTZ, _ := time.Now().Zone()
 				if timezone != expectedTZ {
 					t.Errorf("Expected timezone to be '%s', got '%s'", expectedTZ, timezone)
-				}
-			},
-		},
-		{
-			name:               "success_memory_total_metric_present",
-			expectedMetricName: "memory_total",
-			expectedShortName:  "mem",
-			validateValue: func(t *testing.T, value interface{}) {
-				// Memory value can be uint64 or "unknown"
-				switch v := value.(type) {
-				case uint64:
-					// Valid memory value
-					if v == 0 {
-						t.Error("Expected memory_total to be greater than 0")
-					}
-				case string:
-					if v != "unknown" {
-						t.Errorf("Expected memory_total string to be 'unknown', got '%s'", v)
-					}
-				default:
-					t.Errorf("Expected memory_total to be uint64 or string, got %T", value)
-				}
-			},
-		},
-		{
-			name:               "success_disk_total_metric_present",
-			expectedMetricName: "disk_total",
-			expectedShortName:  "disk",
-			validateValue: func(t *testing.T, value interface{}) {
-				// Disk value can be uint64 or "unknown"
-				switch v := value.(type) {
-				case uint64:
-					// Valid disk value
-					if v == 0 {
-						t.Error("Expected disk_total to be greater than 0")
-					}
-				case string:
-					if v != "unknown" {
-						t.Errorf("Expected disk_total string to be 'unknown', got '%s'", v)
-					}
-				default:
-					t.Errorf("Expected disk_total to be uint64 or string, got %T", value)
 				}
 			},
 		},
@@ -438,80 +342,6 @@ func TestIdsecOSMetricsCollector_ConsistentMetricCount(t *testing.T) {
 	}
 }
 
-func TestIdsecOSMetricsCollector_SystemMetricsValues(t *testing.T) {
-	tests := []struct {
-		name         string
-		validateFunc func(t *testing.T, metrics *IdsecMetrics)
-	}{
-		{
-			name: "success_memory_metric_has_valid_value",
-			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
-				memMetric := findMetricByName(metrics.Metrics, "memory_total")
-				if memMetric == nil {
-					t.Error("Expected to find memory_total metric")
-					return
-				}
-
-				// Check against actual system memory
-				vmStat, err := mem.VirtualMemory()
-				if err == nil {
-					if memValue, ok := memMetric.Value.(uint64); ok {
-						if memValue != vmStat.Total {
-							t.Errorf("Expected memory_total to match system memory %d, got %d", vmStat.Total, memValue)
-						}
-					}
-				} else {
-					if memMetric.Value != "unknown" {
-						t.Error("Expected memory_total to be 'unknown' when gopsutil fails")
-					}
-				}
-			},
-		},
-		{
-			name: "success_disk_metric_has_valid_value",
-			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
-				diskMetric := findMetricByName(metrics.Metrics, "disk_total")
-				if diskMetric == nil {
-					t.Error("Expected to find disk_total metric")
-					return
-				}
-
-				// Check against actual system disk
-				diskStat, err := disk.Usage("/")
-				if err == nil {
-					if diskValue, ok := diskMetric.Value.(uint64); ok {
-						if diskValue != diskStat.Total {
-							t.Errorf("Expected disk_total to match system disk %d, got %d", diskStat.Total, diskValue)
-						}
-					}
-				} else {
-					if diskMetric.Value != "unknown" {
-						t.Error("Expected disk_total to be 'unknown' when gopsutil fails")
-					}
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecOSMetricsCollector{}
-			metrics, err := collector.CollectMetrics()
-
-			if err != nil {
-				t.Errorf("Expected no error, got %v", err)
-				return
-			}
-
-			if tt.validateFunc != nil {
-				tt.validateFunc(t, metrics)
-			}
-		})
-	}
-}
-
 func TestIdsecOSMetricsCollector_MetricTypes(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -529,11 +359,6 @@ func TestIdsecOSMetricsCollector_MetricTypes(t *testing.T) {
 			expectedTypes: []string{"string"},
 		},
 		{
-			name:          "success_cpu_count_is_int",
-			metricName:    "cpu_count",
-			expectedTypes: []string{"int"},
-		},
-		{
 			name:          "success_go_version_is_string",
 			metricName:    "go_version",
 			expectedTypes: []string{"string"},
@@ -542,16 +367,6 @@ func TestIdsecOSMetricsCollector_MetricTypes(t *testing.T) {
 			name:          "success_timezone_is_string",
 			metricName:    "timezone",
 			expectedTypes: []string{"string"},
-		},
-		{
-			name:          "success_memory_total_is_uint64_or_string",
-			metricName:    "memory_total",
-			expectedTypes: []string{"uint64", "string"},
-		},
-		{
-			name:          "success_disk_total_is_uint64_or_string",
-			metricName:    "disk_total",
-			expectedTypes: []string{"uint64", "string"},
 		},
 	}
 

@@ -16,10 +16,24 @@ func TestSerializeTargets(t *testing.T) {
 		{
 			name: "success_serialize_all_targets",
 			target: IdsecPolicyCloudAccessCloudConsoleTarget{
-				AwsAccountTargets:      []IdsecPolicyCloudAccessAWSAccountTarget{{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r1", WorkspaceID: "w1"}}},
-				AwsOrganizationTargets: []IdsecPolicyCloudAccessAWSOrganizationTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r2", WorkspaceID: "w2"}, OrgID: "org1"}}},
-				AzureTargets:           []IdsecPolicyCloudAccessAzureTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r3", WorkspaceID: "w3"}, OrgID: "azorg"}, WorkspaceType: AzureWSTypeSubscription, RoleType: 1}},
-				GcpTargets:             []IdsecPolicyCloudAccessGCPTarget{{IdsecPolicyCloudAccessOrgTarget: IdsecPolicyCloudAccessOrgTarget{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r4", WorkspaceID: "w4"}, OrgID: "gcporg"}, WorkspaceType: GCPWSTypeProject, RolePackage: "pkg", RoleType: 2}},
+				AwsAccountTargets: []IdsecPolicyCloudAccessAWSAccountTarget{{IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r1", WorkspaceID: "w1"}}},
+				AwsOrganizationTargets: []IdsecPolicyCloudAccessAWSOrganizationTarget{{
+					IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r2", WorkspaceID: "w2"},
+					OrgID:                        "org1",
+				}},
+				AzureTargets: []IdsecPolicyCloudAccessAzureTarget{{
+					IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r3", WorkspaceID: "w3"},
+					OrgID:                        "azorg",
+					WorkspaceType:                AzureWSTypeSubscription,
+					RoleType:                     1,
+				}},
+				GcpTargets: []IdsecPolicyCloudAccessGCPTarget{{
+					IdsecPolicyCloudAccessTarget: IdsecPolicyCloudAccessTarget{RoleID: "r4", WorkspaceID: "w4"},
+					OrgID:                        "gcporg",
+					WorkspaceType:                GCPWSTypeProject,
+					RolePackage:                  "pkg",
+					RoleType:                     2,
+				}},
 			},
 			expectsLen: 4,
 			expectsErr: false,

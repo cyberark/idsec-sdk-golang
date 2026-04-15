@@ -45,10 +45,8 @@ type IdsecIdentityRolesPage = common.IdsecPage[rolesmodels.IdsecIdentityRole]
 
 // IdsecIdentityRolesService is the service for managing identity roles.
 type IdsecIdentityRolesService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth            *auth.IdsecISPAuth
-	client             *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 	DirectoriesService *directories.IdsecIdentityDirectoriesService
 
 	DoPost                      func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -69,23 +67,27 @@ func NewIdsecIdentityRolesService(authenticators ...auth.IdsecAuth) (*IdsecIdent
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "", "", "api/idadmin", identityRolesService.refreshIdentityRolesAuth)
+
+	// Create ISP base service which handles client creation
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "", "", "api/idadmin", identityRolesService.refreshIdentityRolesAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.UpdateHeaders(map[string]string{
+
+	// Update headers for identity service
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"X-IDAP-NATIVE-CLIENT": "true",
 	})
+
 	// Update identity URL accordingly
-	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, client.BaseURL)
+	baseURL, err := identitycommon.ResolveIdentityServiceURL(ispAuth, ispBaseService.ISPClient().BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 	}
-	client.BaseURL = baseURL
+	ispBaseService.ISPClient().BaseURL = baseURL
 
-	identityRolesService.client = client
-	identityRolesService.ispAuth = ispAuth
 	identityRolesService.IdsecBaseService = baseService
+	identityRolesService.IdsecISPBaseService = ispBaseService
 	identityRolesService.DirectoriesService, err = directories.NewIdsecIdentityDirectoriesService(ispAuth)
 	if err != nil {
 		return nil, err
@@ -97,25 +99,25 @@ func (s *IdsecIdentityRolesService) postOperation() func(ctx context.Context, pa
 	if s.DoPost != nil {
 		return s.DoPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityRolesService) adminRightsPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoAdminRightsPost != nil {
 		return s.DoAdminRightsPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityRolesService) directoryServiceQueryPostOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.DoDirectoryServiceQueryPost != nil {
 		return s.DoDirectoryServiceQueryPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecIdentityRolesService) refreshIdentityRolesAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -152,10 +154,10 @@ func (s *IdsecIdentityRolesService) setRoleDynamicScript(roleID string, script s
 	return nil
 }
 
-// CreateRole creates a new role in the identity service.
-func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIdentityCreateRole) (*rolesmodels.IdsecIdentityRole, error) {
+// Create creates a new role in the identity service.
+func (s *IdsecIdentityRolesService) Create(createRole *rolesmodels.IdsecIdentityCreateRole) (*rolesmodels.IdsecIdentityRole, error) {
 	s.Logger.Info("Trying to create role [%s]", createRole.RoleName)
-	role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{
+	role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{
 		RoleName: createRole.RoleName,
 	})
 	if err == nil && role != nil {
@@ -217,7 +219,7 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 		}
 	}
 	if len(createRole.AdminRights) > 0 {
-		_, err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
+		_, err = s.AddAdminRights(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
 			RoleID:      roleDetails.RoleID,
 			AdminRights: createRole.AdminRights,
 		})
@@ -229,8 +231,8 @@ func (s *IdsecIdentityRolesService) CreateRole(createRole *rolesmodels.IdsecIden
 	return roleDetails, nil
 }
 
-// AddAdminRightsToRole adds admin rights to a role in the identity service.
-func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *rolesmodels.IdsecIdentityAddAdminRightsToRole) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
+// AddAdminRights adds admin rights to a role in the identity service.
+func (s *IdsecIdentityRolesService) AddAdminRights(addAdminRightsToRole *rolesmodels.IdsecIdentityAddAdminRightsToRole) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
 	s.Logger.Info("Adding admin rights [%v] to role [%s]", addAdminRightsToRole.AdminRights, addAdminRightsToRole.RoleName)
 
 	if addAdminRightsToRole.RoleID == "" && addAdminRightsToRole.RoleName == "" {
@@ -241,7 +243,7 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 		roleID = addAdminRightsToRole.RoleID
 	} else {
 		var err error
-		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: addAdminRightsToRole.RoleName})
+		role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: addAdminRightsToRole.RoleName})
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
@@ -283,8 +285,8 @@ func (s *IdsecIdentityRolesService) AddAdminRightsToRole(addAdminRightsToRole *r
 	return roleAdminRights, nil
 }
 
-// RemoveAdminRightsFromRole removes admin rights from a role in the identity service.
-func (s *IdsecIdentityRolesService) RemoveAdminRightsFromRole(removeAdminRightsFromRole *rolesmodels.IdsecIdentityRemoveAdminRightsToRole) error {
+// RemoveAdminRights removes admin rights from a role in the identity service.
+func (s *IdsecIdentityRolesService) RemoveAdminRights(removeAdminRightsFromRole *rolesmodels.IdsecIdentityRemoveAdminRightsToRole) error {
 	s.Logger.Info("Removing admin rights [%v] from role [%s]", removeAdminRightsFromRole.AdminRights, removeAdminRightsFromRole.RoleName)
 
 	if removeAdminRightsFromRole.RoleID == "" && removeAdminRightsFromRole.RoleName == "" {
@@ -295,7 +297,7 @@ func (s *IdsecIdentityRolesService) RemoveAdminRightsFromRole(removeAdminRightsF
 		roleID = removeAdminRightsFromRole.RoleID
 	} else {
 		var err error
-		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: removeAdminRightsFromRole.RoleName})
+		role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: removeAdminRightsFromRole.RoleName})
 		if err != nil {
 			return fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
@@ -333,9 +335,9 @@ func (s *IdsecIdentityRolesService) RemoveAdminRightsFromRole(removeAdminRightsF
 	return nil
 }
 
-// RoleAdminRights retrieves a role's admin rights in the identity service.
-func (s *IdsecIdentityRolesService) RoleAdminRights(getRoleAdminRights *rolesmodels.IdsecIdentityGetRoleAdminRights) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
-	role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{
+// GetAdminRights retrieves a role's admin rights in the identity service.
+func (s *IdsecIdentityRolesService) GetAdminRights(getRoleAdminRights *rolesmodels.IdsecIdentityGetRoleAdminRights) (*rolesmodels.IdsecIdentityRoleAdminRights, error) {
+	role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{
 		RoleID:   getRoleAdminRights.RoleID,
 		RoleName: getRoleAdminRights.RoleName,
 	})
@@ -350,10 +352,10 @@ func (s *IdsecIdentityRolesService) RoleAdminRights(getRoleAdminRights *rolesmod
 	return roleAdminRights, nil
 }
 
-// UpdateRole updates an existing role in the identity service.
-func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIdentityUpdateRole) (*rolesmodels.IdsecIdentityRole, error) {
+// Update updates an existing role in the identity service.
+func (s *IdsecIdentityRolesService) Update(updateRole *rolesmodels.IdsecIdentityUpdateRole) (*rolesmodels.IdsecIdentityRole, error) {
 	if updateRole.RoleName != "" && updateRole.RoleID == "" {
-		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: updateRole.RoleName})
+		role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: updateRole.RoleName})
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
@@ -391,7 +393,7 @@ func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIden
 		return nil, fmt.Errorf("failed to update role - [%v]", result)
 	}
 	s.Logger.Info("Role updated successfully")
-	role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleID: updateRole.RoleID})
+	role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleID: updateRole.RoleID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve updated role: %v", err)
 	}
@@ -402,14 +404,14 @@ func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIden
 		}
 	}
 	if len(updateRole.AdminRights) > 0 {
-		err = s.RemoveAdminRightsFromRole(&rolesmodels.IdsecIdentityRemoveAdminRightsToRole{
+		err = s.RemoveAdminRights(&rolesmodels.IdsecIdentityRemoveAdminRightsToRole{
 			RoleID:      updateRole.RoleID,
 			AdminRights: updateRole.AdminRights,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to remove admin rights from role: %v", err)
 		}
-		_, err = s.AddAdminRightsToRole(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
+		_, err = s.AddAdminRights(&rolesmodels.IdsecIdentityAddAdminRightsToRole{
 			RoleID:      updateRole.RoleID,
 			AdminRights: updateRole.AdminRights,
 		})
@@ -421,11 +423,11 @@ func (s *IdsecIdentityRolesService) UpdateRole(updateRole *rolesmodels.IdsecIden
 	return role, nil
 }
 
-// DeleteRole deletes a role in the identity service.
-func (s *IdsecIdentityRolesService) DeleteRole(deleteRole *rolesmodels.IdsecIdentityDeleteRole) error {
+// Delete deletes a role in the identity service.
+func (s *IdsecIdentityRolesService) Delete(deleteRole *rolesmodels.IdsecIdentityDeleteRole) error {
 	s.Logger.Info("Deleting role [%s]", deleteRole.RoleName)
 	if deleteRole.RoleName != "" && deleteRole.RoleID == "" {
-		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: deleteRole.RoleName})
+		role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: deleteRole.RoleName})
 		if err != nil {
 			return fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
@@ -475,7 +477,7 @@ func (s *IdsecIdentityRolesService) listRolesBy(search string, pageSize int, lim
 
 	go func() {
 		defer close(output)
-		foundEntitiesChan, err := s.DirectoriesService.ListDirectoriesEntities(
+		foundEntitiesChan, err := s.DirectoriesService.ListEntities(
 			&directoriesmodels.IdsecIdentityListDirectoriesEntities{
 				Directories:  []string{identity.Identity},
 				EntityTypes:  []string{directoriesmodels.EntityTypeRole},
@@ -529,20 +531,20 @@ func (s *IdsecIdentityRolesService) listRolesBy(search string, pageSize int, lim
 	return output, nil
 }
 
-// ListRoles retrieves all roles in the identity service.
-func (s *IdsecIdentityRolesService) ListRoles() (<-chan *IdsecIdentityRolesPage, error) {
+// List retrieves all roles in the identity service.
+func (s *IdsecIdentityRolesService) List() (<-chan *IdsecIdentityRolesPage, error) {
 	s.Logger.Info("Listing all identity roles")
 	return s.listRolesBy("", 0, 0, 0, nil)
 }
 
-// ListRolesBy retrieves roles in the identity service based on filters.
-func (s *IdsecIdentityRolesService) ListRolesBy(filters *rolesmodels.IdsecIdentityRolesFilter) (<-chan *IdsecIdentityRolesPage, error) {
+// ListBy retrieves roles in the identity service based on filters.
+func (s *IdsecIdentityRolesService) ListBy(filters *rolesmodels.IdsecIdentityRolesFilter) (<-chan *IdsecIdentityRolesPage, error) {
 	s.Logger.Info("Listing identity roles by filters")
 	return s.listRolesBy(filters.Search, filters.PageSize, filters.Limit, filters.MaxPageCount, filters.AdminRights)
 }
 
-// Role retrieves a specific role in the identity service.
-func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRole) (*rolesmodels.IdsecIdentityRole, error) {
+// Get retrieves a specific role in the identity service.
+func (s *IdsecIdentityRolesService) Get(getRole *rolesmodels.IdsecIdentityGetRole) (*rolesmodels.IdsecIdentityRole, error) {
 	if getRole.RoleName == "" && getRole.RoleID == "" {
 		return nil, fmt.Errorf("either role ID or role name must be given")
 	}
@@ -551,7 +553,7 @@ func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRo
 		searchRoleItem = getRole.RoleID
 	}
 	s.Logger.Info("Retrieving role ID for name [%s]", searchRoleItem)
-	foundDirectories, err := s.DirectoriesService.ListDirectories(&directoriesmodels.IdsecIdentityListDirectories{
+	foundDirectories, err := s.DirectoriesService.List(&directoriesmodels.IdsecIdentityListDirectories{
 		Directories: []string{identity.Identity},
 	})
 	if err != nil {
@@ -614,10 +616,10 @@ func (s *IdsecIdentityRolesService) Role(getRole *rolesmodels.IdsecIdentityGetRo
 	}, nil
 }
 
-// RolesStats retrieves statistics about roles in the identity service.
-func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRolesStats, error) {
+// Stats retrieves statistics about roles in the identity service.
+func (s *IdsecIdentityRolesService) Stats() (*rolesmodels.IdsecIdentityRolesStats, error) {
 	s.Logger.Info("Retrieving identity roles statistics")
-	roles, err := s.ListRoles()
+	roles, err := s.List()
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +646,7 @@ func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRole
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				roleMembers, err := s.ListRoleMembers(&rolesmodels.IdsecIdentityListRoleMembers{
+				roleMembers, err := s.ListMembers(&rolesmodels.IdsecIdentityListRoleMembers{
 					RoleID: r.RoleID,
 				})
 				if err != nil {
@@ -683,8 +685,8 @@ func (s *IdsecIdentityRolesService) RolesStats() (*rolesmodels.IdsecIdentityRole
 	return stats, nil
 }
 
-// RoleMember retrieves a specific member of a role in the identity service.
-func (s *IdsecIdentityRolesService) RoleMember(getRoleMember *rolesmodels.IdsecIdentityGetRoleMember) (*rolesmodels.IdsecIdentityRoleMember, error) {
+// GetMember retrieves a specific member of a role in the identity service.
+func (s *IdsecIdentityRolesService) GetMember(getRoleMember *rolesmodels.IdsecIdentityGetRoleMember) (*rolesmodels.IdsecIdentityRoleMember, error) {
 	if getRoleMember.RoleID == "" {
 		return nil, fmt.Errorf("role ID must be given")
 	}
@@ -692,7 +694,7 @@ func (s *IdsecIdentityRolesService) RoleMember(getRoleMember *rolesmodels.IdsecI
 		return nil, fmt.Errorf("either member ID or member name must be given")
 	}
 	s.Logger.Info("Searching for member id [%s] or name [%s] from role [%s]", getRoleMember.MemberID, getRoleMember.MemberName, getRoleMember.RoleID)
-	roleMembers, err := s.ListRoleMembers(&rolesmodels.IdsecIdentityListRoleMembers{
+	roleMembers, err := s.ListMembers(&rolesmodels.IdsecIdentityListRoleMembers{
 		RoleID: getRoleMember.RoleID,
 	})
 	if err != nil {
@@ -711,10 +713,10 @@ func (s *IdsecIdentityRolesService) RoleMember(getRoleMember *rolesmodels.IdsecI
 	return nil, fmt.Errorf("member with ID [%s] or name [%s] not found in role [%s]", getRoleMember.MemberID, getRoleMember.MemberName, getRoleMember.RoleID)
 }
 
-// ListRoleMembers retrieves the members of a role in the identity service.
-func (s *IdsecIdentityRolesService) ListRoleMembers(listRoleMembers *rolesmodels.IdsecIdentityListRoleMembers) ([]*rolesmodels.IdsecIdentityRoleMember, error) {
+// ListMembers retrieves the members of a role in the identity service.
+func (s *IdsecIdentityRolesService) ListMembers(listRoleMembers *rolesmodels.IdsecIdentityListRoleMembers) ([]*rolesmodels.IdsecIdentityRoleMember, error) {
 	if listRoleMembers.RoleName != "" && listRoleMembers.RoleID == "" {
-		role, err := s.Role(&rolesmodels.IdsecIdentityGetRole{RoleName: listRoleMembers.RoleName})
+		role, err := s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: listRoleMembers.RoleName})
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve role ID by name: %v", err)
 		}
@@ -765,9 +767,9 @@ func (s *IdsecIdentityRolesService) ListRoleMembers(listRoleMembers *rolesmodels
 	return members, nil
 }
 
-func (s IdsecIdentityRolesService) ListRoleMembersBy(filters *rolesmodels.IdsecIdentityRoleMembersFilter) ([]*rolesmodels.IdsecIdentityRoleMember, error) {
+func (s IdsecIdentityRolesService) ListMembersBy(filters *rolesmodels.IdsecIdentityRoleMembersFilter) ([]*rolesmodels.IdsecIdentityRoleMember, error) {
 	s.Logger.Info("Listing identity role members by filters")
-	allMembers, err := s.ListRoleMembers(&rolesmodels.IdsecIdentityListRoleMembers{
+	allMembers, err := s.ListMembers(&rolesmodels.IdsecIdentityListRoleMembers{
 		RoleID:   filters.RoleID,
 		RoleName: filters.RoleName,
 	})
@@ -790,8 +792,8 @@ func (s IdsecIdentityRolesService) ListRoleMembersBy(filters *rolesmodels.IdsecI
 	return filteredMembers, nil
 }
 
-// AddUserToRole adds a user to a role in the identity service.
-func (s *IdsecIdentityRolesService) AddMemberToRole(addUserToRole *rolesmodels.IdsecIdentityAddMemberToRole) (*rolesmodels.IdsecIdentityRoleMember, error) {
+// AddMember adds a user to a role in the identity service.
+func (s *IdsecIdentityRolesService) AddMember(addUserToRole *rolesmodels.IdsecIdentityAddMemberToRole) (*rolesmodels.IdsecIdentityRoleMember, error) {
 	s.Logger.Info("Adding user [%s] to role [%s]", addUserToRole.MemberName, addUserToRole.RoleID)
 	membersMap := map[string]interface{}{
 		"Name": addUserToRole.RoleID,
@@ -833,14 +835,14 @@ func (s *IdsecIdentityRolesService) AddMemberToRole(addUserToRole *rolesmodels.I
 		return nil, fmt.Errorf("failed to add user to role - [%v]", result)
 	}
 	s.Logger.Info("User added to role successfully")
-	return s.RoleMember(&rolesmodels.IdsecIdentityGetRoleMember{
+	return s.GetMember(&rolesmodels.IdsecIdentityGetRoleMember{
 		RoleID:     addUserToRole.RoleID,
 		MemberName: addUserToRole.MemberName,
 	})
 }
 
-// RemoveUserFromRole removes a user from a role in the identity service.
-func (s *IdsecIdentityRolesService) RemoveMemberFromRole(removeMemberFromRole *rolesmodels.IdsecIdentityRemoveMemberFromRole) error {
+// RemoveMember removes a user from a role in the identity service.
+func (s *IdsecIdentityRolesService) RemoveMember(removeMemberFromRole *rolesmodels.IdsecIdentityRemoveMemberFromRole) error {
 	s.Logger.Info("Removing user [%s] from role [%s]", removeMemberFromRole.MemberName, removeMemberFromRole.RoleID)
 	membersMap := map[string]interface{}{
 		"Name": removeMemberFromRole.RoleID,
@@ -886,10 +888,10 @@ func (s *IdsecIdentityRolesService) RemoveMemberFromRole(removeMemberFromRole *r
 	return nil
 }
 
-// RoleMembersStats retrieves statistics about members of a specific role in the identity service.
-func (s *IdsecIdentityRolesService) RoleMembersStats(getRoleMembersStats *rolesmodels.IdsecIdentityGetRoleMembersStats) (*rolesmodels.IdsecIdentityRoleMembersStats, error) {
+// MemberStats retrieves statistics about members of a specific role in the identity service.
+func (s *IdsecIdentityRolesService) MemberStats(getRoleMembersStats *rolesmodels.IdsecIdentityGetRoleMembersStats) (*rolesmodels.IdsecIdentityRoleMembersStats, error) {
 	s.Logger.Info("Retrieving identity role members statistics")
-	roleMembers, err := s.ListRoleMembers(&rolesmodels.IdsecIdentityListRoleMembers{
+	roleMembers, err := s.ListMembers(&rolesmodels.IdsecIdentityListRoleMembers{
 		RoleName: getRoleMembersStats.RoleName,
 		RoleID:   getRoleMembersStats.RoleID,
 	})

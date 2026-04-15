@@ -17,9 +17,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/mitchellh/mapstructure"
-	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
-	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
@@ -41,48 +39,38 @@ const (
 
 // IdsecSIASSOService is a struct that implements the IdsecService interface and provides functionality for SSO services of SIA.
 type IdsecSIASSOService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth      *auth.IdsecISPAuth
+	*services.IdsecISPBaseService
 	cacheKeyring keyring.IdsecKeyringInterface
-	client       *isp.IdsecISPServiceClient
 }
 
-// NewIdsecSIASSOService creates a new instance of IdsecSIASSOService with the provided authenticators.
-func NewIdsecSIASSOService(authenticators ...auth.IdsecAuth) (*IdsecSIASSOService, error) {
+// NewIdsecSIASSOService creates a new instance of IdsecSIASSOService with the provided ISP base service.
+// This allows sharing the ISP client and telemetry context between services.
+func NewIdsecSIASSOService(ispBaseService *services.IdsecISPBaseService) (*IdsecSIASSOService, error) {
+	if ispBaseService == nil {
+		return nil, fmt.Errorf("ispBaseService cannot be nil")
+	}
+
 	ssoService := &IdsecSIASSOService{
 		cacheKeyring: keyring.NewIdsecKeyring(ServiceConfig.ServiceName),
 	}
+
 	var ssoServiceInterface services.IdsecService = ssoService
-	baseService, err := services.NewIdsecBaseService(ssoServiceInterface, authenticators...)
+
+	// Create base service using ISP auth from the provided ISP base service
+	baseService, err := services.NewIdsecBaseService(ssoServiceInterface, ispBaseService.ISPAuth())
 	if err != nil {
 		return nil, err
 	}
-	ispBaseAuth, err := baseService.Authenticator("isp")
-	if err != nil {
-		return nil, err
-	}
-	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", ssoService.refreshSIAAuth)
-	if err != nil {
-		return nil, err
-	}
-	ssoService.client = client
-	ssoService.ispAuth = ispAuth
+
 	ssoService.IdsecBaseService = baseService
+	ssoService.IdsecISPBaseService = ispBaseService // Share the ISP client and telemetry
+
 	return ssoService, nil
 }
 
-func (s *IdsecSIASSOService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *IdsecSIASSOService) loadFromCache(tokenType string) (*ssomodels.IdsecSIASSOAcquireTokenResponse, error) {
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +99,7 @@ func (s *IdsecSIASSOService) loadFromCache(tokenType string) (*ssomodels.IdsecSI
 }
 
 func (s *IdsecSIASSOService) saveToCache(result *ssomodels.IdsecSIASSOAcquireTokenResponse, tokenType string) error {
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return err
 	}
@@ -149,7 +137,7 @@ func (s *IdsecSIASSOService) saveToCache(result *ssomodels.IdsecSIASSOAcquireTok
 
 func (s *IdsecSIASSOService) outputClientCertificate(folder string, outputFormat string, result *ssomodels.IdsecSIASSOAcquireTokenResponse) error {
 	folderPath := common.ExpandFolder(folder)
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return err
 	}
@@ -216,7 +204,7 @@ func (s *IdsecSIASSOService) saveOracleSSOWallet(folder string, unzipWallet bool
 		}
 	}
 	if !unzipWallet {
-		parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+		parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 		if err != nil {
 			return err
 		}
@@ -266,7 +254,7 @@ func (s *IdsecSIASSOService) saveOracleSSOWallet(folder string, unzipWallet bool
 
 func (s *IdsecSIASSOService) saveOraclePEMWallet(folder string, result *ssomodels.IdsecSIASSOAcquireTokenResponse) error {
 	folderPath := common.ExpandFolder(folder)
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return err
 	}
@@ -313,7 +301,7 @@ func (s *IdsecSIASSOService) ShortLivedPassword(getShortLivedPassword *ssomodels
 			return result.Token["key"].(string), nil
 		}
 	}
-	response, err := s.client.Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
+	response, err := s.ISPClient().Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
 		"token_type": "password",
 		"service":    getShortLivedPassword.Service,
 	})
@@ -352,7 +340,7 @@ func (s *IdsecSIASSOService) ShortLivedClientCertificate(getShortLivedClientCert
 			return s.outputClientCertificate(getShortLivedClientCertificate.Folder, getShortLivedClientCertificate.OutputFormat, result)
 		}
 	}
-	response, err := s.client.Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
+	response, err := s.ISPClient().Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
 		"token_type": "client_certificate",
 		"service":    getShortLivedClientCertificate.Service,
 	})
@@ -398,7 +386,7 @@ func (s *IdsecSIASSOService) ShortLivedOracleWallet(getShortLivedOracleWallet *s
 			}
 		}
 	}
-	response, err := s.client.Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
+	response, err := s.ISPClient().Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
 		"token_type": "oracle_wallet",
 		"service":    "DPA-DB",
 		"token_parameters": map[string]interface{}{
@@ -457,7 +445,7 @@ func (s *IdsecSIASSOService) ShortLivedRdpFile(getShortLivedRDPFile *ssomodels.I
 	if getShortLivedRDPFile.TargetUser != "" {
 		tokenParameters["targetUser"] = getShortLivedRDPFile.TargetUser
 	}
-	response, err := s.client.Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
+	response, err := s.ISPClient().Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
 		"token_type":            "rdp_file",
 		"service":               "DPA-RDP",
 		"token_parameters":      tokenParameters,
@@ -489,8 +477,8 @@ func (s *IdsecSIASSOService) ShortLivedRdpFile(getShortLivedRDPFile *ssomodels.I
 	return fmt.Errorf("failed to generate short rdp file - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 }
 
-// ShortLivedSSHKey generates a short-lived SSH key for the user to connect to remote servers.
-func (s *IdsecSIASSOService) ShortLivedSSHKey(getSSHKey *ssomodels.IdsecSIASSOGetSSHKey) (string, error) {
+// ShortLivedSshKey generates a short-lived SSH key for the user to connect to remote servers.
+func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGetSSHKey) (string, error) {
 	s.Logger.Info("Getting short lived ssh sso key")
 	format := getSSHKey.Format
 	if format == "" {
@@ -500,7 +488,7 @@ func (s *IdsecSIASSOService) ShortLivedSSHKey(getSSHKey *ssomodels.IdsecSIASSOGe
 		return "", fmt.Errorf("invalid ssh key format [%s], supported formats are: %s, %s", format, ssomodels.OpenSSH, ssomodels.PPK)
 	}
 	queryParams := map[string]string{"format": format}
-	response, err := s.client.Get(context.Background(), sshSsoKeyURL, queryParams)
+	response, err := s.ISPClient().Get(context.Background(), sshSsoKeyURL, queryParams)
 	if err != nil {
 		return "", err
 	}
@@ -527,7 +515,7 @@ func (s *IdsecSIASSOService) ShortLivedSSHKey(getSSHKey *ssomodels.IdsecSIASSOGe
 			return "", err
 		}
 	}
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.client.GetToken(), jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(s.ISPClient().GetToken(), jwt.MapClaims{})
 	if err != nil {
 		return "", err
 	}
@@ -554,7 +542,7 @@ func (s *IdsecSIASSOService) ShortLivedTokenInfo(getTokenInfo *ssomodels.IdsecSI
 	s.Logger.Info("Getting short lived token info")
 	getTokenInfoParams := map[string]string{}
 	_ = mapstructure.Decode(getTokenInfo, &getTokenInfoParams)
-	response, err := s.client.Get(context.Background(), tokenSsoInfoURL, getTokenInfoParams)
+	response, err := s.ISPClient().Get(context.Background(), tokenSsoInfoURL, getTokenInfoParams)
 	if err != nil {
 		return nil, err
 	}

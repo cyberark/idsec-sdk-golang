@@ -62,7 +62,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 					changedFromLastCollection: true,
 				}
 			},
-			expectedMetrics: 13,
+			expectedMetrics: 13, // Base metrics without tool context fields
 			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				if metrics.Collector != IdsecMetadataMetricsCollectorName {
@@ -84,7 +84,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 					changedFromLastCollection: true,
 				}
 			},
-			expectedMetrics: 13,
+			expectedMetrics: 13, // Base metrics without tool context fields
 			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				serviceMetric := findMetricByName(metrics.Metrics, "service")
@@ -120,7 +120,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 					changedFromLastCollection: true,
 				}
 			},
-			expectedMetrics: 13,
+			expectedMetrics: 13, // Base metrics without tool context fields
 			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				serviceMetric := findMetricByName(metrics.Metrics, "service")
@@ -138,7 +138,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 					changedFromLastCollection: true,
 				}
 			},
-			expectedMetrics: 13,
+			expectedMetrics: 13, // Base metrics without tool context fields
 			expectedChanged: false,
 		},
 	}

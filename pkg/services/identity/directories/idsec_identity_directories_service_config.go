@@ -3,22 +3,16 @@ package directories
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	identitydirectoriesactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/actions"
+	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories/actions"
 )
 
-// ServiceConfig is the configuration for the identity users service.
+// ServiceConfig is the configuration for the identity directories service.
 var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "identity-directories",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
-	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
-		actions.IdsecServiceActionTypeCLI: {
-			identitydirectoriesactions.CLIAction,
-		},
-		actions.IdsecServiceActionTypeTerraformDataSource: {
-			identitydirectoriesactions.TerraformActionTenantSuffixesDataSource,
-		},
-	},
+	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
+	ActionSchemas:              svcactions.ActionToSchemaMap,
 }
 
 // ServiceGenerator is the function that generates a new instance of the IdsecIdentityDirectoriesService.

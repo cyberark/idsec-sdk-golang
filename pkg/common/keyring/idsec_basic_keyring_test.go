@@ -795,7 +795,7 @@ func TestConstants(t *testing.T) {
 		{
 			name:     "default_folder_correct_value",
 			constant: DefaultBasicKeyringFolder,
-			expected: ".idsec_cache/keyring",
+			expected: ".idsec/cache/keyring",
 		},
 		{
 			name:     "env_var_correct_value",

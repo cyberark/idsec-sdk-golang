@@ -589,6 +589,64 @@ func (ac *IdsecClient) GetCookieJar() *cookiejar.Jar {
 	return ac.cookieJar
 }
 
+// AddExtraContextField adds a tool-specific context field to telemetry metadata.
+//
+// This method allows any tool (Terraform, CLI, SDK, etc.) to add arbitrary context
+// fields to the telemetry metadata. Tools provide both a full descriptive name and
+// a short name for efficient transmission.
+//
+// Parameters:
+//   - name: The full descriptive name for the field (e.g., "terraform_resource", "cli_command")
+//   - shortName: The short identifier for the field (e.g., "tfr", "clic")
+//   - value: The value to associate with this field
+//
+// Common usage by tool:
+//   - Terraform: ("terraform_resource", "tfr", "idsec_user")
+//   - CLI: ("cli_command", "clic", "login")
+//   - SDK: Tool-specific fields as needed
+//
+// This method is typically called before executing operations to provide visibility
+// into which tool and context is making the request.
+//
+// Example:
+//
+//	client.AddExtraContextField("terraform_resource", "tfr", "idsec_user")
+//	client.AddExtraContextField("terraform_operation", "tfo", "Create")
+//	client.AddExtraContextField("terraform_version", "tfv", "1.5.0")
+//	defer client.ClearExtraContext()
+func (ac *IdsecClient) AddExtraContextField(name, shortName, value string) {
+	if ac.telemetry != nil {
+		collector := ac.telemetry.CollectorByName(collectors.IdsecMetadataMetricsCollectorName)
+		if collector != nil {
+			if metadataCollector, ok := collector.(*collectors.IdsecMetadataMetricsCollector); ok {
+				metadataCollector.AddExtraContextField(name, shortName, value)
+			}
+		}
+	}
+}
+
+// ClearExtraContext clears all tool-specific context fields from telemetry metadata.
+//
+// This method resets all dynamically added tool context fields in the telemetry
+// metadata collector. It should typically be called using defer after adding tool
+// context to ensure cleanup even if the operation panics or errors.
+//
+// Example:
+//
+//	client.AddExtraContextField("tfr", "idsec_policy_db")
+//	client.AddExtraContextField("tfo", "create")
+//	defer client.ClearExtraContext()
+func (ac *IdsecClient) ClearExtraContext() {
+	if ac.telemetry != nil {
+		collector := ac.telemetry.CollectorByName(collectors.IdsecMetadataMetricsCollectorName)
+		if collector != nil {
+			if metadataCollector, ok := collector.(*collectors.IdsecMetadataMetricsCollector); ok {
+				metadataCollector.ClearExtraContext()
+			}
+		}
+	}
+}
+
 // fillMetadataTelemetry populates telemetry metadata for the current operation.
 func (ac *IdsecClient) fillMetadataTelemetry(route string, refreshRetryCountLocal int) {
 	collector := ac.telemetry.CollectorByName(collectors.IdsecMetadataMetricsCollectorName)
@@ -707,6 +765,9 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 		return nil, err
 	}
 	for key, value := range ac.headers {
+		if strings.EqualFold(key, "Content-Type") && bodyReader == nil {
+			continue
+		}
 		req.Header.Set(key, value)
 	}
 	if telemetryHeader != "" {

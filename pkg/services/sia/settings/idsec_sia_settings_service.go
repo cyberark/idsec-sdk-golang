@@ -21,10 +21,8 @@ const (
 
 // IdsecSIASettingsService is a struct that implements the IdsecService interface and provides functionality for settings of SIA.
 type IdsecSIASettingsService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 
 	// For testing purposes
 	doGet   func(ctx context.Context, path string, params interface{}) (*http.Response, error)
@@ -45,18 +43,19 @@ func NewIdsecSIASettingsService(authenticators ...auth.IdsecAuth) (*IdsecSIASett
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", siaSettingsService.refreshSIAAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", siaSettingsService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	siaSettingsService.client = client
-	siaSettingsService.ispAuth = ispAuth
+
 	siaSettingsService.IdsecBaseService = baseService
+	siaSettingsService.IdsecISPBaseService = ispBaseService
 	return siaSettingsService, nil
 }
 
 func (s *IdsecSIASettingsService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -67,21 +66,21 @@ func (s *IdsecSIASettingsService) getOperation() func(ctx context.Context, path 
 	if s.doGet != nil {
 		return s.doGet
 	}
-	return s.client.Get
+	return s.ISPClient().Get
 }
 
 func (s *IdsecSIASettingsService) putOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.doPut != nil {
 		return s.doPut
 	}
-	return s.client.Put
+	return s.ISPClient().Put
 }
 
 func (s *IdsecSIASettingsService) patchOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.doPatch != nil {
 		return s.doPatch
 	}
-	return s.client.Patch
+	return s.ISPClient().Patch
 }
 
 func (s *IdsecSIASettingsService) setting(featureName string) (map[string]interface{}, error) {
@@ -368,7 +367,7 @@ func (s *IdsecSIASettingsService) RdpKeyboardLayout() (*settingsmodels.IdsecSIAS
 //   - rdpKeyboardLayout: The settings to apply for RDP Keyboard Layout.
 //
 // Returns an error if the operation fails.
-func (s *IdsecSIASettingsService) SetRDPKeyboardLayout(rdpKeyboardLayout *settingsmodels.IdsecSIASettingsRdpKeyboardLayout) (*settingsmodels.IdsecSIASettingsRdpKeyboardLayout, error) {
+func (s *IdsecSIASettingsService) SetRdpKeyboardLayout(rdpKeyboardLayout *settingsmodels.IdsecSIASettingsRdpKeyboardLayout) (*settingsmodels.IdsecSIASettingsRdpKeyboardLayout, error) {
 	settingJSON, err := common.SerializeJSONCamel(rdpKeyboardLayout)
 	if err != nil {
 		return nil, err
@@ -417,7 +416,7 @@ func (s *IdsecSIASettingsService) SetRdpMfaCaching(rdpMfaCaching *settingsmodels
 // RDPTokenMfaCaching retrieves the RDP Token MFA Caching settings.
 //
 // Returns the current RDP Token MFA Caching settings or an error if retrieval fails.
-func (s *IdsecSIASettingsService) RDPTokenMfaCaching() (*settingsmodels.IdsecSIASettingsRdpTokenMfaCaching, error) {
+func (s *IdsecSIASettingsService) RdpTokenMfaCaching() (*settingsmodels.IdsecSIASettingsRdpTokenMfaCaching, error) {
 	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameRDPTokenMfaCaching)
 	if err != nil {
 		return nil, err
@@ -445,7 +444,7 @@ func (s *IdsecSIASettingsService) SetRdpTokenMfaCaching(rdpTokenMfaCaching *sett
 	if err != nil {
 		return nil, err
 	}
-	return s.RDPTokenMfaCaching()
+	return s.RdpTokenMfaCaching()
 }
 
 // RdpRecording retrieves the RDP Recording settings.
@@ -752,6 +751,142 @@ func (s *IdsecSIASettingsService) SetSshRecording(sshRecording *settingsmodels.I
 		return nil, err
 	}
 	return s.SshRecording()
+}
+
+// ValidateFingerprintForSSHZeroStanding retrieves the SSH fingerprint validation setting for Zero Standing connections.
+//
+// Returns the current setting or an error if retrieval fails.
+func (s *IdsecSIASettingsService) ValidateFingerprintForSshZeroStanding() (*settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameValidateFingerprintForSSHZeroStanding)
+	if err != nil {
+		return nil, err
+	}
+	var setting settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding
+	err = mapstructure.Decode(settingJSON, &setting)
+	if err != nil {
+		return nil, err
+	}
+	return &setting, nil
+}
+
+// SetValidateFingerprintForSSHZeroStanding sets the SSH fingerprint validation for Zero Standing connections.
+//
+// Parameters:
+//   - setting: The setting to apply for SSH fingerprint validation.
+//
+// Returns an error if the operation fails.
+func (s *IdsecSIASettingsService) SetValidateFingerprintForSshZeroStanding(setting *settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding) (*settingsmodels.IdsecSIASettingsValidateFingerprintForSSHZeroStanding, error) {
+	settingJSON, err := common.SerializeJSONCamel(setting)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameValidateFingerprintForSSHZeroStanding, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.ValidateFingerprintForSshZeroStanding()
+}
+
+// RdpFileParameters retrieves the RDP File Parameters settings.
+//
+// Returns the current RDP File Parameters settings or an error if retrieval fails.
+func (s *IdsecSIASettingsService) RdpFileParameters() (*settingsmodels.IdsecSIASettingsRdpFileParameters, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameRDPFileParameters)
+	if err != nil {
+		return nil, err
+	}
+	var rdpFileParameters settingsmodels.IdsecSIASettingsRdpFileParameters
+	err = mapstructure.Decode(settingJSON, &rdpFileParameters)
+	if err != nil {
+		return nil, err
+	}
+	return &rdpFileParameters, nil
+}
+
+// SetRdpFileParameters sets the RDP File Parameters settings.
+//
+// Parameters:
+//   - rdpFileParameters: The settings to apply for RDP File Parameters.
+//
+// Returns an error if the operation fails.
+func (s *IdsecSIASettingsService) SetRdpFileParameters(rdpFileParameters *settingsmodels.IdsecSIASettingsRdpFileParameters) (*settingsmodels.IdsecSIASettingsRdpFileParameters, error) {
+	settingJSON, err := common.SerializeJSONCamel(rdpFileParameters)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameRDPFileParameters, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.RdpFileParameters()
+}
+
+// ZspList retrieves the ZSP List feature setting.
+//
+// Returns the current ZSP List setting or an error if retrieval fails.
+func (s *IdsecSIASettingsService) ZspList() (*settingsmodels.IdsecSIASettingsZspList, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameZSPList)
+	if err != nil {
+		return nil, err
+	}
+	var setting settingsmodels.IdsecSIASettingsZspList
+	err = mapstructure.Decode(settingJSON, &setting)
+	if err != nil {
+		return nil, err
+	}
+	return &setting, nil
+}
+
+// SetZspList sets the ZSP List feature setting.
+//
+// Parameters:
+//   - setting: The setting to apply for ZSP List.
+//
+// Returns the updated setting or an error if the operation fails.
+func (s *IdsecSIASettingsService) SetZspList(setting *settingsmodels.IdsecSIASettingsZspList) (*settingsmodels.IdsecSIASettingsZspList, error) {
+	settingJSON, err := common.SerializeJSONCamel(setting)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameZSPList, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.ZspList()
+}
+
+// RdpFileSigning retrieves the RDP File Signing settings.
+//
+// Returns the current RDP File Signing settings or an error if retrieval fails.
+func (s *IdsecSIASettingsService) RdpFileSigning() (*settingsmodels.IdsecSIASettingsRdpFileSigning, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameRDPFileSigning)
+	if err != nil {
+		return nil, err
+	}
+	var rdpFileSigning settingsmodels.IdsecSIASettingsRdpFileSigning
+	err = mapstructure.Decode(settingJSON, &rdpFileSigning)
+	if err != nil {
+		return nil, err
+	}
+	return &rdpFileSigning, nil
+}
+
+// SetRdpFileSigning sets the RDP File Signing settings.
+//
+// Parameters:
+//   - rdpFileSigning: The settings to apply for RDP File Signing.
+//
+// Returns an error if the operation fails.
+func (s *IdsecSIASettingsService) SetRdpFileSigning(rdpFileSigning *settingsmodels.IdsecSIASettingsRdpFileSigning) (*settingsmodels.IdsecSIASettingsRdpFileSigning, error) {
+	settingJSON, err := common.SerializeJSONCamel(rdpFileSigning)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameRDPFileSigning, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.RdpFileSigning()
 }
 
 // ServiceConfig returns the service configuration for the IdsecSIASettingsService.

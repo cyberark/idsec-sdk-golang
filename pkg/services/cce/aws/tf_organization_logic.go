@@ -22,7 +22,7 @@ func (s *IdsecCCEAWSService) tfOrganization(input *awsmodels.TfIdsecCCEAWSGetOrg
 	s.Logger.Info("Getting AWS organization details for ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathOrganizationGetOrDeleteURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (s *IdsecCCEAWSService) tfOrganizationDatasource(input *awsmodels.TfIdsecCC
 	s.Logger.Info("Getting AWS organization details for ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathOrganizationGetOrDeleteURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,12 @@ func (s *IdsecCCEAWSService) tfAddOrganization(input *awsmodels.TfIdsecCCEAWSAdd
 	// Add hardcoded onboarding type
 	requestBody["onboardingType"] = ccemodels.TerraformProvider
 
-	response, err := s.client.Post(context.Background(), pathOrganizationAddURL, requestBody)
+	// Add serviceParameters if provided
+	if len(input.ServiceParameters) > 0 {
+		requestBody["serviceParameters"] = input.ServiceParameters
+	}
+
+	response, err := s.ISPClient().Post(context.Background(), pathOrganizationAddURL, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +163,7 @@ func (s *IdsecCCEAWSService) tfDeleteOrganization(input *awsmodels.TfIdsecCCEAWS
 	s.Logger.Info("Deleting AWS organization with ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathOrganizationGetOrDeleteURL, input.ID)
-	response, err := s.client.Delete(context.Background(), url, nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -180,7 +185,7 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 	// Step 1: Get current organization details to determine existing services
 	// We need to extract services from the raw API response since it's not in the struct
 	url := fmt.Sprintf(pathOrganizationGetOrDeleteURL, input.ID)
-	response, err := s.client.Get(context.Background(), url, nil)
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current organization details: %w", err)
 	}
@@ -253,8 +258,9 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 	if len(servicesToAdd) > 0 {
 		s.Logger.Info("Adding %d services to organization [%s]", len(servicesToAdd), input.ID)
 		err = s.addOrganizationServices(&awsmodels.TfIdsecCCEAWSAddOrganizationServices{
-			ID:       input.ID,
-			Services: servicesToAdd,
+			ID:                input.ID,
+			Services:          servicesToAdd,
+			ServiceParameters: input.ServiceParameters,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to add services: %w", err)
@@ -295,7 +301,12 @@ func (s *IdsecCCEAWSService) addOrganizationServices(input *awsmodels.TfIdsecCCE
 		"services": input.Services,
 	}
 
-	response, err := s.client.Post(context.Background(), url, requestBody)
+	// Add serviceParameters if provided
+	if len(input.ServiceParameters) > 0 {
+		requestBody["serviceParameters"] = input.ServiceParameters
+	}
+
+	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
 	if err != nil {
 		return fmt.Errorf("failed to add services to organization: %w", err)
 	}
@@ -324,7 +335,7 @@ func (s *IdsecCCEAWSService) deleteOrganizationServices(input *awsmodels.TfIdsec
 
 	s.Logger.Info("Deleting services: %v from organization [%s]", input.ServiceNames, input.ID)
 
-	response, err := s.client.Delete(context.Background(), path, nil, params)
+	response, err := s.ISPClient().Delete(context.Background(), path, nil, params)
 	if err != nil {
 		return fmt.Errorf("failed to delete services from organization: %w", err)
 	}
@@ -343,15 +354,15 @@ func (s *IdsecCCEAWSService) deleteOrganizationServices(input *awsmodels.TfIdsec
 // For synchronous operation with automatic scan/retry logic, use TfAddOrganizationAccountSync.
 // API: POST /api/aws/programmatic/organization/{id}/account
 func (s *IdsecCCEAWSService) addOrganizationAccount(input *awsmodels.IdsecCCEAWSAddOrganizationAccount) (*awsmodels.IdsecCCEAWSAddedOrganizationAccount, error) {
-	s.Logger.Info("Adding AWS account [%s] to organization [%s]", input.AccountID, input.OrganizationID)
+	s.Logger.Info("Adding AWS account [%s] to organization [%s]", input.AccountID, input.ParentOrganizationID)
 
 	requestBody := map[string]interface{}{
 		"accountId": input.AccountID,
 		"services":  input.Services,
 	}
 
-	url := fmt.Sprintf(pathOrganizationAccountURL, input.OrganizationID)
-	response, err := s.client.Post(context.Background(), url, requestBody)
+	url := fmt.Sprintf(pathOrganizationAccountURL, input.ParentOrganizationID)
+	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +508,7 @@ func (s *IdsecCCEAWSService) waitForOrganizationScanCompletion(organizationID st
 // Returns the full account details after successful addition.
 // API: POST /api/aws/programmatic/organization/{id}/account
 func (s *IdsecCCEAWSService) tfAddOrganizationAccountSync(input *awsmodels.IdsecCCEAWSAddOrganizationAccountSync) (*awsmodels.TfIdsecCCEAWSAccount, error) {
-	s.Logger.Info("Adding AWS account [%s] to organization [%s] (sync mode with retry)", input.AccountID, input.OrganizationID)
+	s.Logger.Info("Adding AWS account [%s] to organization [%s] (sync mode with retry)", input.AccountID, input.ParentOrganizationID)
 
 	// Convert to base input struct (without retry options)
 	baseInput := input.ToAddOrganizationAccount()
@@ -524,7 +535,7 @@ func (s *IdsecCCEAWSService) tfAddOrganizationAccountSync(input *awsmodels.Idsec
 			scanStartTime := time.Now()
 
 			// Trigger scan if needed (only for 404, not if scan already in progress)
-			if err := s.triggerOrganizationScanIfNeeded(isNotFound, input.OrganizationID); err != nil {
+			if err := s.triggerOrganizationScanIfNeeded(isNotFound, input.ParentOrganizationID); err != nil {
 				return nil, err
 			}
 
@@ -533,7 +544,7 @@ func (s *IdsecCCEAWSService) tfAddOrganizationAccountSync(input *awsmodels.Idsec
 			retryInterval := input.GetScanProbeInterval()
 
 			// Wait for scan completion
-			if err := s.waitForOrganizationScanCompletion(input.OrganizationID, scanStartTime, maxRetries, retryInterval); err != nil {
+			if err := s.waitForOrganizationScanCompletion(input.ParentOrganizationID, scanStartTime, maxRetries, retryInterval); err != nil {
 				return nil, err
 			}
 

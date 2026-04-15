@@ -14,6 +14,7 @@ import (
 	survey "github.com/Iilun/survey/v2"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/toqueteos/webbrowser"
+	authcommon "github.com/cyberark/idsec-sdk-golang/pkg/auth/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
@@ -31,9 +32,8 @@ const (
 )
 
 // DefaultTokenLifetimeSeconds is the default token lifetime in seconds.
-const (
-	DefaultTokenLifetimeSeconds = 3600
-)
+// Deprecated: Use authcommon.DefaultTokenLifetimeSeconds instead.
+const DefaultTokenLifetimeSeconds = authcommon.DefaultTokenLifetimeSeconds
 
 var factors = map[string]string{
 	"otp":   "📲 Push / Code",
@@ -68,6 +68,7 @@ type IdsecIdentity struct {
 	isPolling           bool
 	loadedFromCache     bool
 	interactionRoutine  chan string
+	cacheManager        *authcommon.CacheManager
 }
 
 // HasCacheRecord Checks if a cache record exists for the specified profile and username
@@ -173,6 +174,14 @@ func NewIdsecIdentity(username string, password string, identityURL string, iden
 		identityAuth.keyring = keyring.NewIdsecKeyring(strings.ToLower("IdsecIdentity"))
 	}
 
+	// Initialize cache manager
+	cacheConfig := &authcommon.CacheConfig{
+		Keyring:             identityAuth.keyring,
+		CacheAuthentication: cacheAuthentication,
+		Logger:              logger,
+	}
+	identityAuth.cacheManager = authcommon.NewCacheManager(cacheConfig)
+
 	if loadCache && cacheProfile != nil {
 		identityAuth.loadCache(cacheProfile)
 	}
@@ -226,9 +235,9 @@ func (ai *IdsecIdentity) saveCache(profile *models.IdsecProfile) error {
 	if ai.keyring != nil && profile != nil && ai.sessionDetails != nil {
 		delta := ai.sessionDetails.TokenLifetime
 		if delta == 0 {
-			delta = DefaultTokenLifetimeSeconds
+			delta = authcommon.DefaultTokenLifetimeSeconds
 		}
-		ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+		ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 		sessionDetailsBytes, err := json.Marshal(ai.sessionDetails)
 		if err != nil {
 			return err
@@ -410,9 +419,9 @@ func (ai *IdsecIdentity) performPinCodeIdpAuthentication(startAuthResponse *iden
 		ai.session.UpdateToken(oobAdvanceResp.(*identity.IdpAuthStatusResponse).Result.Token, "Bearer")
 		delta := ai.sessionDetails.TokenLifetime
 		if delta == 0 {
-			delta = DefaultTokenLifetimeSeconds
+			delta = authcommon.DefaultTokenLifetimeSeconds
 		}
-		ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+		ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 		if ai.cacheAuthentication {
 			if err := ai.saveCache(profile); err != nil {
 				return err
@@ -466,9 +475,9 @@ func (ai *IdsecIdentity) performIdpAuthentication(startAuthResponse *identity.St
 			ai.session.UpdateToken(idpAuthStatus.Result.Token, "Bearer")
 			delta := ai.sessionDetails.TokenLifetime
 			if delta == 0 {
-				delta = DefaultTokenLifetimeSeconds
+				delta = authcommon.DefaultTokenLifetimeSeconds
 			}
-			ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+			ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 			if ai.cacheAuthentication {
 				if err := ai.saveCache(profile); err != nil {
 					return err
@@ -665,9 +674,9 @@ func (ai *IdsecIdentity) pollAuthentication(profile *models.IdsecProfile, mechan
 				ai.session.UpdateToken(ai.sessionDetails.Token, "Bearer")
 				delta := ai.sessionDetails.TokenLifetime
 				if delta == 0 {
-					delta = DefaultTokenLifetimeSeconds
+					delta = authcommon.DefaultTokenLifetimeSeconds
 				}
-				ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+				ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 				if ai.cacheAuthentication {
 					if err := ai.saveCache(profile); err != nil {
 						return err
@@ -719,9 +728,9 @@ func (ai *IdsecIdentity) performUpAuthentication(
 		ai.session.UpdateToken(ai.sessionDetails.Token, "Bearer")
 		delta := ai.sessionDetails.TokenLifetime
 		if delta == 0 {
-			delta = DefaultTokenLifetimeSeconds
+			delta = authcommon.DefaultTokenLifetimeSeconds
 		}
-		ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+		ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 		if ai.cacheAuthentication {
 			if err := ai.saveCache(profile); err != nil {
 				return "", -1, err
@@ -777,15 +786,17 @@ func (ai *IdsecIdentity) GetApps() (map[string]interface{}, error) {
 // The auth token and other details are stored in the object for future use.
 func (ai *IdsecIdentity) AuthIdentity(profile *models.IdsecProfile, interactive bool, force bool) error {
 	ai.logger.Debug("Attempting to authenticate to Identity")
-	if ai.cacheAuthentication && !force {
+
+	// Check cache if enabled and not forced
+	if ai.cacheManager.ShouldLoadFromCache(force, ai.loadedFromCache) {
 		if ai.loadedFromCache {
-			if time.Time(ai.sessionExp).After(time.Now()) {
+			if ai.cacheManager.ValidateCachedToken(ai.sessionExp) {
 				ai.logger.Info("Loaded identity details from cache")
 				return nil
 			}
 		} else {
 			ai.loadCache(profile)
-			if time.Time(ai.sessionExp).After(time.Now()) {
+			if ai.cacheManager.ValidateCachedToken(ai.sessionExp) {
 				ai.logger.Info("Loaded identity details from cache")
 				return nil
 			}
@@ -972,9 +983,9 @@ func (ai *IdsecIdentity) RefreshAuthIdentity(profile *models.IdsecProfile, inter
 
 	delta := ai.sessionDetails.TokenLifetime
 	if delta == 0 {
-		delta = DefaultTokenLifetimeSeconds
+		delta = authcommon.DefaultTokenLifetimeSeconds
 	}
-	ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(delta) * time.Second))
+	ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 
 	if ai.cacheAuthentication {
 		if err := ai.saveCache(profile); err != nil {

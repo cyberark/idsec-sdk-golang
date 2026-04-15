@@ -4,7 +4,7 @@ import (
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
-// IdsecPolicyCloudAccessFilters exposes Cloud Access–specific filter helpers built atop the shared policy filters.
+// IdsecPolicyCloudAccessFilters exposes Cloud Console access filter helpers.
 //
 // You can set the following fields:
 //

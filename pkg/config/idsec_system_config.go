@@ -8,7 +8,11 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/google/uuid"
@@ -33,6 +37,58 @@ var (
 	// repoPath is the repository path for the Idsec CLI application.
 	repoPath = "cyberark/idsec-sdk-golang"
 )
+
+func init() {
+	// If version is still the default value, try to read from VERSION file
+	// This handles cases where the binary wasn't built with ldflags
+	if version == "0.0.0" {
+		if v := readVersionFile(); v != "" {
+			version = v
+		}
+	}
+}
+
+// readVersionFile attempts to read the VERSION file from the repository root using os.Root for security.
+func readVersionFile() string {
+	// Get the directory of this source file
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+
+	// Navigate up to find the repository root
+	// From pkg/config/idsec_system_config.go to root: ../../
+	dir := filepath.Dir(filename)
+	repoRoot := filepath.Join(dir, "..", "..")
+
+	// Clean the path to get absolute path
+	repoRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return ""
+	}
+
+	// Use os.OpenRoot to scope file access under the repository root (prevents directory traversal)
+	root, err := os.OpenRoot(repoRoot)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = root.Close() }()
+
+	// Open VERSION file using the scoped root
+	file, err := root.Open("VERSION")
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+
+	// Read file contents
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(data))
+}
 
 // IdsecTool represents the current Idsec tool in use (SDK, CLI, or Terraform Provider).
 type IdsecTool string
@@ -75,8 +131,18 @@ const (
 	// IdsecLoggerStyleEnvVar sets the style of the logger output.
 	IdsecLoggerStyleEnvVar = "IDSEC_LOGGER_STYLE"
 
-	// IdsecLogLevelEnvVar sets the logging verbosity level.
+	// IdsecLogLevelEnvVar sets the stdout logging verbosity level.
+	// Supported levels are DEBUG, INFO, WARNING, ERROR, and CRITICAL.
 	IdsecLogLevelEnvVar = "IDSEC_LOG_LEVEL"
+
+	// IdsecFileLogPathEnvVar overrides the file path used for file-based logging.
+	// When unset, defaults to $HOME/.idsec/logs/idsec-cli.log.
+	IdsecFileLogPathEnvVar = "IDSEC_FILE_LOG_PATH"
+
+	// IdsecFileLogLevelEnvVar sets the verbosity level used for file-based logging output.
+	// When unset, defaults to INFO.
+	// Set to "none" or "off" to disable file logging entirely.
+	IdsecFileLogLevelEnvVar = "IDSEC_FILE_LOG_LEVEL"
 
 	// IdsecExtraTrustedCAPathEnvVar sets the path to an extra trusted CA certificates bundle.
 	IdsecExtraTrustedCACertsBundlePathEnvVar = "IDSEC_EXTRA_TRUSTED_CA_CERTS_BUNDLE_PATH"

@@ -404,10 +404,8 @@ EOF`
 
 // IdsecSIASSHCAService is a struct that implements the IdsecService interface and provides functionality for SSH CA of SIA.
 type IdsecSIASSHCAService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 
 	doGet         func(ctx context.Context, path string, params interface{}) (*http.Response, error)
 	doPost        func(ctx context.Context, path string, body interface{}) (*http.Response, error)
@@ -427,18 +425,17 @@ func NewIdsecSIASSHCAService(authenticators ...auth.IdsecAuth) (*IdsecSIASSHCASe
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", sshCaService.refreshSIAAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", sshCaService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	sshCaService.client = client
-	sshCaService.ispAuth = ispAuth
 	sshCaService.IdsecBaseService = baseService
+	sshCaService.IdsecISPBaseService = ispBaseService
 	return sshCaService, nil
 }
 
 func (s *IdsecSIASSHCAService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -449,14 +446,14 @@ func (s *IdsecSIASSHCAService) getOperation() func(ctx context.Context, path str
 	if s.doGet != nil {
 		return s.doGet
 	}
-	return s.client.Get
+	return s.ISPClient().Get
 }
 
 func (s *IdsecSIASSHCAService) postOperation() func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 	if s.doPost != nil {
 		return s.doPost
 	}
-	return s.client.Post
+	return s.ISPClient().Post
 }
 
 func (s *IdsecSIASSHCAService) newSSHConnection() connections.IdsecConnection {
@@ -466,8 +463,8 @@ func (s *IdsecSIASSHCAService) newSSHConnection() connections.IdsecConnection {
 	return ssh.NewIdsecSSHConnection()
 }
 
-// GenerateNewCA generates a new CA key version.
-func (s *IdsecSIASSHCAService) GenerateNewCA() error {
+// GenerateNewCa generates a new CA key version.
+func (s *IdsecSIASSHCAService) GenerateNewCa() error {
 	s.Logger.Info("Generate new CA key version")
 	response, err := s.postOperation()(context.Background(), generateNewCAKeyURL, nil)
 	if err != nil {

@@ -1,14 +1,16 @@
 package auth
 
 import (
-	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	"slices"
+
+	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 )
 
 var (
 	// SupportedAuthenticatorsList is a list of supported authenticators.
 	SupportedAuthenticatorsList = []IdsecAuth{
 		NewIdsecISPAuth(true),
+		NewIdsecPVWAAuth(true),
 	}
 
 	// SupportedAuthenticators is a map of supported authenticators.

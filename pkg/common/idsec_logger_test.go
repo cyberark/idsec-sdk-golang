@@ -2,8 +2,10 @@ package common
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -800,5 +802,226 @@ func TestGlobalLogger(t *testing.T) {
 
 	if !GlobalLogger.resolveLogLevelFromEnv {
 		t.Error("Expected GlobalLogger to resolve log level from environment")
+	}
+}
+
+func TestResolveFileLoggingConfig(t *testing.T) {
+	originalPath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	originalLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	originalTool := config.IdsecToolInUse()
+	defer func() {
+		if originalPath != "" {
+			_ = os.Setenv(config.IdsecFileLogPathEnvVar, originalPath)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+		}
+		if originalLevel != "" {
+			_ = os.Setenv(config.IdsecFileLogLevelEnvVar, originalLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+		}
+		config.SetIdsecToolInUse(originalTool)
+	}()
+	config.SetIdsecToolInUse(config.IdsecToolCLI)
+
+	// When env var is unset, file logging should still be enabled with the default path.
+	_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+	_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+	writer, level, enabled := resolveFileLoggingConfig()
+	if !enabled {
+		t.Fatal("Expected file logging to be enabled with default path when env var is unset")
+	}
+	if writer == nil {
+		t.Fatal("Expected file writer to be initialized with default path")
+	}
+	if level != Info {
+		t.Fatalf("Expected default file log level Info, got %d", level)
+	}
+
+	// When env var is explicitly set, file logging should use the custom path.
+	customPath := filepath.Join(t.TempDir(), "sdk.log")
+	_ = os.Setenv(config.IdsecFileLogPathEnvVar, customPath)
+	_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+	writer, level, enabled = resolveFileLoggingConfig()
+	if !enabled {
+		t.Fatal("Expected file logging to be enabled when file path is set")
+	}
+	if writer == nil {
+		t.Fatal("Expected file writer to be initialized when file logging is enabled")
+	}
+	if level != Info {
+		t.Fatalf("Expected default file log level Info, got %d", level)
+	}
+}
+
+func TestResolveFileLoggingConfig_ExplicitlyDisabled(t *testing.T) {
+	originalPath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	originalLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	originalTool := config.IdsecToolInUse()
+	defer func() {
+		if originalPath != "" {
+			_ = os.Setenv(config.IdsecFileLogPathEnvVar, originalPath)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+		}
+		if originalLevel != "" {
+			_ = os.Setenv(config.IdsecFileLogLevelEnvVar, originalLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+		}
+		config.SetIdsecToolInUse(originalTool)
+	}()
+	config.SetIdsecToolInUse(config.IdsecToolCLI)
+
+	disableValues := []string{"none", "NONE", "off", "Off"}
+	for _, val := range disableValues {
+		_ = os.Setenv(config.IdsecFileLogPathEnvVar, filepath.Join(t.TempDir(), "sdk.log"))
+		_ = os.Setenv(config.IdsecFileLogLevelEnvVar, val)
+		_, _, enabled := resolveFileLoggingConfig()
+		if enabled {
+			t.Fatalf("Expected file logging to be disabled for IDSEC_FILE_LOG_LEVEL=%q", val)
+		}
+	}
+}
+
+func TestResolveFileLoggingConfig_DisabledForNonCLI(t *testing.T) {
+	originalPath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	originalLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	originalTool := config.IdsecToolInUse()
+	defer func() {
+		if originalPath != "" {
+			_ = os.Setenv(config.IdsecFileLogPathEnvVar, originalPath)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+		}
+		if originalLevel != "" {
+			_ = os.Setenv(config.IdsecFileLogLevelEnvVar, originalLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+		}
+		config.SetIdsecToolInUse(originalTool)
+	}()
+
+	_ = os.Setenv(config.IdsecFileLogPathEnvVar, filepath.Join(t.TempDir(), "sdk.log"))
+	_ = os.Setenv(config.IdsecFileLogLevelEnvVar, "DEBUG")
+	config.SetIdsecToolInUse(config.IdsecToolSDK)
+
+	writer, level, enabled := resolveFileLoggingConfig()
+	if enabled {
+		t.Fatal("Expected file logging to be disabled for non-CLI tool")
+	}
+	if writer != nil {
+		t.Fatal("Expected file writer to be nil for non-CLI tool")
+	}
+	if level != Critical {
+		t.Fatalf("Expected fallback level Critical for disabled file logging, got %d", level)
+	}
+}
+
+func TestIdsecLogger_FileLoggingIndependentFromStdout(t *testing.T) {
+	originalStdoutLevel := os.Getenv(config.IdsecLogLevelEnvVar)
+	originalFilePath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	originalFileLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	originalTool := config.IdsecToolInUse()
+	defer func() {
+		if originalStdoutLevel != "" {
+			_ = os.Setenv(config.IdsecLogLevelEnvVar, originalStdoutLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecLogLevelEnvVar)
+		}
+		if originalFilePath != "" {
+			_ = os.Setenv(config.IdsecFileLogPathEnvVar, originalFilePath)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+		}
+		if originalFileLevel != "" {
+			_ = os.Setenv(config.IdsecFileLogLevelEnvVar, originalFileLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+		}
+		config.SetIdsecToolInUse(originalTool)
+	}()
+	config.SetIdsecToolInUse(config.IdsecToolCLI)
+
+	filePath := filepath.Join(t.TempDir(), "idsec-file.log")
+	_ = os.Setenv(config.IdsecLogLevelEnvVar, "CRITICAL")
+	_ = os.Setenv(config.IdsecFileLogPathEnvVar, filePath)
+	_ = os.Setenv(config.IdsecFileLogLevelEnvVar, "INFO")
+
+	logger := NewIdsecLogger("test-app", Unknown, true, true)
+	var stdoutBuffer bytes.Buffer
+	logger.Logger = log.New(&stdoutBuffer, "test-app", log.LstdFlags)
+
+	logger.Info("file-only message")
+
+	if stdoutBuffer.Len() != 0 {
+		t.Fatalf("Expected no stdout output at CRITICAL level, got: %s", stdoutBuffer.String())
+	}
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Expected file log to be written, failed reading file: %v", err)
+	}
+	if !strings.Contains(string(fileContent), "file-only message") {
+		t.Fatalf("Expected file log to contain message, got: %s", string(fileContent))
+	}
+}
+
+func TestIdsecLogger_FileLogLevelFiltering(t *testing.T) {
+	originalFilePath := os.Getenv(config.IdsecFileLogPathEnvVar)
+	originalFileLevel := os.Getenv(config.IdsecFileLogLevelEnvVar)
+	originalTool := config.IdsecToolInUse()
+	defer func() {
+		if originalFilePath != "" {
+			_ = os.Setenv(config.IdsecFileLogPathEnvVar, originalFilePath)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogPathEnvVar)
+		}
+		if originalFileLevel != "" {
+			_ = os.Setenv(config.IdsecFileLogLevelEnvVar, originalFileLevel)
+		} else {
+			_ = os.Unsetenv(config.IdsecFileLogLevelEnvVar)
+		}
+		config.SetIdsecToolInUse(originalTool)
+	}()
+	config.SetIdsecToolInUse(config.IdsecToolCLI)
+
+	filePath := filepath.Join(t.TempDir(), "filtered.log")
+	_ = os.Setenv(config.IdsecFileLogPathEnvVar, filePath)
+	_ = os.Setenv(config.IdsecFileLogLevelEnvVar, "ERROR")
+
+	logger := NewIdsecLogger("test-app", Debug, true, false)
+	logger.Info("info-should-not-be-written")
+
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Failed to read file log: %v", err)
+	}
+	if strings.Contains(string(fileContent), "info-should-not-be-written") {
+		t.Fatalf("Expected info message to be filtered out by file log level ERROR, got: %s", string(fileContent))
+	}
+}
+
+func TestRotatingFileWriter_Rotates(t *testing.T) {
+	logFilePath := filepath.Join(t.TempDir(), "idsec.log")
+	writer := &rotatingFileWriter{
+		filePath:          logFilePath,
+		maxSizeBytes:      20,
+		maxBackups:        2,
+		statCheckInterval: 1,
+	}
+
+	if _, err := writer.Write([]byte("1234567890\n")); err != nil {
+		t.Fatalf("failed to write first log line: %v", err)
+	}
+	if _, err := writer.Write([]byte("abcdefghij\n")); err != nil {
+		t.Fatalf("failed to write second log line: %v", err)
+	}
+	// Third write triggers the stat check that detects the file exceeded maxSizeBytes.
+	if _, err := writer.Write([]byte("trigger\n")); err != nil {
+		t.Fatalf("failed to write third log line: %v", err)
+	}
+
+	if _, err := os.Stat(logFilePath + ".1"); err != nil {
+		t.Fatalf("expected rotated log file '%s.1' to exist: %v", logFilePath, err)
 	}
 }

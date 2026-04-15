@@ -3,6 +3,7 @@ package azure
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure/actions"
 )
 
 // ServiceConfig is the configuration for the CCE Azure service.
@@ -10,20 +11,8 @@ var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "cce-azure",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
-	ActionsConfigurations: map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{
-		actions.IdsecServiceActionTypeTerraformResource: {
-			// azureactions.TerraformActionEntraResource,
-			// azureactions.TerraformActionManagementGroupResource,
-			// azureactions.TerraformActionSubscriptionResource,
-		},
-		actions.IdsecServiceActionTypeTerraformDataSource: {
-			// azureactions.TerraformActionEntraDataSource,
-			// azureactions.TerraformActionManagementGroupDataSource,
-			// azureactions.TerraformActionSubscriptionDataSource,
-			// azureactions.TerraformActionWorkspacesDataSource,
-			// azureactions.TerraformActionIdentityParamsDataSource,
-		},
-	},
+	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
+	ActionSchemas:              svcactions.ActionToSchemaMap,
 }
 
 // ServiceGenerator is the function that creates a new instance of the CCE Azure service.

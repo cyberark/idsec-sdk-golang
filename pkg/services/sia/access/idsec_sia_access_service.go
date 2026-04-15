@@ -30,6 +30,11 @@ const (
 	connectorTestReachabilityURL = "/api/connectors/%s/reachability"
 	connectorMaintenanceURL      = "/api/connectors/%s/maintenance"
 
+	httpsRelaysURL           = "/api/https-relays"
+	httpsRelayURL            = "/api/https-relays/%s"
+	httpsRelayUpgradeURL     = "/api/https-relays/%s/upgrade"
+	httpsRelaySetupScriptURL = "/api/https-relays/setup-script"
+
 	// Linux / Darwin Commands
 	unixStopConnectorServiceCmd   = "sudo systemctl stop cyberark-dpa-connector"
 	unixRemoveConnectorServiceCmd = "sudo rm -f /etc/systemd/system/cyberark-dpa-connector.service && sudo rm -f /usr/lib/systemd/system/cyberark-dpa-connector.service && sudo systemctl daemon-reload && sudo systemctl reset-failed"
@@ -49,7 +54,27 @@ const (
 	connectorInstallRetryTick  = 10.0 * time.Second
 	connectorReadyRetryCount   = 10
 	connectorRetryTick         = 3.0 * time.Second
+
+	// Linux / Darwin Relay Commands
+	unixStopRelayServiceCmd   = "sudo systemctl stop cyberark-sia-https-relay"
+	unixRemoveRelayServiceCmd = "sudo rm -f /etc/systemd/system/cyberark-sia-https-relay.service && sudo rm -f /usr/lib/systemd/system/cyberark-sia-https-relay.service && sudo systemctl daemon-reload && sudo systemctl reset-failed"
+	unixRemoveRelayFilesCmd   = "sudo rm -rf /opt/cyberark-relay"
+	unixRelayActiveCmd        = "sudo systemctl is-active --quiet cyberark-sia-https-relay"
+	unixReadRelayConfigCmd    = "sudo cat /opt/cyberark-relay/https-relay/https-relay.config.json"
+
+	// Windows Relay Commands
+	winStopRelayServiceCmd   = "Stop-Service -Name \"CyberArkSIAHttpsRelay\""
+	winRemoveRelayServiceCmd = `$service = Get-WmiObject -Class Win32_Service -Filter "Name='CyberArkSIAHttpsRelay'"; $service.delete()`
+	winRemoveRelayFilesCmd   = "Remove-Item -LiteralPath \"C:\\Program Files\\CyberArk\\SIAHttpsRelay\" -Force -Recurse"
+	winRelayActiveCmd        = `$result = Get-Service -Name "CyberArkSIAHttpsRelay"; if ($result.Status -ne 'Running') { return 1 }`
+	winReadRelayConfigCmd    = "Get-Content -Path \"C:\\Program Files\\CyberArk\\SIAHttpsRelay\\https-relay.config.json\""
+
+	relayReadyRetryCount = 10
+	relayRetryTick       = 3.0 * time.Second
 )
+
+// IdsecSIAHTTPSRelayPage is a page of IdsecSIAHTTPSRelay items.
+type IdsecSIAHTTPSRelayPage = common.IdsecPage[accessmodels.IdsecSIAHTTPSRelay]
 
 // ConnectorCmdSet maps OS types to their respective command sets.
 var connectorCmdSet = map[string]map[string]string{
@@ -79,12 +104,34 @@ var connectorInstallRetryErrors = []string{
 	"invalid content type",
 }
 
+var relayCmdSet = map[string]map[string]string{
+	commonmodels.OSTypeLinux: {
+		"stopRelayService":   unixStopRelayServiceCmd,
+		"removeRelayService": unixRemoveRelayServiceCmd,
+		"removeRelayFiles":   unixRemoveRelayFilesCmd,
+		"relayActive":        unixRelayActiveCmd,
+		"readRelayConfig":    unixReadRelayConfigCmd,
+	},
+	commonmodels.OSTypeDarwin: {
+		"stopRelayService":   unixStopRelayServiceCmd,
+		"removeRelayService": unixRemoveRelayServiceCmd,
+		"removeRelayFiles":   unixRemoveRelayFilesCmd,
+		"relayActive":        unixRelayActiveCmd,
+		"readRelayConfig":    unixReadRelayConfigCmd,
+	},
+	commonmodels.OSTypeWindows: {
+		"stopRelayService":   winStopRelayServiceCmd,
+		"removeRelayService": winRemoveRelayServiceCmd,
+		"removeRelayFiles":   winRemoveRelayFilesCmd,
+		"relayActive":        winRelayActiveCmd,
+		"readRelayConfig":    winReadRelayConfigCmd,
+	},
+}
+
 // IdsecSIAAccessService is a struct that implements the IdsecService interface and provides functionality for Connectors of SIA.
 type IdsecSIAAccessService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 
 	doGet func(ctx context.Context, path string, params map[string]string) (*http.Response, error)
 }
@@ -102,18 +149,17 @@ func NewIdsecSIAAccessService(authenticators ...auth.IdsecAuth) (*IdsecSIAAccess
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "dpa", ".", "", accessService.refreshSIAAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", accessService.refreshSIAAuth)
 	if err != nil {
 		return nil, err
 	}
-	accessService.client = client
-	accessService.ispAuth = ispAuth
 	accessService.IdsecBaseService = baseService
+	accessService.IdsecISPBaseService = ispBaseService
 	return accessService, nil
 }
 
 func (s *IdsecSIAAccessService) refreshSIAAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -360,7 +406,7 @@ func (s *IdsecSIAAccessService) TestConnectorReachability(testReachabilityReques
 		},
 		"checkBackendEndpoints": testReachabilityRequest.CheckBackendEndpoints,
 	}
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(connectorTestReachabilityURL, testReachabilityRequest.ConnectorID), testReachabilityRequestJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(connectorTestReachabilityURL, testReachabilityRequest.ConnectorID), testReachabilityRequestJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +439,7 @@ func (s *IdsecSIAAccessService) ConnectorSetupScript(getConnectorSetupScript *ac
 	if err != nil {
 		return nil, err
 	}
-	response, err := s.client.Post(context.Background(), connectorSetupScriptURL, getConnectorSetupScriptJSON)
+	response, err := s.ISPClient().Post(context.Background(), connectorSetupScriptURL, getConnectorSetupScriptJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +528,7 @@ func (s *IdsecSIAAccessService) DeleteConnector(deleteConnector *accessmodels.Id
 	)
 	currentTryCount := 0
 	for {
-		response, err := s.client.Delete(context.Background(), fmt.Sprintf(connectorURL, deleteConnector.ConnectorID), nil, nil)
+		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(connectorURL, deleteConnector.ConnectorID), nil, nil)
 		if err != nil {
 			return err
 		}
@@ -507,7 +553,7 @@ func (s *IdsecSIAAccessService) ListConnectors() (*accessmodels.IdsecSIAConnecto
 	getFn := s.doGet
 	if getFn == nil {
 		getFn = func(ctx context.Context, path string, params map[string]string) (*http.Response, error) {
-			return s.client.Get(ctx, path, params)
+			return s.ISPClient().Get(ctx, path, params)
 		}
 	}
 
@@ -545,7 +591,7 @@ func (s *IdsecSIAAccessService) UpdateConnectorMaintenanceMode(maintenanceConnec
 
 	currentTryCount := 0
 	for {
-		response, err := s.client.Put(context.Background(), fmt.Sprintf(connectorMaintenanceURL, maintenanceConnector.ConnectorID), requestBody)
+		response, err := s.ISPClient().Put(context.Background(), fmt.Sprintf(connectorMaintenanceURL, maintenanceConnector.ConnectorID), requestBody)
 		if err != nil {
 			return nil, err
 		}
@@ -578,6 +624,311 @@ func (s *IdsecSIAAccessService) UpdateConnectorMaintenanceMode(maintenanceConnec
 		}
 		return &status, nil
 	}
+}
+
+// ListRelays returns HTTPS relays page-by-page via a channel.
+// Each page contains up to 500 items (server-enforced maximum). The channel is
+// closed when all pages have been delivered or an error occurs during pagination;
+// errors are logged and cause the channel to be closed early.
+//
+// Example:
+//
+//	pages, err := service.ListRelays()
+//	if err != nil {
+//	    return err
+//	}
+//	for page := range pages {
+//	    for _, relay := range page.Items {
+//	        fmt.Printf("Relay: %s\n", relay.ID)
+//	    }
+//	}
+func (s *IdsecSIAAccessService) ListRelays() (<-chan *IdsecSIAHTTPSRelayPage, error) {
+	s.Logger.Info("Listing all HTTPS relays")
+	output := make(chan *IdsecSIAHTTPSRelayPage)
+
+	go func() {
+		defer close(output)
+
+		queryParams := map[string]string{}
+		for {
+			response, err := s.ISPClient().Get(context.Background(), httpsRelaysURL, queryParams)
+			if err != nil {
+				s.Logger.Error("Failed to list HTTPS relays: %v", err)
+				return
+			}
+
+			if response.StatusCode != http.StatusOK {
+				s.Logger.Error("Failed to list HTTPS relays - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+				_ = response.Body.Close()
+				return
+			}
+
+			result, err := common.DeserializeJSONSnake(response.Body)
+			_ = response.Body.Close()
+			if err != nil {
+				s.Logger.Error("Failed to decode HTTPS relays response: %v", err)
+				return
+			}
+
+			var page IdsecSIAHTTPSRelayPage
+			if err = mapstructure.Decode(result, &page); err != nil {
+				s.Logger.Error("Failed to decode HTTPS relay items: %v", err)
+				return
+			}
+
+			if len(page.Items) > 0 {
+				output <- &page
+			}
+
+			if page.ContinuationToken == "" {
+				break
+			}
+			queryParams["continuationToken"] = page.ContinuationToken
+		}
+	}()
+
+	return output, nil
+}
+
+// GetRelay retrieves a specific HTTPS relay by its ID by scanning the full list.
+func (s *IdsecSIAAccessService) GetRelay(getRelay *accessmodels.IdsecSIAGetHTTPSRelay) (*accessmodels.IdsecSIAHTTPSRelay, error) {
+	if getRelay.ID == "" {
+		return nil, fmt.Errorf("HTTPS relay ID is required")
+	}
+	s.Logger.Info("Retrieving HTTPS relay [%s]", getRelay.ID)
+	pages, err := s.ListRelays()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve HTTPS relay: %w", err)
+	}
+	for page := range pages {
+		for _, relay := range page.Items {
+			if relay.ID == getRelay.ID {
+				return relay, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("HTTPS relay [%s] not found", getRelay.ID)
+}
+
+// DeleteRelay deletes an existing HTTPS relay.
+func (s *IdsecSIAAccessService) DeleteRelay(deleteRelay *accessmodels.IdsecSIADeleteHTTPSRelay) error {
+	if deleteRelay.ID == "" {
+		return fmt.Errorf("HTTPS relay ID is required")
+	}
+	s.Logger.Info("Deleting HTTPS relay [%s]", deleteRelay.ID)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(httpsRelayURL, deleteRelay.ID), nil, nil)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("failed to delete HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	return nil
+}
+
+// UpgradeRelay initiates an upgrade process for an existing HTTPS relay.
+func (s *IdsecSIAAccessService) UpgradeRelay(upgradeRelay *accessmodels.IdsecSIAUpgradeHTTPSRelay) error {
+	if upgradeRelay.ID == "" {
+		return fmt.Errorf("HTTPS relay ID is required")
+	}
+	s.Logger.Info("Upgrading HTTPS relay [%s]", upgradeRelay.ID)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(httpsRelayUpgradeURL, upgradeRelay.ID), nil)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to upgrade HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	return nil
+}
+
+// RelaySetupScript generates an installation setup script for a new HTTPS relay.
+func (s *IdsecSIAAccessService) RelaySetupScript(installRelay *accessmodels.IdsecSIAHTTPSRelaySetupScriptRequest) (*accessmodels.IdsecSIAHTTPSRelaySetupScript, error) {
+	s.Logger.Info("Generating HTTPS relay installation script")
+	var installRelayJSON map[string]interface{}
+	err := mapstructure.Decode(installRelay, &installRelayJSON)
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.ISPClient().Post(context.Background(), httpsRelaySetupScriptURL, installRelayJSON)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("failed to generate HTTPS relay installation script - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	setupScriptJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	var setupScript accessmodels.IdsecSIAHTTPSRelaySetupScript
+	err = mapstructure.Decode(setupScriptJSON, &setupScript)
+	if err != nil {
+		return nil, err
+	}
+	return &setupScript, nil
+}
+
+func (s *IdsecSIAAccessService) installRelayOnMachine(
+	installScript string,
+	osType string,
+	targetMachine string,
+	username string,
+	password string,
+	privateKeyPath string,
+	privateKeyContents string,
+	retryCount int,
+	retryDelay int,
+	winrmProtocol string,
+) (string, error) {
+	connection, _, err := s.createConnection(
+		osType,
+		targetMachine,
+		username,
+		password,
+		privateKeyPath,
+		privateKeyContents,
+		retryCount,
+		retryDelay,
+		winrmProtocol,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create connection: %w", err)
+	}
+	defer func(connection connections.IdsecConnection) {
+		err := connection.Disconnect()
+		if err != nil {
+			s.Logger.Warning("failed to disconnect: %v", err)
+		}
+	}(connection)
+
+	cmdSet := relayCmdSet[osType]
+
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["stopRelayService"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to stop existing HTTPS relay service (if any): %v", err)
+	}
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["removeRelayService"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to remove existing HTTPS relay service (if any): %v", err)
+	}
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["removeRelayFiles"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to remove existing HTTPS relay files (if any): %v", err)
+	}
+
+	if osType == commonmodels.OSTypeWindows {
+		_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+			Command:          installScript,
+			ExtraCommandData: map[string]interface{}{"force_command_split": true},
+			RetryCount:       connectorInstallRetryCount,
+			RetryDelay:       int(connectorInstallRetryTick.Seconds()),
+			RetryOnErrors:    connectorInstallRetryErrors,
+		})
+	} else {
+		_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+			Command: installScript,
+		})
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to install HTTPS relay: %w", err)
+	}
+
+	currRelayReadyRetryCount := relayReadyRetryCount
+	for {
+		_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+			Command: cmdSet["relayActive"],
+		})
+		if err == nil {
+			break
+		}
+		if currRelayReadyRetryCount > 0 {
+			currRelayReadyRetryCount--
+			time.Sleep(relayRetryTick)
+			continue
+		}
+		return "", fmt.Errorf("failed to check if HTTPS relay is active: %w", err)
+	}
+
+	result, err := connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["readRelayConfig"],
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to read HTTPS relay config: %w", err)
+	}
+
+	var relayConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(result.Stdout), &relayConfig); err != nil {
+		return "", fmt.Errorf("failed to parse HTTPS relay config: %w", err)
+	}
+	relayID, ok := relayConfig["id"].(string)
+	if !ok {
+		relayID, ok = relayConfig["Id"].(string)
+		if !ok {
+			return "", fmt.Errorf("HTTPS relay ID not found in config")
+		}
+	}
+	return relayID, nil
+}
+
+// InstallRelay installs an HTTPS relay on the target machine.
+func (s *IdsecSIAAccessService) InstallRelay(installRelay *accessmodels.IdsecSIAInstallRelay) (*accessmodels.IdsecSIAHTTPSRelay, error) {
+	s.Logger.Info(
+		"Installing HTTPS relay on machine [%s] of type [%s]",
+		installRelay.TargetMachine,
+		installRelay.HTTPSRelayOS,
+	)
+	setupScript, err := s.RelaySetupScript(&accessmodels.IdsecSIAHTTPSRelaySetupScriptRequest{
+		HTTPSRelayOS:            installRelay.HTTPSRelayOS,
+		ExpirationMinutes:       installRelay.ExpirationMinutes,
+		ProtocolPortMap:         installRelay.ProtocolPortMap,
+		ProxyHost:               installRelay.ProxyHost,
+		ProxyPort:               installRelay.ProxyPort,
+		WindowsInstallationPath: installRelay.WindowsInstallationPath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve HTTPS relay setup script: %w", err)
+	}
+	relayID, err := s.installRelayOnMachine(
+		setupScript.BashCmd,
+		installRelay.HTTPSRelayOS,
+		installRelay.TargetMachine,
+		installRelay.Username,
+		installRelay.Password,
+		strings.TrimSuffix(common.ExpandFolder(installRelay.PrivateKeyPath), "/"),
+		installRelay.PrivateKeyContents,
+		installRelay.RetryCount,
+		installRelay.RetryDelay,
+		installRelay.WinRMProtocol,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetRelay(&accessmodels.IdsecSIAGetHTTPSRelay{ID: relayID})
 }
 
 // ServiceConfig returns the service configuration for the IdsecSIAAccessService.

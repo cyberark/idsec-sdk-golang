@@ -27,6 +27,8 @@ type TfIdsecCCEAzureGetIdentityParams struct {
 // ⚠️  It exists only for compatibility with Terraform provider.
 // OPENAPI-CORRELATION: GetIdentityParamsOutput
 type TfIdsecCCEAzureIdentityParams struct {
+	// TenantID is the tenant identifier.
+	TenantID string `json:"tenant_id" mapstructure:"tenant_id" desc:"Azure tenant identifier"`
 	// IdentityParams contains a map of service names to their workload federation identity details.
 	// Keys are service names (e.g., "cds", "dpa", "cloud_onboarding") and values are identity objects.
 	IdentityParams map[string]IdsecCCEWorkloadFederation `json:"identity_params" mapstructure:"identity_params" desc:"Map of service names to identity parameters"`

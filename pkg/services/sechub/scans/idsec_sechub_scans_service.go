@@ -24,10 +24,8 @@ type IdsecSecHubScansPage = common.IdsecPage[scansmodels.IdsecSecHubScan]
 
 // IdsecSecHubScansService is the service for interacting with Secrets Hub scans
 type IdsecSecHubScansService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSecHubScansService creates a new instance of IdsecSecHubscansService.
@@ -43,37 +41,37 @@ func NewIdsecSecHubScansService(authenticators ...auth.IdsecAuth) (*IdsecSecHubS
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "secretshub", ".", "", scansService.refreshSecHubAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "secretshub", ".", "", scansService.refreshSecHubAuth)
 	if err != nil {
 		return nil, err
 	}
 	// Required as endpoints are currently beta
-	client.UpdateHeaders(map[string]string{
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"Accept": "application/x.secretshub.beta+json",
 	})
-	scansService.client = client
-	scansService.ispAuth = ispAuth
+
 	scansService.IdsecBaseService = baseService
+	scansService.IdsecISPBaseService = ispBaseService
 	return scansService, nil
 }
 
 func (s *IdsecSecHubScansService) refreshSecHubAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// Scans retrieves the scans info from the Secrets Hub service.
+// Get retrieves the scans info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/78cprz38emhrb-get-scans
-func (s *IdsecSecHubScansService) Scans() (<-chan *IdsecSecHubScansPage, error) {
+func (s *IdsecSecHubScansService) Get() (<-chan *IdsecSecHubScansPage, error) {
 	s.Logger.Info("Getting scans")
 
 	results := make(chan *IdsecSecHubScansPage)
 	go func() {
 		defer close(results)
-		response, err := s.client.Get(context.Background(), sechubURL, nil)
+		response, err := s.ISPClient().Get(context.Background(), sechubURL, nil)
 		if err != nil {
 			s.Logger.Error("Failed to list filters: %v", err)
 			return
@@ -119,9 +117,9 @@ func (s *IdsecSecHubScansService) Scans() (<-chan *IdsecSecHubScansPage, error) 
 	return results, nil
 }
 
-// TriggerScan triggers scans in the Secrets Hub service.
+// Trigger triggers scans in the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/kyc9azwliw2xa-trigger-scan
-func (s *IdsecSecHubScansService) TriggerScan(triggerScan *scansmodels.IdsecSecHubTriggerScans) (*scansmodels.IdsecSecHubScanIDs, error) {
+func (s *IdsecSecHubScansService) Trigger(triggerScan *scansmodels.IdsecSecHubTriggerScans) (*scansmodels.IdsecSecHubScanIDs, error) {
 	bodyMap := scansmodels.IdsecSecHubScanMap{
 		Scope: scansmodels.IdsecSecHubSecretStoreIds{
 			SecretStoresIds: triggerScan.SecretStoresIds,
@@ -132,7 +130,7 @@ func (s *IdsecSecHubScansService) TriggerScan(triggerScan *scansmodels.IdsecSecH
 		return nil, err
 	}
 	s.Logger.Info("Triggering scan. Scan ID %s", triggerScan.ID)
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(triggerURL, triggerScan.Type, triggerScan.ID), bodyMapJSON)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(triggerURL, triggerScan.Type, triggerScan.ID), bodyMapJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -157,10 +155,10 @@ func (s *IdsecSecHubScansService) TriggerScan(triggerScan *scansmodels.IdsecSecH
 	return &scans, nil
 }
 
-// ScansStats retrieves statistics about scans.
-func (s *IdsecSecHubScansService) ScansStats() (*scansmodels.IdsecSecHubScanStats, error) {
+// Stats retrieves statistics about scans.
+func (s *IdsecSecHubScansService) Stats() (*scansmodels.IdsecSecHubScanStats, error) {
 	s.Logger.Info("Retrieving scan stats")
-	scansChan, err := s.Scans()
+	scansChan, err := s.Get()
 	if err != nil {
 		return nil, err
 	}

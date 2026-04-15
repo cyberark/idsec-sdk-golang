@@ -63,10 +63,8 @@ const (
 //
 // Exported methods have comprehensive documentation per project standards.
 type IdsecSCAService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSCAService creates a new standalone SCA service instance using provided authenticators.
@@ -77,8 +75,7 @@ type IdsecSCAService struct {
 // Returns *IdsecSCAService or error if required authenticators missing or client init fails.
 func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, error) {
 	svc := &IdsecSCAService{}
-	var svcIface services.IdsecService = svc
-	base, err := services.NewIdsecBaseService(svcIface, authenticators...)
+	base, err := services.NewIdsecBaseService(svc, authenticators...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,14 +84,15 @@ func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, err
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	svc.ispAuth = ispAuth
-	client, err := isp.FromISPAuth(ispAuth, "sca", ".", "", svc.refreshScaAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "sca", ".", "", svc.refreshScaAuth)
 	if err != nil {
 		return nil, err
 	}
-	client.SetHeader("X-API-Version", "2.0")
-	svc.client = client
+	ispBaseService.ISPClient().SetHeader("X-API-Version", "2.0")
+
 	svc.IdsecBaseService = base
+	svc.IdsecISPBaseService = ispBaseService
 	return svc, nil
 }
 
@@ -103,7 +101,7 @@ func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, err
 // It delegates to isp.RefreshClient using the stored ispAuth. Returns any
 // propagation error from the refresh attempt.
 func (s *IdsecSCAService) refreshScaAuth(client *common.IdsecClient) error {
-	return isp.RefreshClient(client, s.ispAuth)
+	return isp.RefreshClient(client, s.ISPAuth())
 }
 
 // serializePayload copies all JSON-marshalable keys from req into a generic map[string]interface{}.
@@ -148,7 +146,7 @@ func (s *IdsecSCAService) discoveryRequest(req *scamodels.IdsecSCADiscoveryReque
 		return nil, err
 	}
 	s.Logger.Info("Starting SCA discovery for CSP [%s] Org [%s] Account [%s]", req.CSP, req.OrganizationID, req.AccountInfo.ID)
-	resp, err := s.client.Post(context.Background(), discoveryURL, payloadMap)
+	resp, err := s.ISPClient().Post(context.Background(), discoveryURL, payloadMap)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +188,7 @@ func (s *IdsecSCAService) jobStatus(jobID string) (*scamodels.IdsecSCAJobStatusR
 	}
 	params := map[string]string{"jobId": jobID}
 	s.Logger.Info("Polling SCA job status for job [%s]", jobID)
-	resp, err := s.client.Get(context.Background(), jobStatusURL, params)
+	resp, err := s.ISPClient().Get(context.Background(), jobStatusURL, params)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +317,7 @@ func (s *IdsecSCAService) Discovery(req *scamodels.IdsecSCADiscoveryRequest) (*s
 	if req.AccountInfo.ID == "" {
 		return nil, fmt.Errorf("account_info.id cannot be empty")
 	}
-	if s == nil || s.client == nil {
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca service not initialized")
 	}
 	s.Logger.Info("Start SCA Discovery [%s]", req.AccountInfo.ID)

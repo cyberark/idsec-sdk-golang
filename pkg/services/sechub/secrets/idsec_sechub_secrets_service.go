@@ -24,10 +24,8 @@ type IdsecSecHubSecretsPage = common.IdsecPage[secretsmodels.IdsecSecHubSecret]
 
 // IdsecSecHubSecretsService is the service for interacting with Secrets Hub secrets
 type IdsecSecHubSecretsService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSecHubSecretsService creates a new instance of IdsecSecHubSecretsService.
@@ -43,22 +41,23 @@ func NewIdsecSecHubSecretsService(authenticators ...auth.IdsecAuth) (*IdsecSecHu
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "secretshub", ".", "", secretsService.refreshSecHubAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "secretshub", ".", "", secretsService.refreshSecHubAuth)
 	if err != nil {
 		return nil, err
 	}
 	// Required as endpoints are currently beta
-	client.UpdateHeaders(map[string]string{
+	ispBaseService.ISPClient().UpdateHeaders(map[string]string{
 		"Accept": "application/x.secretshub.beta+json",
 	})
-	secretsService.client = client
-	secretsService.ispAuth = ispAuth
+
 	secretsService.IdsecBaseService = baseService
+	secretsService.IdsecISPBaseService = ispBaseService
 	return secretsService, nil
 }
 
 func (s *IdsecSecHubSecretsService) refreshSecHubAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
@@ -92,7 +91,7 @@ func (s *IdsecSecHubSecretsService) getSecretsWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.client.Get(context.Background(), sechubURL, query)
+			response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
 			if err != nil {
 				s.Logger.Error("Failed to list Secrets %v", err)
 				return
@@ -150,9 +149,9 @@ func (s *IdsecSecHubSecretsService) getSecretsWithFilters(
 	return results, nil
 }
 
-// Secrets returns a channel of IdsecSecHubSecretsPage containing all Secret Stores.
+// Get returns a channel of IdsecSecHubSecretsPage containing all Secret Stores.
 // https://api-docs.cyberark.com/docs/secretshub-api/kdyou8dae9r8m-get-secrets
-func (s *IdsecSecHubSecretsService) Secrets() (<-chan *IdsecSecHubSecretsPage, error) {
+func (s *IdsecSecHubSecretsService) Get() (<-chan *IdsecSecHubSecretsPage, error) {
 	return s.getSecretsWithFilters(
 		"",
 		"",
@@ -162,8 +161,8 @@ func (s *IdsecSecHubSecretsService) Secrets() (<-chan *IdsecSecHubSecretsPage, e
 	)
 }
 
-// ListSecretsBy returns a channel of IdsecSecHubSecretsPage containing secrets filtered by the given filters.
-func (s *IdsecSecHubSecretsService) ListSecretsBy(secretsFilters *secretsmodels.IdsecSecHubSecretsFilter) (<-chan *IdsecSecHubSecretsPage, error) {
+// ListBy returns a channel of IdsecSecHubSecretsPage containing secrets filtered by the given filters.
+func (s *IdsecSecHubSecretsService) ListBy(secretsFilters *secretsmodels.IdsecSecHubSecretsFilter) (<-chan *IdsecSecHubSecretsPage, error) {
 	return s.getSecretsWithFilters(
 		secretsFilters.Projection,
 		secretsFilters.Filter,
@@ -173,10 +172,10 @@ func (s *IdsecSecHubSecretsService) ListSecretsBy(secretsFilters *secretsmodels.
 	)
 }
 
-// SecretsStats retrieves statistics about secrets.
-func (s *IdsecSecHubSecretsService) SecretsStats() (*secretsmodels.IdsecSecHubSecretsStats, error) {
+// Stats retrieves statistics about secrets.
+func (s *IdsecSecHubSecretsService) Stats() (*secretsmodels.IdsecSecHubSecretsStats, error) {
 	s.Logger.Info("Retrieving secret stats")
-	secretsChan, err := s.Secrets()
+	secretsChan, err := s.Get()
 	if err != nil {
 		return nil, err
 	}

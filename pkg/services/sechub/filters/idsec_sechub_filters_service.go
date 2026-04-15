@@ -24,10 +24,8 @@ type IdsecSecHubFiltersPage = common.IdsecPage[filtersmodels.IdsecSecHubFilter]
 
 // IdsecSecHubFiltersService is the service for interacting with Secrets Hub filters
 type IdsecSecHubFiltersService struct {
-	services.IdsecService
 	*services.IdsecBaseService
-	ispAuth *auth.IdsecISPAuth
-	client  *isp.IdsecISPServiceClient
+	*services.IdsecISPBaseService
 }
 
 // NewIdsecSecHubFiltersService creates a new instance of IdsecSecHubFiltersService.
@@ -43,27 +41,28 @@ func NewIdsecSecHubFiltersService(authenticators ...auth.IdsecAuth) (*IdsecSecHu
 		return nil, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
-	client, err := isp.FromISPAuth(ispAuth, "secretshub", ".", "", filtersService.refreshSecHubAuth)
+
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "secretshub", ".", "", filtersService.refreshSecHubAuth)
 	if err != nil {
 		return nil, err
 	}
-	filtersService.client = client
-	filtersService.ispAuth = ispAuth
+
 	filtersService.IdsecBaseService = baseService
+	filtersService.IdsecISPBaseService = ispBaseService
 	return filtersService, nil
 }
 
 func (s *IdsecSecHubFiltersService) refreshSecHubAuth(client *common.IdsecClient) error {
-	err := isp.RefreshClient(client, s.ispAuth)
+	err := isp.RefreshClient(client, s.ISPAuth())
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// Filter retrieves the filters info from the Secrets Hub service.
+// Get retrieves the filters info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/rqykgubx980ul-get-secrets-filter
-func (s *IdsecSecHubFiltersService) Filter(getFilters *filtersmodels.IdsecSecHubGetFilter) (*filtersmodels.IdsecSecHubFilter, error) {
+func (s *IdsecSecHubFiltersService) Get(getFilters *filtersmodels.IdsecSecHubGetFilter) (*filtersmodels.IdsecSecHubFilter, error) {
 	if getFilters.StoreID == "" {
 		s.Logger.Info("Setting Secret Store ID to default")
 		getFilters.StoreID = "default"
@@ -73,7 +72,7 @@ func (s *IdsecSecHubFiltersService) Filter(getFilters *filtersmodels.IdsecSecHub
 		getFilters.FilterID = "default"
 	}
 	s.Logger.Info("Getting filter")
-	response, err := s.client.Get(context.Background(), fmt.Sprintf(filterURL, getFilters.StoreID, getFilters.FilterID), nil)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(filterURL, getFilters.StoreID, getFilters.FilterID), nil)
 	if err != nil {
 		s.Logger.Error("Failed to list filters: %v", err)
 		return nil, err
@@ -101,9 +100,9 @@ func (s *IdsecSecHubFiltersService) Filter(getFilters *filtersmodels.IdsecSecHub
 	return &filter, nil
 }
 
-// ListFilters retrieves the filters info from the Secrets Hub service.
+// List retrieves the filters info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/punr36gz4tuqe-get-all-secrets-filters
-func (s *IdsecSecHubFiltersService) ListFilters(getFilters *filtersmodels.IdsecSecHubGetFilters) (<-chan *IdsecSecHubFiltersPage, error) {
+func (s *IdsecSecHubFiltersService) List(getFilters *filtersmodels.IdsecSecHubGetFilters) (<-chan *IdsecSecHubFiltersPage, error) {
 	if getFilters.StoreID == "" {
 		s.Logger.Info("Setting Secret Store ID to default")
 		getFilters.StoreID = "default"
@@ -113,7 +112,7 @@ func (s *IdsecSecHubFiltersService) ListFilters(getFilters *filtersmodels.IdsecS
 	results := make(chan *IdsecSecHubFiltersPage)
 	go func() {
 		defer close(results)
-		response, err := s.client.Get(context.Background(), fmt.Sprintf(sechubURL, getFilters.StoreID), nil)
+		response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(sechubURL, getFilters.StoreID), nil)
 		if err != nil {
 			s.Logger.Error("Failed to list filters: %v", err)
 			return
@@ -159,9 +158,9 @@ func (s *IdsecSecHubFiltersService) ListFilters(getFilters *filtersmodels.IdsecS
 	return results, nil
 }
 
-// AddFilter adds a new filter for a specific secret store id
+// Create adds a new filter for a specific secret store id
 // https://api-docs.cyberark.com/docs/secretshub-api/ifgbuo8tmt1en-create-secrets-filter
-func (s *IdsecSecHubFiltersService) AddFilter(filter *filtersmodels.IdsecSecHubAddFilter) (*filtersmodels.IdsecSecHubFilter, error) {
+func (s *IdsecSecHubFiltersService) Create(filter *filtersmodels.IdsecSecHubCreateFilter) (*filtersmodels.IdsecSecHubFilter, error) {
 	s.Logger.Info("Adding filter for secret store [%s]", filter.StoreID)
 	bodyMap := map[string]interface{}{
 		"type": filter.Type,
@@ -169,7 +168,7 @@ func (s *IdsecSecHubFiltersService) AddFilter(filter *filtersmodels.IdsecSecHubA
 			"safeName": filter.Data.SafeName,
 		},
 	}
-	response, err := s.client.Post(context.Background(), fmt.Sprintf(sechubURL, filter.StoreID), bodyMap)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(sechubURL, filter.StoreID), bodyMap)
 	if err != nil {
 		return nil, err
 	}
@@ -194,11 +193,11 @@ func (s *IdsecSecHubFiltersService) AddFilter(filter *filtersmodels.IdsecSecHubA
 	return &filterResponse, nil
 }
 
-// DeleteFilter deletes a specified filter based on secret store id and filter id
+// Delete deletes a specified filter based on secret store id and filter id
 // https://api-docs.cyberark.com/docs/secretshub-api/h8q9q5xtkxqgz-delete-secrets-filter
-func (s *IdsecSecHubFiltersService) DeleteFilter(filter *filtersmodels.IdsecSecHubDeleteFilter) error {
+func (s *IdsecSecHubFiltersService) Delete(filter *filtersmodels.IdsecSecHubDeleteFilter) error {
 	s.Logger.Info("Deleting secret store [%s] filter [%s]", filter.StoreID, filter.FilterID)
-	response, err := s.client.Delete(context.Background(), fmt.Sprintf(filterURL, filter.StoreID, filter.FilterID), nil, nil)
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(filterURL, filter.StoreID, filter.FilterID), nil, nil)
 	if err != nil {
 		return err
 	}

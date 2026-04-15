@@ -9,17 +9,40 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 )
 
+// releasedFeaturesOnly controls whether Enable attribute filtering is applied.
+// Set via ldflags: -ldflags "-X github.com/cyberark/idsec-sdk-golang/pkg/services.releasedFeaturesOnly=true"
+var releasedFeaturesOnly = "false"
+
+// isEnableAttributeActive returns true if Enable attribute filtering is active.
+func isEnableAttributeActive() bool {
+	return releasedFeaturesOnly == "true"
+}
+
 // IdsecServiceConfig defines the configuration for an Idsec service.
 type IdsecServiceConfig struct {
 	ServiceName                string
+	Enabled                    *bool
 	RequiredAuthenticatorNames []string
 	OptionalAuthenticatorNames []string
 	ActionsConfigurations      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition
+	ActionSchemas              map[string]interface{}
 }
 
 // IdsecService is an interface that defines the methods for an Idsec service.
+// All services must implement this interface including telemetry support for tracking
+// service usage and operations.
 type IdsecService interface {
 	ServiceConfig() IdsecServiceConfig
+
+	// AddExtraContextField adds a custom context field to telemetry data.
+	// This allows services to provide additional context for telemetry tracking.
+	// Returns an error if the service client is not properly initialized.
+	AddExtraContextField(name, shortName, value string) error
+
+	// ClearExtraContext removes all extra context fields from telemetry data.
+	// This should be called after operations complete to ensure clean telemetry state.
+	// Returns an error if the service client is not properly initialized.
+	ClearExtraContext() error
 }
 
 // IdsecBaseService is a struct that implements the IdsecService interface and provides base functionality for Idsec services.
@@ -85,14 +108,54 @@ var (
 	topLevelServices []string
 )
 
+// filterEnabledActions removes disabled actions from the configuration.
+// Only filters top-level actions - subactions are not individually filtered.
+func filterEnabledActions(config IdsecServiceConfig) IdsecServiceConfig {
+	filtered := IdsecServiceConfig{
+		ServiceName:                config.ServiceName,
+		Enabled:                    config.Enabled,
+		RequiredAuthenticatorNames: config.RequiredAuthenticatorNames,
+		OptionalAuthenticatorNames: config.OptionalAuthenticatorNames,
+		ActionsConfigurations:      make(map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition),
+	}
+
+	for actionType, actionDefs := range config.ActionsConfigurations {
+		enabledActions := make([]actions.IdsecServiceActionDefinition, 0)
+		for _, actionDef := range actionDefs {
+			if actionDef.IsEnabled() {
+				enabledActions = append(enabledActions, actionDef)
+			}
+		}
+		if len(enabledActions) > 0 {
+			filtered.ActionsConfigurations[actionType] = enabledActions
+		}
+	}
+
+	return filtered
+}
+
 // Register registers a new Idsec service configuration.
+// If Enable attribute filtering is active and the service is disabled (Enabled = false),
+// it is silently skipped. Disabled actions within the service are filtered out before registration.
 func Register(serviceConfig IdsecServiceConfig, topLevel bool) error {
+	// Skip disabled services silently (only when filtering is active)
+	if isEnableAttributeActive() && serviceConfig.Enabled != nil && !*serviceConfig.Enabled {
+		return nil
+	}
+
 	if _, exists := serviceRegistry[serviceConfig.ServiceName]; exists {
 		return fmt.Errorf("service %s already registered", serviceConfig.ServiceName)
 	}
-	serviceRegistry[serviceConfig.ServiceName] = serviceConfig
+
+	// Filter disabled top-level actions (only when filtering is active)
+	configToRegister := serviceConfig
+	if isEnableAttributeActive() {
+		configToRegister = filterEnabledActions(serviceConfig)
+	}
+
+	serviceRegistry[configToRegister.ServiceName] = configToRegister
 	if topLevel {
-		topLevelServices = append(topLevelServices, serviceConfig.ServiceName)
+		topLevelServices = append(topLevelServices, configToRegister.ServiceName)
 	}
 	return nil
 }

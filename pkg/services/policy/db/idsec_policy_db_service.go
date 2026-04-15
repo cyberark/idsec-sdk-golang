@@ -20,7 +20,6 @@ type IdsecPolicyDBPolicyPage = common.IdsecPage[models.IdsecPolicyDBAccessPolicy
 
 // IdsecPolicyDBService represents the Infrastructure DB service.
 type IdsecPolicyDBService struct {
-	services.IdsecService
 	*services.IdsecBaseService
 	baseService *policycommon.IdsecPolicyBaseService
 }
@@ -81,23 +80,23 @@ func (s *IdsecPolicyDBService) deserializeProfile(policy *models.IdsecPolicyDBAc
 	return nil
 }
 
-// AddPolicy adds a new policy with the given information.
-func (s *IdsecPolicyDBService) AddPolicy(addPolicy *models.IdsecPolicyDBAccessPolicy) (*models.IdsecPolicyDBAccessPolicy, error) {
-	s.Logger.Info("Adding new policy [%s]", addPolicy.Metadata.Name)
-	addPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeDB
-	if addPolicy.Metadata.PolicyTags == nil {
-		addPolicy.Metadata.PolicyTags = make([]string, 0)
+// CreatePolicy creates a new policy with the given information.
+func (s *IdsecPolicyDBService) CreatePolicy(createPolicy *models.IdsecPolicyDBAccessPolicy) (*models.IdsecPolicyDBAccessPolicy, error) {
+	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
+	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeDB
+	if createPolicy.Metadata.PolicyTags == nil {
+		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}
-	policyType := reflect.TypeOf(addPolicy)
-	policyJSON, err := common.SerializeJSONCamelSchema(addPolicy, &policyType)
+	policyType := reflect.TypeOf(createPolicy)
+	policyJSON, err := common.SerializeJSONCamelSchema(createPolicy, &policyType)
 	if err != nil {
 		return nil, err
 	}
-	err = s.serializeProfile(addPolicy, policyJSON)
+	err = s.serializeProfile(createPolicy, policyJSON)
 	if err != nil {
 		return nil, err
 	}
-	policyResp, err := s.baseService.BaseAddPolicy(policyJSON)
+	policyResp, err := s.baseService.BaseCreatePolicy(policyJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -241,4 +240,16 @@ func (s *IdsecPolicyDBService) PoliciesStats() (*policycommonmodels.IdsecPolicyS
 // ServiceConfig returns the service configuration for IdsecPolicyDBService.
 func (s *IdsecPolicyDBService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
+}
+
+// AddExtraContextField adds a custom context field to telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyDBService) AddExtraContextField(name, shortName, value string) error {
+	return s.baseService.AddExtraContextField(name, shortName, value)
+}
+
+// ClearExtraContext removes all extra context fields from telemetry data.
+// Delegates to the base service which has the ISP client with telemetry support.
+func (s *IdsecPolicyDBService) ClearExtraContext() error {
+	return s.baseService.ClearExtraContext()
 }
