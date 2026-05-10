@@ -1345,13 +1345,16 @@ func (s *IdsecIdentityRolesService) UpdateAttributesSchema(updateSchemaColumns *
 func (s *IdsecIdentityRolesService) DeleteAttributesSchema(deleteSchemaColumns *rolesmodels.IdsecIdentityDeleteRoleAttributesSchema) (*rolesmodels.IdsecIdentityRoleAttributesSchema, error) {
 	s.Logger.Info("Deleting role attribute schema")
 
-	if len(deleteSchemaColumns.IDs) == 0 && len(deleteSchemaColumns.ColumnNames) == 0 {
-		return nil, fmt.Errorf("either attribute_ids or column_names must be provided")
+	if len(deleteSchemaColumns.IDs) == 0 && len(deleteSchemaColumns.ColumnNames) == 0 && len(deleteSchemaColumns.Columns) == 0 {
+		return nil, fmt.Errorf("either ids or column_names or columns must be provided")
 	}
 
 	attributeIDs := append([]string{}, deleteSchemaColumns.IDs...)
-
-	if len(deleteSchemaColumns.ColumnNames) > 0 {
+	columnNames := append([]string{}, deleteSchemaColumns.ColumnNames...)
+	for _, col := range deleteSchemaColumns.Columns {
+		columnNames = append(columnNames, col.Name)
+	}
+	if len(columnNames) > 0 {
 		existingSchema, err := s.AttributesSchema()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get existing schema: %w", err)
@@ -1360,7 +1363,7 @@ func (s *IdsecIdentityRolesService) DeleteAttributesSchema(deleteSchemaColumns *
 		for _, col := range existingSchema.Columns {
 			idByName[col.Name] = col.ID
 		}
-		for _, name := range deleteSchemaColumns.ColumnNames {
+		for _, name := range columnNames {
 			id, ok := idByName[name]
 			if !ok {
 				return nil, fmt.Errorf("attribute with name [%s] not found in role schema", name)

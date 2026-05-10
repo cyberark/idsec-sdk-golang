@@ -4,6 +4,6 @@ package models
 type IdsecSIADeleteConnector struct {
 	ConnectorID string `json:"connector_id" mapstructure:"connector_id" flag:"connector-id" desc:"The connector ID of the connector to delete." validate:"required"`
 	ForceDelete bool   `json:"force_delete" mapstructure:"force_delete" flag:"force-delete" desc:"When true, forces deletion of the connector even if it is active." default:"false"`
-	RetryCount  int    `json:"retry_count" mapstructure:"retry_count" flag:"retry-count" desc:"The number of times to retry to delete the connector, if it fails." default:"10"`
+	RetryCount  int    `json:"retry_count" mapstructure:"retry_count" flag:"retry-count" desc:"The number of times to retry to delete the connector, if it fails." default:"30"`
 	RetryDelay  int    `json:"retry_delay" mapstructure:"retry_delay" flag:"retry-delay" desc:"The number of seconds to wait between retries." default:"5"`
 }
