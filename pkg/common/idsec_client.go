@@ -868,6 +868,29 @@ func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{})
 	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount, ac.retryCount)
 }
 
+// PostWithParams performs an HTTP POST request to the specified route with query parameters.
+//
+// This method is identical to Post but additionally accepts URL query parameters that
+// are appended to the request URL. The body is serialized as JSON. This is useful for
+// APIs that require both a POST body and query string parameters.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout control
+//   - route: API route/path to append to the base URL
+//   - body: Request body data to be JSON-serialized
+//   - params: URL query parameters (map[string]string or map[string][]string)
+//
+// Returns the HTTP response or an error if the request fails.
+//
+// Example:
+//
+//	body := map[string]string{"description": "updated"}
+//	params := map[string]string{"attributeid": "abc-123"}
+//	response, err := client.PostWithParams(ctx, "/SomeApi/Update", body, params)
+func (ac *IdsecClient) PostWithParams(ctx context.Context, route string, body interface{}, params interface{}) (*http.Response, error) {
+	return ac.doRequest(ctx, http.MethodPost, route, body, params, refreshRetryCount, ac.retryCount)
+}
+
 // Put performs an HTTP PUT request to the specified route.
 //
 // This method constructs and executes a PUT request with the provided body

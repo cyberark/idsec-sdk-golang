@@ -515,6 +515,7 @@ func (s *IdsecSIAAccessService) UninstallConnector(uninstallConnector *accessmod
 	}
 	return s.DeleteConnector(&accessmodels.IdsecSIADeleteConnector{
 		ConnectorID: uninstallConnector.ConnectorID,
+		ForceDelete: uninstallConnector.ForceDelete,
 		RetryCount:  uninstallConnector.RetryCount,
 		RetryDelay:  uninstallConnector.RetryDelay,
 	})
@@ -526,9 +527,13 @@ func (s *IdsecSIAAccessService) DeleteConnector(deleteConnector *accessmodels.Id
 		"Deleting connector [%s] from machine",
 		deleteConnector.ConnectorID,
 	)
+	var queryParams map[string]string
+	if deleteConnector.ForceDelete {
+		queryParams = map[string]string{"force_delete": "true"}
+	}
 	currentTryCount := 0
 	for {
-		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(connectorURL, deleteConnector.ConnectorID), nil, nil)
+		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(connectorURL, deleteConnector.ConnectorID), nil, queryParams)
 		if err != nil {
 			return err
 		}
@@ -716,18 +721,28 @@ func (s *IdsecSIAAccessService) DeleteRelay(deleteRelay *accessmodels.IdsecSIADe
 		return fmt.Errorf("HTTPS relay ID is required")
 	}
 	s.Logger.Info("Deleting HTTPS relay [%s]", deleteRelay.ID)
-	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(httpsRelayURL, deleteRelay.ID), nil, nil)
-	if err != nil {
-		return err
+	var queryParams map[string]string
+	if deleteRelay.ForceDelete {
+		queryParams = map[string]string{"force_delete": "true"}
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	currentTryCount := 0
+	for {
+		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(httpsRelayURL, deleteRelay.ID), nil, queryParams)
 		if err != nil {
-			common.GlobalLogger.Warning("Error closing response body")
+			return err
 		}
-	}(response.Body)
-	if response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to delete HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		if response.StatusCode != http.StatusNoContent {
+			_ = response.Body.Close()
+			if currentTryCount < deleteRelay.RetryCount {
+				currentTryCount++
+				s.Logger.Warning("Failed to delete HTTPS relay, retrying... [%d/%d]", currentTryCount, deleteRelay.RetryCount)
+				time.Sleep(time.Duration(deleteRelay.RetryDelay) * time.Second)
+				continue
+			}
+			return fmt.Errorf("failed to delete HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		}
+		_ = response.Body.Close()
+		break
 	}
 	return nil
 }
@@ -893,6 +908,92 @@ func (s *IdsecSIAAccessService) installRelayOnMachine(
 		}
 	}
 	return relayID, nil
+}
+
+func (s *IdsecSIAAccessService) uninstallRelayOnMachine(
+	osType string,
+	targetMachine string,
+	username string,
+	password string,
+	privateKeyPath string,
+	privateKeyContents string,
+	retryCount int,
+	retryDelay int,
+	winrmProtocol string,
+) error {
+	connection, _, err := s.createConnection(
+		osType,
+		targetMachine,
+		username,
+		password,
+		privateKeyPath,
+		privateKeyContents,
+		retryCount,
+		retryDelay,
+		winrmProtocol,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create connection: %w", err)
+	}
+	defer func(connection connections.IdsecConnection) {
+		err := connection.Disconnect()
+		if err != nil {
+			s.Logger.Warning("failed to disconnect: %v", err)
+		}
+	}(connection)
+
+	cmdSet := relayCmdSet[osType]
+
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["stopRelayService"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to stop HTTPS relay service (may already be stopped): %v", err)
+	}
+
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["removeRelayService"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to remove HTTPS relay service (may already be removed): %v", err)
+	}
+
+	_, err = connection.RunCommand(&connectionsmodels.IdsecConnectionCommand{
+		Command: cmdSet["removeRelayFiles"],
+	})
+	if err != nil {
+		s.Logger.Debug("failed to remove HTTPS relay files (may already be removed): %v", err)
+	}
+
+	return nil
+}
+
+// UninstallRelay uninstalls an HTTPS relay from the target machine and deletes it.
+func (s *IdsecSIAAccessService) UninstallRelay(uninstallRelay *accessmodels.IdsecSIAUninstallRelay) error {
+	s.Logger.Info(
+		"Uninstalling HTTPS relay [%s] from machine",
+		uninstallRelay.ID,
+	)
+	err := s.uninstallRelayOnMachine(
+		uninstallRelay.HTTPSRelayOS,
+		uninstallRelay.TargetMachine,
+		uninstallRelay.Username,
+		uninstallRelay.Password,
+		strings.TrimSuffix(common.ExpandFolder(uninstallRelay.PrivateKeyPath), "/"),
+		uninstallRelay.PrivateKeyContents,
+		uninstallRelay.RetryCount,
+		uninstallRelay.RetryDelay,
+		uninstallRelay.WinRMProtocol,
+	)
+	if err != nil {
+		return err
+	}
+	return s.DeleteRelay(&accessmodels.IdsecSIADeleteHTTPSRelay{
+		ID:          uninstallRelay.ID,
+		ForceDelete: uninstallRelay.ForceDelete,
+		RetryCount:  uninstallRelay.RetryCount,
+		RetryDelay:  uninstallRelay.RetryDelay,
+	})
 }
 
 // InstallRelay installs an HTTPS relay on the target machine.

@@ -33,6 +33,12 @@ const (
 	removeUserFromRoleURL        = "SaasManage/RemoveUsersAndGroupsFromRole"
 	deleteRoleURL                = "SaasManage/DeleteRole"
 	directoryServiceQueryURL     = "UserMgmt/DirectoryServiceQuery"
+	addRoleAttributesURL         = "RoleAttributes/AddAttributes"
+	getRoleAttributesURL         = "RoleAttributes/GetAttributes"
+	deleteRoleAttributesURL      = "RoleAttributes/DeleteAttributes"
+	updateRoleAttributeURL       = "RoleAttributes/UpdateAttribute"
+	getAttributesByRoleURL       = "RoleAttributes/GetRoleAttributes"
+	updateAttributesByRoleURL    = "RoleAttributes/UpdateAttributesByRole"
 )
 
 const (
@@ -52,6 +58,8 @@ type IdsecIdentityRolesService struct {
 	DoPost                      func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 	DoAdminRightsPost           func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 	DoDirectoryServiceQueryPost func(ctx context.Context, path string, body interface{}) (*http.Response, error)
+	DoPostWithParams            func(ctx context.Context, path string, body interface{}, params interface{}) (*http.Response, error)
+	DoGet                       func(ctx context.Context, path string, params interface{}) (*http.Response, error)
 }
 
 // NewIdsecIdentityRolesService creates a new instance of IdsecIdentityRolesService.
@@ -114,6 +122,20 @@ func (s *IdsecIdentityRolesService) directoryServiceQueryPostOperation() func(ct
 		return s.DoDirectoryServiceQueryPost
 	}
 	return s.ISPClient().Post
+}
+
+func (s *IdsecIdentityRolesService) postWithParamsOperation() func(ctx context.Context, path string, body interface{}, params interface{}) (*http.Response, error) {
+	if s.DoPostWithParams != nil {
+		return s.DoPostWithParams
+	}
+	return s.ISPClient().PostWithParams
+}
+
+func (s *IdsecIdentityRolesService) getOperation() func(ctx context.Context, path string, params interface{}) (*http.Response, error) {
+	if s.DoGet != nil {
+		return s.DoGet
+	}
+	return s.ISPClient().Get
 }
 
 func (s *IdsecIdentityRolesService) refreshIdentityRolesAuth(client *common.IdsecClient) error {
@@ -543,16 +565,13 @@ func (s *IdsecIdentityRolesService) ListBy(filters *rolesmodels.IdsecIdentityRol
 	return s.listRolesBy(filters.Search, filters.PageSize, filters.Limit, filters.MaxPageCount, filters.AdminRights)
 }
 
-// Get retrieves a specific role in the identity service.
-func (s *IdsecIdentityRolesService) Get(getRole *rolesmodels.IdsecIdentityGetRole) (*rolesmodels.IdsecIdentityRole, error) {
-	if getRole.RoleName == "" && getRole.RoleID == "" {
-		return nil, fmt.Errorf("either role ID or role name must be given")
-	}
-	searchRoleItem := getRole.RoleName
-	if getRole.RoleID != "" {
-		searchRoleItem = getRole.RoleID
-	}
-	s.Logger.Info("Retrieving role ID for name [%s]", searchRoleItem)
+// fetchRoleInfo retrieves the directory-service entry for a role identified by name or ID.
+//
+// It performs the same DirectoryServiceQuery the public Get method has historically used
+// and returns a role populated with the directory-derived fields (ID, Name, Description,
+// RoleType, AdminRights). RoleAttributes are intentionally left unset and are merged in
+// by the caller from the parallel role-attribute fetch.
+func (s *IdsecIdentityRolesService) fetchRoleInfo(searchRoleItem string) (*rolesmodels.IdsecIdentityRole, error) {
 	foundDirectories, err := s.DirectoriesService.List(&directoriesmodels.IdsecIdentityListDirectories{
 		Directories: []string{identity.Identity},
 	})
@@ -601,19 +620,95 @@ func (s *IdsecIdentityRolesService) Get(getRole *rolesmodels.IdsecIdentityGetRol
 	if len(allRoles) == 0 {
 		return nil, fmt.Errorf("no role found for given name")
 	}
+	adminRights := []string{}
+	for _, right := range allRoles[0].Row.AdminRights {
+		adminRights = append(adminRights, right.Path)
+	}
 	return &rolesmodels.IdsecIdentityRole{
 		RoleID:      allRoles[0].Row.ID,
 		RoleName:    allRoles[0].Row.Name,
 		Description: allRoles[0].Row.Description,
 		RoleType:    allRoles[0].Row.RoleType,
-		AdminRights: func() []string {
-			var adminRights []string
-			for _, right := range allRoles[0].Row.AdminRights {
-				adminRights = append(adminRights, right.Path)
-			}
-			return adminRights
-		}(),
+		AdminRights: adminRights,
 	}, nil
+}
+
+// Get retrieves a specific role in the identity service.
+//
+// Get returns the directory-derived role info merged with its custom role attribute
+// values. When a role ID is supplied, the directory-service query and the role-attribute
+// fetch are executed in parallel; when only a role name is supplied the attribute fetch
+// waits for the directory query to resolve the role ID first.
+func (s *IdsecIdentityRolesService) Get(getRole *rolesmodels.IdsecIdentityGetRole) (*rolesmodels.IdsecIdentityRole, error) {
+	if getRole.RoleName == "" && getRole.RoleID == "" {
+		return nil, fmt.Errorf("either role ID or role name must be given")
+	}
+	searchRoleItem := getRole.RoleName
+	if getRole.RoleID != "" {
+		searchRoleItem = getRole.RoleID
+	}
+	s.Logger.Info("Retrieving role for [%s]", searchRoleItem)
+
+	type roleInfoResult struct {
+		role *rolesmodels.IdsecIdentityRole
+		err  error
+	}
+	type attrsResult struct {
+		attributes map[string]string
+		err        error
+	}
+
+	roleInfoChan := make(chan roleInfoResult, 1)
+	go func() {
+		role, err := s.fetchRoleInfo(searchRoleItem)
+		roleInfoChan <- roleInfoResult{role: role, err: err}
+	}()
+
+	// Kick off the role-attribute fetch in parallel only when we already know the role ID.
+	// Otherwise we have to wait for the directory query to resolve it first.
+	var attrsChan chan attrsResult
+	if getRole.RoleID != "" {
+		attrsChan = make(chan attrsResult, 1)
+		go func() {
+			attrs, err := s.GetAttributes(&rolesmodels.IdsecIdentityGetRoleAttributes{RoleID: getRole.RoleID})
+			if err != nil {
+				attrsChan <- attrsResult{err: err}
+				return
+			}
+			attrsChan <- attrsResult{attributes: attrs.Attributes}
+		}()
+	}
+
+	roleRes := <-roleInfoChan
+	if roleRes.err != nil {
+		return nil, roleRes.err
+	}
+	role := roleRes.role
+
+	if attrsChan == nil {
+		// If the directory query did not yield a role ID we cannot fetch attributes; skip
+		// the lookup and return the partial role rather than failing the whole call.
+		if role.RoleID == "" {
+			return role, nil
+		}
+		attrs, err := s.GetAttributes(&rolesmodels.IdsecIdentityGetRoleAttributes{RoleID: role.RoleID})
+		if err != nil {
+			// Role attributes are an extension; a tenant without the RoleAttributes endpoints
+			// or a transient fetch failure should not block returning the core role info.
+			s.Logger.Warning("failed to retrieve role attributes for [%s]: %v", role.RoleID, err)
+			return role, nil
+		}
+		role.RoleAttributes = attrs.Attributes
+		return role, nil
+	}
+
+	attrsRes := <-attrsChan
+	if attrsRes.err != nil {
+		s.Logger.Warning("failed to retrieve role attributes for [%s]: %v", role.RoleID, attrsRes.err)
+		return role, nil
+	}
+	role.RoleAttributes = attrsRes.attributes
+	return role, nil
 }
 
 // Stats retrieves statistics about roles in the identity service.
@@ -908,6 +1003,703 @@ func (s *IdsecIdentityRolesService) MemberStats(getRoleMembersStats *rolesmodels
 	}
 	s.Logger.Info("Retrieved identity role members statistics successfully")
 	return stats, nil
+}
+
+// AttributesSchema retrieves the role attribute schema columns from the identity service.
+//
+// AttributesSchema queries the identity service for the current schema columns
+// configuration for role attributes. These columns define custom extensible attributes
+// that can be added to role objects.
+//
+// Returns the list of schema columns and any error encountered.
+//
+// Example:
+//
+//	schema, err := service.AttributesSchema()
+//	if err != nil {
+//	    return err
+//	}
+//	for _, column := range schema.Columns {
+//	    fmt.Printf("Column: %s (ID: %s, Type: %s)\n", column.Name, column.ID, column.Type)
+//	}
+func (s *IdsecIdentityRolesService) AttributesSchema() (*rolesmodels.IdsecIdentityRoleAttributesSchema, error) {
+	s.Logger.Info("Getting role attribute schema")
+	response, err := s.postOperation()(context.Background(), getRoleAttributesURL, map[string]interface{}{})
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get role attribute schema - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	schemaResponse := &rolesmodels.IdsecIdentityRoleAttributesSchema{
+		Columns: []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn{},
+	}
+	if attributes, ok := result["Attributes"].([]interface{}); ok {
+		for _, attr := range attributes {
+			if attrMap, ok := attr.(map[string]interface{}); ok {
+				translatedMap := map[string]interface{}{
+					"id":          attrMap["ID"],
+					"name":        attrMap["Name"],
+					"type":        attrMap["Type"],
+					"description": attrMap["Description"],
+				}
+				var schemaColumn rolesmodels.IdsecIdentityRoleAttributesSchemaColumn
+				err = mapstructure.Decode(translatedMap, &schemaColumn)
+				if err != nil {
+					return nil, fmt.Errorf("failed to decode schema column: %w", err)
+				}
+				schemaResponse.Columns = append(schemaResponse.Columns, schemaColumn)
+			}
+		}
+	}
+	if total, ok := result["Total"].(float64); ok {
+		schemaResponse.TotalCount = int(total)
+	} else {
+		schemaResponse.TotalCount = len(schemaResponse.Columns)
+	}
+	return schemaResponse, nil
+}
+
+// addRoleAttributeSchemaColumns posts the AddAttributes payload for the supplied set of
+// fresh schema columns. It does not handle name-collision merging; that is the caller's
+// responsibility (see CreateAttributesSchema).
+func (s *IdsecIdentityRolesService) addRoleAttributeSchemaColumns(columns []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn) error {
+	if len(columns) == 0 {
+		return nil
+	}
+	attributes := make([]map[string]interface{}, 0, len(columns))
+	for _, col := range columns {
+		attributes = append(attributes, map[string]interface{}{
+			"Name": col.Name,
+			"Type": col.Type,
+		})
+	}
+	addBody := map[string]interface{}{
+		"Attributes": attributes,
+	}
+	response, err := s.postOperation()(context.Background(), addRoleAttributesURL, addBody)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to create role attribute schema - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return err
+	}
+	if res, ok := result["success"].(bool); ok && !res {
+		return fmt.Errorf("failed to create role attribute schema - [%v]", result)
+	}
+	return nil
+}
+
+// CreateAttributesSchema creates new role attribute schema columns in the identity service.
+//
+// CreateAttributesSchema adds new attribute columns to the role schema using the
+// RoleAttributes/AddAttributes API. The API only accepts the column Name and Type, so
+// any provided Description is applied via the RoleAttributes/UpdateAttribute API after
+// the columns are created.
+//
+// To play nicely with re-runs and partially-applied schemas, columns whose Name already
+// exists in the current schema are not re-added; instead, only their Description is
+// merged onto the existing column via UpdateAttribute. The Type of an existing column
+// is left untouched (the underlying API does not allow changing it).
+//
+// Parameters:
+//   - createSchemaColumns: The request containing the columns to create
+//
+// Returns the refreshed attribute schema and any error encountered during creation.
+//
+// Example:
+//
+//	schema, err := service.CreateAttributesSchema(&rolesmodels.IdsecIdentityCreateRoleAttributesSchema{
+//	    Columns: []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn{
+//	        {Name: "Department", Type: "Text", Description: "Owning department"},
+//	    },
+//	})
+func (s *IdsecIdentityRolesService) CreateAttributesSchema(createSchemaColumns *rolesmodels.IdsecIdentityCreateRoleAttributesSchema) (*rolesmodels.IdsecIdentityRoleAttributesSchema, error) {
+	s.Logger.Info("Creating role attribute schema columns")
+
+	if len(createSchemaColumns.Columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required")
+	}
+
+	existingSchema, err := s.AttributesSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get existing schema: %w", err)
+	}
+	existingByName := make(map[string]rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, len(existingSchema.Columns))
+	for _, col := range existingSchema.Columns {
+		existingByName[col.Name] = col
+	}
+
+	// Partition the requested columns into:
+	//   - newColumns:           not present in the schema; created via AddAttributes.
+	//   - descriptionUpdates:   columns whose description must be merged via UpdateAttribute,
+	//                           either because they already existed by name or because the
+	//                           AddAttributes API silently dropped the Description we sent.
+	type descriptionUpdate struct {
+		attributeID string
+		name        string
+		description string
+	}
+	newColumns := make([]rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, 0, len(createSchemaColumns.Columns))
+	descriptionUpdates := make([]descriptionUpdate, 0, len(createSchemaColumns.Columns))
+	for _, col := range createSchemaColumns.Columns {
+		if existing, ok := existingByName[col.Name]; ok {
+			s.Logger.Info("Role attribute column [%s] already exists; merging description only", col.Name)
+			if col.Description != "" && col.Description != existing.Description {
+				descriptionUpdates = append(descriptionUpdates, descriptionUpdate{
+					attributeID: existing.ID,
+					name:        col.Name,
+					description: col.Description,
+				})
+			}
+			continue
+		}
+		newColumns = append(newColumns, col)
+	}
+
+	if err := s.addRoleAttributeSchemaColumns(newColumns); err != nil {
+		return nil, err
+	}
+
+	// Resolve newly-created column IDs (only if any of them carries a Description that
+	// the AddAttributes payload could not deliver) by re-reading the schema.
+	pendingNewDescriptions := false
+	for _, col := range newColumns {
+		if col.Description != "" {
+			pendingNewDescriptions = true
+			break
+		}
+	}
+	if pendingNewDescriptions {
+		refreshedSchema, err := s.AttributesSchema()
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve created attribute IDs: %w", err)
+		}
+		idByName := make(map[string]string, len(refreshedSchema.Columns))
+		for _, col := range refreshedSchema.Columns {
+			idByName[col.Name] = col.ID
+		}
+		for _, col := range newColumns {
+			if col.Description == "" {
+				continue
+			}
+			id, ok := idByName[col.Name]
+			if !ok {
+				return nil, fmt.Errorf("created column [%s] not found in refreshed schema", col.Name)
+			}
+			descriptionUpdates = append(descriptionUpdates, descriptionUpdate{
+				attributeID: id,
+				name:        col.Name,
+				description: col.Description,
+			})
+		}
+	}
+
+	for _, upd := range descriptionUpdates {
+		if err := s.updateRoleAttributeDescription(upd.attributeID, upd.description); err != nil {
+			return nil, fmt.Errorf("failed to merge description for column [%s]: %w", upd.name, err)
+		}
+	}
+
+	return s.AttributesSchema()
+}
+
+// updateRoleAttributeDescription updates the description of a single role attribute by its ID.
+func (s *IdsecIdentityRolesService) updateRoleAttributeDescription(attributeID string, description string) error {
+	s.Logger.Info("Updating role attribute schema column [%s]", attributeID)
+	requestBody := map[string]interface{}{
+		"Description": description,
+	}
+	params := map[string]string{
+		"attributeid": attributeID,
+	}
+	response, err := s.postWithParamsOperation()(context.Background(), updateRoleAttributeURL, requestBody, params)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to update role attribute - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return err
+	}
+	if res, ok := result["success"].(bool); ok && !res {
+		return fmt.Errorf("failed to update role attribute - [%v]", result)
+	}
+	return nil
+}
+
+// UpdateAttributesSchema updates the descriptions of one or more role attribute schema columns.
+//
+// UpdateAttributesSchema applies description updates via the RoleAttributes/UpdateAttribute
+// API. Because the underlying API only supports a single attribute per call, columns are
+// updated sequentially. Each column may identify its target attribute by AttributeID or
+// by Name (resolved to its ID via the current schema). The first failure aborts the
+// remaining updates.
+//
+// Parameters:
+//   - updateSchemaColumns: The request containing the columns to update
+//
+// Returns the refreshed attribute schema and any error encountered during the update.
+//
+// Example:
+//
+//	schema, err := service.UpdateAttributesSchema(&rolesmodels.IdsecIdentityUpdateRoleAttributesSchema{
+//	    Columns: []rolesmodels.IdsecIdentityUpdateRoleAttributesSchemaColumn{
+//	        {Name: "Department", Description: "Role department"},
+//	    },
+//	})
+func (s *IdsecIdentityRolesService) UpdateAttributesSchema(updateSchemaColumns *rolesmodels.IdsecIdentityUpdateRoleAttributesSchema) (*rolesmodels.IdsecIdentityRoleAttributesSchema, error) {
+	s.Logger.Info("Updating role attribute schema columns")
+
+	if len(updateSchemaColumns.Columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required")
+	}
+	for i, col := range updateSchemaColumns.Columns {
+		if col.ID == "" && col.Name == "" {
+			return nil, fmt.Errorf("column at index %d: either attribute_id or name must be provided", i)
+		}
+	}
+
+	// Resolve any name-based references to attribute IDs in a single pass.
+	idByName := map[string]string{}
+	needsResolution := false
+	for _, col := range updateSchemaColumns.Columns {
+		if col.ID == "" {
+			needsResolution = true
+			break
+		}
+	}
+	if needsResolution {
+		existingSchema, err := s.AttributesSchema()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get existing schema: %w", err)
+		}
+		for _, c := range existingSchema.Columns {
+			idByName[c.Name] = c.ID
+		}
+	}
+
+	for _, col := range updateSchemaColumns.Columns {
+		attributeID := col.ID
+		if attributeID == "" {
+			id, ok := idByName[col.Name]
+			if !ok {
+				return nil, fmt.Errorf("attribute with name [%s] not found in role schema", col.Name)
+			}
+			attributeID = id
+		}
+		if err := s.updateRoleAttributeDescription(attributeID, col.Description); err != nil {
+			return nil, err
+		}
+	}
+	return s.AttributesSchema()
+}
+
+// DeleteAttributesSchema deletes role attribute schema columns from the identity service.
+//
+// DeleteAttributesSchema removes attribute columns from the role schema using the
+// RoleAttributes/DeleteAttributes API. Columns may be identified either by their
+// attribute IDs (used directly) or by their names (resolved to IDs via the current schema).
+//
+// Parameters:
+//   - deleteSchemaColumns: The request containing the columns to delete
+//
+// Returns the refreshed attribute schema and any error encountered during deletion.
+//
+// Example:
+//
+//	schema, err := service.DeleteAttributesSchema(&rolesmodels.IdsecIdentityDeleteRoleAttributesSchema{
+//	    ColumnNames: []string{"Department"},
+//	})
+func (s *IdsecIdentityRolesService) DeleteAttributesSchema(deleteSchemaColumns *rolesmodels.IdsecIdentityDeleteRoleAttributesSchema) (*rolesmodels.IdsecIdentityRoleAttributesSchema, error) {
+	s.Logger.Info("Deleting role attribute schema")
+
+	if len(deleteSchemaColumns.IDs) == 0 && len(deleteSchemaColumns.ColumnNames) == 0 {
+		return nil, fmt.Errorf("either attribute_ids or column_names must be provided")
+	}
+
+	attributeIDs := append([]string{}, deleteSchemaColumns.IDs...)
+
+	if len(deleteSchemaColumns.ColumnNames) > 0 {
+		existingSchema, err := s.AttributesSchema()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get existing schema: %w", err)
+		}
+		idByName := make(map[string]string)
+		for _, col := range existingSchema.Columns {
+			idByName[col.Name] = col.ID
+		}
+		for _, name := range deleteSchemaColumns.ColumnNames {
+			id, ok := idByName[name]
+			if !ok {
+				return nil, fmt.Errorf("attribute with name [%s] not found in role schema", name)
+			}
+			if !slices.Contains(attributeIDs, id) {
+				attributeIDs = append(attributeIDs, id)
+			}
+		}
+	}
+
+	deleteBody := map[string]interface{}{
+		"AttributeIds": attributeIDs,
+	}
+	response, err := s.postOperation()(context.Background(), deleteRoleAttributesURL, deleteBody)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to delete role attribute schema - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	if res, ok := result["success"].(bool); ok && !res {
+		return nil, fmt.Errorf("failed to delete role attribute schema - [%v]", result)
+	}
+	return s.AttributesSchema()
+}
+
+// getRoleAttributeRecords fetches the raw role attribute value records for a role.
+//
+// The response payload of RoleAttributes/GetRoleAttributes is a flat array of records,
+// each record carrying ValueText, ID, _RowKey, AttributeId and RoleId. Some Identity
+// deployments wrap the array under the standard {success, Result} envelope, so this
+// helper accepts both shapes.
+func (s *IdsecIdentityRolesService) getRoleAttributeRecords(roleID string) ([]map[string]interface{}, error) {
+	params := map[string]string{
+		"roleId": roleID,
+	}
+	response, err := s.getOperation()(context.Background(), getAttributesByRoleURL, params)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get role attributes - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var raw interface{}
+	err = json.NewDecoder(response.Body).Decode(&raw)
+	if err != nil {
+		return nil, err
+	}
+	records := []map[string]interface{}{}
+	switch v := raw.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if m, ok := item.(map[string]interface{}); ok {
+				records = append(records, m)
+			}
+		}
+	case map[string]interface{}:
+		if res, ok := v["success"].(bool); ok && !res {
+			return nil, fmt.Errorf("failed to get role attributes - [%v]", v)
+		}
+		var items []interface{}
+		switch r := v["Result"].(type) {
+		case []interface{}:
+			items = r
+		case map[string]interface{}:
+			if results, ok := r["Results"].([]interface{}); ok {
+				items = results
+			}
+		}
+		for _, item := range items {
+			if m, ok := item.(map[string]interface{}); ok {
+				records = append(records, m)
+			}
+		}
+	}
+	return records, nil
+}
+
+// buildRoleAttributesUpdateBody constructs the wire payload for RoleAttributes/UpdateAttributesByRole.
+//
+// The expected shape is:
+//
+//	{
+//	    "RoleId": "<role-id>",
+//	    "Attributes": [
+//	        {"Id": "<attr-schema-id>", "Name": "<name>", "Type": "<type>", "Description": "<desc>", "Value": "<value>"}
+//	    ]
+//	}
+//
+// Each attribute echoes the schema column it refers to and carries the new value. An empty
+// Value clears the value for that attribute on the role.
+func buildRoleAttributesUpdateBody(roleID string, schemaColumns []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, valuesByName map[string]string) (map[string]interface{}, error) {
+	columnByName := make(map[string]rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, len(schemaColumns))
+	for _, col := range schemaColumns {
+		columnByName[col.Name] = col
+	}
+	attributes := make([]map[string]interface{}, 0, len(valuesByName))
+	for name, value := range valuesByName {
+		col, ok := columnByName[name]
+		if !ok {
+			return nil, fmt.Errorf("attribute [%s] not found in role attribute schema", name)
+		}
+		attributes = append(attributes, map[string]interface{}{
+			"Id":          col.ID,
+			"Name":        col.Name,
+			"Type":        col.Type,
+			"Description": col.Description,
+			"Value":       value,
+		})
+	}
+	return map[string]interface{}{
+		"RoleId":     roleID,
+		"Attributes": attributes,
+	}, nil
+}
+
+// updateAttributesByRole sends an attribute payload to RoleAttributes/UpdateAttributesByRole.
+func (s *IdsecIdentityRolesService) updateAttributesByRole(body map[string]interface{}) error {
+	if body == nil {
+		return nil
+	}
+	if attributes, ok := body["Attributes"].([]map[string]interface{}); ok && len(attributes) == 0 {
+		return nil
+	}
+	response, err := s.postOperation()(context.Background(), updateAttributesByRoleURL, body)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to update role attributes - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	var result map[string]interface{}
+	err = json.NewDecoder(response.Body).Decode(&result)
+	if err != nil {
+		return err
+	}
+	if res, ok := result["success"].(bool); ok && !res {
+		return fmt.Errorf("failed to update role attributes - [%v]", result)
+	}
+	return nil
+}
+
+// GetAttributes retrieves attribute values for a given role from the identity service.
+//
+// GetAttributes fetches role attribute values via RoleAttributes/GetRoleAttributes and
+// returns them as a friendly attribute-name → value map. The mapping from internal
+// AttributeId references to attribute names is resolved against the current role
+// attribute schema.
+//
+// Parameters:
+//   - getRoleAttributes: The request containing the role ID for which to retrieve attributes
+//
+// Returns the role attributes and any error encountered.
+//
+// Example:
+//
+//	attributes, err := service.GetAttributes(&rolesmodels.IdsecIdentityGetRoleAttributes{
+//	    RoleID: "role-123",
+//	})
+//	if err != nil {
+//	    return err
+//	}
+//	for key, value := range attributes.Attributes {
+//	    fmt.Printf("Attribute: %s = %v\n", key, value)
+//	}
+func (s *IdsecIdentityRolesService) GetAttributes(getRoleAttributes *rolesmodels.IdsecIdentityGetRoleAttributes) (*rolesmodels.IdsecIdentityRoleAttributes, error) {
+	if getRoleAttributes.RoleID == "" {
+		return nil, fmt.Errorf("role_id is required")
+	}
+	s.Logger.Info("Getting identity role attributes for role [%s]", getRoleAttributes.RoleID)
+
+	records, err := s.getRoleAttributeRecords(getRoleAttributes.RoleID)
+	if err != nil {
+		return nil, err
+	}
+	schema, err := s.AttributesSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve role attribute schema: %w", err)
+	}
+	nameByID := make(map[string]string)
+	for _, col := range schema.Columns {
+		nameByID[col.ID] = col.Name
+	}
+
+	attributes := &rolesmodels.IdsecIdentityRoleAttributes{
+		RoleID:     getRoleAttributes.RoleID,
+		Attributes: make(map[string]string),
+	}
+	for _, rec := range records {
+		// The endpoint can answer with either of two record shapes depending on the tenant:
+		//   - {Id, Name, Type, Description, Value}
+		//   - {ID, _RowKey, AttributeId, RoleId, ValueText}
+		// The first shape carries the schema column name directly; the second references
+		// the schema column by its attribute ID.
+		var name string
+		if n, ok := rec["Name"].(string); ok && n != "" {
+			name = n
+		} else if attrID, ok := rec["AttributeId"].(string); ok {
+			if mapped, ok := nameByID[attrID]; ok {
+				name = mapped
+			}
+		} else if attrID, ok := rec["Id"].(string); ok {
+			if mapped, ok := nameByID[attrID]; ok {
+				name = mapped
+			}
+		}
+		if name == "" {
+			continue
+		}
+		var value string
+		switch {
+		case rec["Value"] != nil:
+			if v, ok := rec["Value"].(string); ok {
+				value = v
+			}
+		case rec["ValueText"] != nil:
+			if v, ok := rec["ValueText"].(string); ok {
+				value = v
+			}
+		}
+		attributes.Attributes[name] = value
+	}
+	return attributes, nil
+}
+
+// UpsertAttributes creates or updates attribute values for a given role in the identity service.
+//
+// UpsertAttributes resolves attribute names to their schema columns and submits a single
+// RoleAttributes/UpdateAttributesByRole call carrying the {Id, Name, Type, Description, Value}
+// record for each requested attribute. The API performs the create-or-update logic itself,
+// so this method does not need to read existing records first.
+//
+// Parameters:
+//   - upsertRoleAttributes: The request containing the role ID and attributes to upsert
+//
+// Returns the refreshed role attributes and any error encountered.
+//
+// Example:
+//
+//	updated, err := service.UpsertAttributes(&rolesmodels.IdsecIdentityUpsertRoleAttributes{
+//	    RoleID: "role-123",
+//	    Attributes: map[string]string{
+//	        "department": "Engineering",
+//	    },
+//	})
+func (s *IdsecIdentityRolesService) UpsertAttributes(upsertRoleAttributes *rolesmodels.IdsecIdentityUpsertRoleAttributes) (*rolesmodels.IdsecIdentityRoleAttributes, error) {
+	if upsertRoleAttributes.RoleID == "" {
+		return nil, fmt.Errorf("role_id is required")
+	}
+	if len(upsertRoleAttributes.Attributes) == 0 {
+		return nil, fmt.Errorf("at least one attribute is required")
+	}
+	s.Logger.Info("Upserting identity role attributes for role [%s]", upsertRoleAttributes.RoleID)
+
+	schema, err := s.AttributesSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get role attribute schema: %w", err)
+	}
+	body, err := buildRoleAttributesUpdateBody(upsertRoleAttributes.RoleID, schema.Columns, upsertRoleAttributes.Attributes)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.updateAttributesByRole(body); err != nil {
+		return nil, err
+	}
+	return s.GetAttributes(&rolesmodels.IdsecIdentityGetRoleAttributes{RoleID: upsertRoleAttributes.RoleID})
+}
+
+// DeleteAttributes clears attribute values for a given role in the identity service.
+//
+// DeleteAttributes sends an empty Value for each requested attribute via
+// RoleAttributes/UpdateAttributesByRole. Since the RoleAttributes API only exposes Get
+// and UpdateAttributesByRole, removal is expressed as blanking the value. Attributes can
+// be referenced by name (via either AttributeNames or the keys of Attributes); names are
+// resolved through the current role attribute schema.
+//
+// Parameters:
+//   - deleteRoleAttributes: The request containing the role ID and attribute names to clear
+//
+// Returns the refreshed role attributes and any error encountered.
+//
+// Example:
+//
+//	updated, err := service.DeleteAttributes(&rolesmodels.IdsecIdentityDeleteRoleAttributes{
+//	    RoleID:         "role-123",
+//	    AttributeNames: []string{"department"},
+//	})
+func (s *IdsecIdentityRolesService) DeleteAttributes(deleteRoleAttributes *rolesmodels.IdsecIdentityDeleteRoleAttributes) (*rolesmodels.IdsecIdentityRoleAttributes, error) {
+	if deleteRoleAttributes.RoleID == "" {
+		return nil, fmt.Errorf("role_id is required")
+	}
+	if len(deleteRoleAttributes.AttributeNames) == 0 && len(deleteRoleAttributes.Attributes) == 0 {
+		return nil, fmt.Errorf("at least one attribute name is required")
+	}
+	s.Logger.Info("Deleting identity role attributes for role [%s]", deleteRoleAttributes.RoleID)
+
+	valuesByName := make(map[string]string, len(deleteRoleAttributes.AttributeNames)+len(deleteRoleAttributes.Attributes))
+	for _, name := range deleteRoleAttributes.AttributeNames {
+		valuesByName[name] = ""
+	}
+	for name := range deleteRoleAttributes.Attributes {
+		valuesByName[name] = ""
+	}
+
+	schema, err := s.AttributesSchema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get role attribute schema: %w", err)
+	}
+	body, err := buildRoleAttributesUpdateBody(deleteRoleAttributes.RoleID, schema.Columns, valuesByName)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.updateAttributesByRole(body); err != nil {
+		return nil, err
+	}
+	return s.GetAttributes(&rolesmodels.IdsecIdentityGetRoleAttributes{RoleID: deleteRoleAttributes.RoleID})
 }
 
 // ServiceConfig returns the service configuration for the IdsecIdentityRolesService.

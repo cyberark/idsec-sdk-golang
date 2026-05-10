@@ -1,4 +1,4 @@
-package cloudconsole
+package cloudaccess
 
 import (
 	"context"
@@ -14,12 +14,12 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
-	cloudconsolemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole/models"
+	cloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/models"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
 const (
-	// eligibilityURLFmt is the endpoint for listing eligible cloud-console targets.
+	// eligibilityURLFmt is the endpoint for listing eligible cloudaccess targets.
 	// The CSP (AWS | AZURE | GCP) is a path parameter.
 	eligibilityURLFmt = "/api/access/%s/eligibility"
 
@@ -28,9 +28,12 @@ const (
 
 	// maxRoleIDs is the maximum number of comma-separated role IDs allowed per elevate call.
 	maxRoleIDs = 5
+
+	// maxAWSRoleIDs is the maximum number of role IDs AWS accepts per elevate call.
+	maxAWSRoleIDs = 1
 )
 
-// IdsecSCACloudConsoleService provides SCA cloud-console eligibility operations.
+// IdsecSCACloudAccessService provides SCA cloudaccess eligibility operations.
 //
 // It is an independent service that hits GET /api/access/{csp}/eligibility
 // and supports AWS, AZURE and GCP as valid CSP values.
@@ -40,20 +43,20 @@ const (
 //
 // Example:
 //
-//	svc, err := NewIdsecSCACloudConsoleService(ispAuth)
+//	svc, err := NewIdsecSCACloudAccessService(ispAuth)
 //	if err != nil { /* handle */ }
 //	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 //	if err != nil { /* handle */ }
-//	for _, t := range resp.Response { fmt.Println(t.WorkspaceName) } // t is cloudconsolemodels.IdsecSCAEligibleTarget
-type IdsecSCACloudConsoleService struct {
+//	for _, t := range resp.Response { fmt.Println(t.WorkspaceName) } // t is cloudaccessmodels.IdsecSCAEligibleTarget
+type IdsecSCACloudAccessService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
 }
 
-// NewIdsecSCACloudConsoleService creates a new IdsecSCACloudConsoleService instance
+// NewIdsecSCACloudAccessService creates a new IdsecSCACloudAccessService instance
 // using the provided authenticators. An "isp" authenticator is required.
-func NewIdsecSCACloudConsoleService(authenticators ...auth.IdsecAuth) (*IdsecSCACloudConsoleService, error) {
-	svc := &IdsecSCACloudConsoleService{}
+func NewIdsecSCACloudAccessService(authenticators ...auth.IdsecAuth) (*IdsecSCACloudAccessService, error) {
+	svc := &IdsecSCACloudAccessService{}
 	base, err := services.NewIdsecBaseService(svc, authenticators...)
 	if err != nil {
 		return nil, err
@@ -75,11 +78,11 @@ func NewIdsecSCACloudConsoleService(authenticators ...auth.IdsecAuth) (*IdsecSCA
 	return svc, nil
 }
 
-func (s *IdsecSCACloudConsoleService) refreshAuth(client *common.IdsecClient) error {
+func (s *IdsecSCACloudAccessService) refreshAuth(client *common.IdsecClient) error {
 	return isp.RefreshClient(client, s.ISPAuth())
 }
 
-// ListTargets retrieves eligible cloud-console targets for the authenticated user.
+// ListTargets retrieves eligible cloudaccess targets for the authenticated user.
 //
 // It calls GET /api/access/{csp}/eligibility where CSP is a path parameter.
 // Supports optional filtering by WorkspaceID and pagination via Limit and NextToken.
@@ -101,7 +104,7 @@ func (s *IdsecSCACloudConsoleService) refreshAuth(client *common.IdsecClient) er
 //	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 //	if err != nil { /* handle */ }
 //	for _, t := range resp.Response { fmt.Println(t.WorkspaceName) }
-func (s *IdsecSCACloudConsoleService) ListTargets(req *scamodels.IdsecSCAListTargetsRequest) (*cloudconsolemodels.IdsecSCAListTargetsResponse, error) { //nolint:revive
+func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTargetsRequest) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
@@ -114,7 +117,7 @@ func (s *IdsecSCACloudConsoleService) ListTargets(req *scamodels.IdsecSCAListTar
 		return nil, fmt.Errorf("unsupported csp '%s': supported values are AWS, AZURE, GCP", req.CSP)
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca cloud-console service not initialized")
+		return nil, fmt.Errorf("sca cloudaccess service not initialized")
 	}
 	params := map[string]string{}
 	if req.WorkspaceID != "" {
@@ -127,7 +130,7 @@ func (s *IdsecSCACloudConsoleService) ListTargets(req *scamodels.IdsecSCAListTar
 		params["nextToken"] = req.NextToken
 	}
 	url := fmt.Sprintf(eligibilityURLFmt, cspUpper)
-	s.Logger.Info("Listing SCA eligible cloud-console targets for CSP [%s]", cspUpper)
+	s.Logger.Info("Listing SCA eligible cloudaccess targets for CSP [%s]", cspUpper)
 	resp, err := s.ISPClient().Get(context.Background(), url, params)
 	if err != nil {
 		return nil, err
@@ -144,7 +147,7 @@ func (s *IdsecSCACloudConsoleService) ListTargets(req *scamodels.IdsecSCAListTar
 	if !ok {
 		return nil, fmt.Errorf("unexpected response format from eligibility API")
 	}
-	var response cloudconsolemodels.IdsecSCAListTargetsResponse
+	var response cloudaccessmodels.IdsecSCAListTargetsResponse
 	if err = mapstructure.Decode(dataMap, &response); err != nil {
 		return nil, err
 	}
@@ -153,18 +156,18 @@ func (s *IdsecSCACloudConsoleService) ListTargets(req *scamodels.IdsecSCAListTar
 
 // Elevate calls the SCA Elevate API to obtain short-lived cloud credentials.
 //
-// The flat request schema (IdsecSCACloudConsoleElevateActionRequest) is used so
+// The flat request schema (IdsecSCACloudAccessElevateActionRequest) is used so
 // the CLI framework can auto-wire flags directly to this method by naming convention
 // ("elevate" → Elevate()), identical to how "list-targets" → ListTargets() works.
 //
 // Parameters:
-//   - req: *IdsecSCACloudConsoleElevateActionRequest with CSP, WorkspaceID, and RoleID (required).
+//   - req: *IdsecSCACloudAccessElevateActionRequest with CSP, WorkspaceID, and RoleIDs (required).
 //
-// Returns *IdsecSCACloudConsoleElevateResponse on success or an error when:
-//   - req is nil, CSP is empty, WorkspaceID is empty, or RoleID is empty
+// Returns *IdsecSCACloudAccessElevateResponse on success or an error when:
+//   - req is nil, CSP is empty, WorkspaceID is empty, or RoleIDs is empty
 //   - the network call fails or the response status is not 200
 //   - JSON decoding fails
-func (s *IdsecSCACloudConsoleService) Elevate(req *cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest) (*cloudconsolemodels.IdsecSCACloudConsoleElevateResponse, error) { //nolint:revive
+func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest) (*cloudaccessmodels.IdsecSCACloudAccessElevateResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
@@ -174,29 +177,33 @@ func (s *IdsecSCACloudConsoleService) Elevate(req *cloudconsolemodels.IdsecSCACl
 	if strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId cannot be empty")
 	}
-	if strings.TrimSpace(req.RoleID) == "" {
-		return nil, fmt.Errorf("roleId cannot be empty")
+	if strings.TrimSpace(req.RoleIDs) == "" {
+		return nil, fmt.Errorf("roleIds cannot be empty")
 	}
 
-	roleIDs := sca.SplitCommaSeparated(req.RoleID)
-	if len(roleIDs) > maxRoleIDs {
-		return nil, fmt.Errorf("maximum %d role IDs allowed, got %d", maxRoleIDs, len(roleIDs))
+	roleIDs := sca.SplitCommaSeparated(req.RoleIDs)
+	maxAllowedRoleIDs := maxRoleIDs
+	if strings.EqualFold(strings.TrimSpace(req.CSP), "AWS") {
+		maxAllowedRoleIDs = maxAWSRoleIDs
+	}
+	if len(roleIDs) > maxAllowedRoleIDs {
+		return nil, fmt.Errorf("maximum %d role IDs allowed for %s, got %d", maxAllowedRoleIDs, strings.ToUpper(strings.TrimSpace(req.CSP)), len(roleIDs))
 	}
 
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca cloud-console service not initialized")
+		return nil, fmt.Errorf("sca cloudaccess service not initialized")
 	}
 	s.Logger.Info("Calling SCA Elevate API for CSP [%s] workspaceId [%s]", req.CSP, req.WorkspaceID)
 
-	var targets []cloudconsolemodels.IdsecSCACloudConsoleElevateTarget
+	var targets []cloudaccessmodels.IdsecSCACloudAccessElevateTarget
 	for _, rid := range roleIDs {
-		targets = append(targets, cloudconsolemodels.IdsecSCACloudConsoleElevateTarget{
+		targets = append(targets, cloudaccessmodels.IdsecSCACloudAccessElevateTarget{
 			WorkspaceID: req.WorkspaceID,
 			RoleID:      rid,
 		})
 	}
 
-	apiReq := &cloudconsolemodels.IdsecSCACloudConsoleElevateRequest{
+	apiReq := &cloudaccessmodels.IdsecSCACloudAccessElevateRequest{
 		CSP:            req.CSP,
 		OrganizationID: req.OrganizationID,
 		Targets:        targets,
@@ -213,7 +220,7 @@ func (s *IdsecSCACloudConsoleService) Elevate(req *cloudconsolemodels.IdsecSCACl
 		return nil, fmt.Errorf("elevate API returned status %d. Response body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var result cloudconsolemodels.IdsecSCACloudConsoleElevateResponse
+	var result cloudaccessmodels.IdsecSCACloudAccessElevateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode elevate response: %w", err)
 	}
@@ -221,6 +228,6 @@ func (s *IdsecSCACloudConsoleService) Elevate(req *cloudconsolemodels.IdsecSCACl
 }
 
 // ServiceConfig returns the service configuration (implements services.IdsecService).
-func (s *IdsecSCACloudConsoleService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
+func (s *IdsecSCACloudAccessService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
 	return ServiceConfig
 }

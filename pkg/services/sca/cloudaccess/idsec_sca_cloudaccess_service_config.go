@@ -1,27 +1,27 @@
-package cloudconsole
+package cloudaccess
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole/actions"
+	svcactions "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/actions"
 )
 
-// ServiceConfig is the configuration for the SCA Cloud Console service.
+// ServiceConfig is the configuration for the SCA Cloud Access service.
 //
 // Registered as a non-top-level service (false). The CLI action tree is owned
 // by the parent "sca" service in the idsec-cli-golang repository.
 var ServiceConfig = services.IdsecServiceConfig{
-	ServiceName:                "sca-cloudconsole",
+	ServiceName:                "sca-cloudaccess",
 	RequiredAuthenticatorNames: []string{"isp"},
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
 	ActionSchemas:              svcactions.ActionToSchemaMap,
 }
 
-// ServiceGenerator creates a new IdsecSCACloudConsoleService instance.
-var ServiceGenerator = NewIdsecSCACloudConsoleService
+// ServiceGenerator creates a new IdsecSCACloudAccessService instance.
+var ServiceGenerator = NewIdsecSCACloudAccessService
 
-// init registers the sca-cloudconsole service configuration at package load time.
+// init registers the sca-cloudaccess service configuration at package load time.
 // Registered with false (not top-level) — the CLI tree is rooted at the parent "sca" service.
 func init() {
 	if err := services.Register(ServiceConfig, false); err != nil {

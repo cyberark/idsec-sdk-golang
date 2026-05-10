@@ -6,4 +6,5 @@ const (
 	CategoryTypeVM           = "VM"
 	CategoryTypeDB           = "DB"
 	CategoryTypeGroupAccess  = "Groups"
+	// CategoryTypeClusters = "Clusters"
 )

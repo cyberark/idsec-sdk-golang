@@ -18,6 +18,13 @@ sca_cli_test_data_pre_prod.json
 sca_cli_test_data_prod.json
 ```
 
+For local testing, use:
+
+- `sca_cli_test_data_dev.json`
+- `sca_cli_test_data_pre_prod.json`
+
+By default, in real environment `sca_cli_test_data_prod.json` is used.
+
 ## Step 2: Fill the JSON file with non-secret config data
 
 The JSON file should include IDs, targets, and non-secret fields only. Do not add passwords or secrets.
@@ -30,7 +37,7 @@ Example:
     "method": "identity",
     "identity_url": "https://identity.example.com"
   },
-  "azure_cloud_console": {
+  "azure_cloudaccess": {
     "principal": {
       "principal_id": "user-id",
       "principal_name": "eva_user@tenant.example",
@@ -53,39 +60,26 @@ Example:
 
 ## Step 3: Run tests
 
-Provide credentials and environment inline with the command:
+Run only the Cloud Access ListTargets test:
 
 ```bash
 IDSEC_E2E_ENV=pre_prod \
-  IDSEC_E2E_ISP_USERNAME='service-user@domain' \
-  IDSEC_E2E_ISP_SECRET='service-user-secret' \
-  IDSEC_E2E_SCA_PRINCIPAL_USERNAME='principal-user@domain' \
+  IDSEC_E2E_ISP_SECRET='admin-user-secret' \
   IDSEC_E2E_SCA_PRINCIPAL_SECRET='principal-secret' \
-  go test -tags "e2e sca" -v ./tests/e2e/sca/...
-```
-
-Run only the Cloud Console ListTargets test:
-
-```bash
-IDSEC_E2E_ENV=pre_prod \
-  IDSEC_E2E_ISP_USERNAME='service-user@domain' \
-  IDSEC_E2E_ISP_SECRET='service-user-secret' \
-  IDSEC_E2E_SCA_PRINCIPAL_USERNAME='principal-user@domain' \
-  IDSEC_E2E_SCA_PRINCIPAL_SECRET='principal-secret' \
-  go test -tags "e2e sca" -v ./tests/e2e/sca/ -run '^TestCloudConsoleAzureListTargets$'
+  go test -tags "e2e sca" -v ./tests/e2e/sca/ -run '^TestCloudAccessAzureEntraIDListTargets$'
 ```
 
 ## Step 4: Understand the flow
 
-For the Cloud Console E2E test:
+For the Cloud Access E2E test:
 
 1. Read `principal` block and `targets.targets[]` array from the selected JSON config
 2. Read credentials from env vars
-3. Create the Cloud Console policy for the configured principal and target
+3. Create the Cloud Access policy for the configured principal and target
 4. Poll `GetPolicy` until status becomes `active`
 5. Verify `GetPolicy` is the source of truth for the expected target
 6. Authenticate as the principal user for `ListTargets`
-7. Match `ListTargets` response to `GetPolicy` target using:
+7. Match `ListTargets` response to `GetPolicy` target using example CSP: Azure
    - `roleId` -> `roleInfo.id`
    - `workspaceId` -> `workspaceId`
    - `orgId` -> `organizationId`
@@ -94,23 +88,21 @@ For the Cloud Console E2E test:
 
 General SCA note:
 
-- auth user: dedicated service user
-- principal user: dedicated test user
+- auth user: dedicated admin user
+- principal user (eva user): dedicated test user
 
 This distinction matters because:
 
-- `CreatePolicy` runs with the service user
+- `CreatePolicy` runs with the admin user
 - `ListTargets` runs with the principal user's credentials so eligibility is validated in the principal context
 
 ## Environment Variables
 
-| Env var | Purpose |
-| ------- | ------- |
-| `IDSEC_E2E_ENV` | Selects the config file (`dev`, `pre_prod`, `prod`) |
-| `IDSEC_E2E_ISP_USERNAME` | Auth (service) user |
-| `IDSEC_E2E_ISP_SECRET` | Auth (service) user secret |
-| `IDSEC_E2E_SCA_PRINCIPAL_USERNAME` | Principal user for ListTargets |
-| `IDSEC_E2E_SCA_PRINCIPAL_SECRET` | Principal user secret |
+| Env var                         | Purpose                                              |
+| ------------------------------- | ---------------------------------------------------- |
+| `IDSEC_E2E_ENV`                 | Selects the config file (`dev`, `pre_prod`)         |
+| `IDSEC_E2E_ISP_SECRET`          | Auth admin user secret                               |
+| `IDSEC_E2E_SCA_PRINCIPAL_SECRET`| Principal user secret                                |
 
 ## Troubleshooting
 
@@ -126,8 +118,5 @@ and that `IDSEC_E2E_ENV` points to the correct environment.
 
 ### Auth succeeds but `ListTargets` does not contain the policy target
 
-Make sure `IDSEC_E2E_SCA_PRINCIPAL_SECRET` is set correctly. The Cloud Console E2E flow authenticates as the principal user for the `ListTargets` step, so missing or incorrect principal credentials will break the final validation.
+Make sure `IDSEC_E2E_SCA_PRINCIPAL_SECRET` is set correctly. The Cloud Access E2E flow authenticates as the principal user for the `ListTargets` step, so missing or incorrect principal credentials will break the final validation.
 
-### Full package build fails because of unrelated SCA tests
-
-Run only the Cloud Console test command shown above instead of the whole package.

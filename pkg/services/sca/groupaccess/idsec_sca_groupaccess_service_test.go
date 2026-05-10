@@ -1,4 +1,4 @@
-package entragroups
+package groupaccess
 
 import (
 	"encoding/json"
@@ -12,20 +12,20 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	entragroupsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups/models"
+	groupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess/models"
 	scainternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
-// setupEntraGroupsService creates an IdsecSCAEntraGroupsService with the given mock ISP client injected.
-func setupEntraGroupsService(client *isp.IdsecISPServiceClient) *IdsecSCAEntraGroupsService {
+// setupGroupAccessService creates an IdsecSCAGroupAccessService with the given mock ISP client injected.
+func setupGroupAccessService(client *isp.IdsecISPServiceClient) *IdsecSCAGroupAccessService {
 	ispBase := &services.IdsecISPBaseService{}
 	v := reflect.ValueOf(ispBase).Elem()
 	clientField := v.FieldByName("client")
 	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
 	clientField.Set(reflect.ValueOf(client))
 
-	return &IdsecSCAEntraGroupsService{
+	return &IdsecSCAGroupAccessService{
 		IdsecBaseService: &services.IdsecBaseService{
 			Logger: common.GlobalLogger,
 		},
@@ -38,7 +38,7 @@ func setupEntraGroupsService(client *isp.IdsecISPServiceClient) *IdsecSCAEntraGr
 // ---------------------------------------------------------------------------
 
 func TestListTargets_validation_table(t *testing.T) {
-	svc := &IdsecSCAEntraGroupsService{}
+	svc := &IdsecSCAGroupAccessService{}
 	tests := []struct {
 		name string
 		req  *scamodels.IdsecSCAListTargetsRequest
@@ -67,7 +67,7 @@ func TestListTargets_validation_table(t *testing.T) {
 
 // TestListTargets_NonAzureCSP_ErrorMessage verifies the error message names the rejected CSP.
 func TestListTargets_NonAzureCSP_ErrorMessage(t *testing.T) {
-	svc := &IdsecSCAEntraGroupsService{}
+	svc := &IdsecSCAGroupAccessService{}
 	nonAzureCSPs := []string{"AWS", "GCP", "ibm", "oracle"}
 
 	for _, csp := range nonAzureCSPs {
@@ -112,7 +112,7 @@ func TestListTargets_Success(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestListTargets_EmptyResponse(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.NoError(t, err)
@@ -169,12 +169,12 @@ func TestListTargets_URLPath(t *testing.T) {
 			})
 			defer cleanup()
 
-			svc := setupEntraGroupsService(client)
+			svc := setupGroupAccessService(client)
 			_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: inputCSP})
 
 			require.NoError(t, err)
 			require.Equal(t, "/api/access/AZURE/eligibility/groups", capturedPath)
-			// Must never hit the cloud-console endpoint (no /groups suffix there)
+			// Must never hit the cloudaccess endpoint (no /groups suffix there)
 			require.True(t, strings.HasSuffix(capturedPath, "/groups"))
 		})
 	}
@@ -199,7 +199,7 @@ func TestListTargets_WorkspaceID(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
 		CSP:         "AZURE",
 		WorkspaceID: "ws-azure-999",
@@ -227,7 +227,7 @@ func TestListTargets_Pagination(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
 		CSP:       "AZURE",
 		Limit:     25,
@@ -257,7 +257,7 @@ func TestListTargets_WorkspaceID_NotSentWhenEmpty(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestListTargets_400BadRequest(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.Error(t, err)
@@ -298,7 +298,7 @@ func TestListTargets_404NotFound(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.Error(t, err)
@@ -316,7 +316,7 @@ func TestListTargets_500InternalServerError(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
+	svc := setupGroupAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 
 	require.Error(t, err)
@@ -327,7 +327,7 @@ func TestListTargets_500InternalServerError(t *testing.T) {
 // This uses the shared helper which runs 400, 404, 500 as sub-tests automatically.
 func TestListTargets_ErrorPropagation(t *testing.T) {
 	scainternal.TestServiceErrorPropagation(t, func(client *isp.IdsecISPServiceClient) error {
-		svc := setupEntraGroupsService(client)
+		svc := setupGroupAccessService(client)
 		_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"})
 		return err
 	})
@@ -338,18 +338,18 @@ func TestListTargets_ErrorPropagation(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestElevate_validation_table(t *testing.T) {
-	svc := &IdsecSCAEntraGroupsService{}
+	svc := &IdsecSCAGroupAccessService{}
 	tests := []struct {
 		name string
-		req  *entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest
+		req  *groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest
 	}{
 		{name: "nil_request", req: nil},
-		{name: "empty_csp", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{}},
-		{name: "aws_rejected", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{CSP: "AWS", DirectoryID: "dir", Groups: "g"}},
-		{name: "gcp_rejected", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{CSP: "GCP", DirectoryID: "dir", Groups: "g"}},
-		{name: "missing_directory_id", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{CSP: "AZURE", Groups: "g"}},
-		{name: "missing_groups", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{CSP: "AZURE", DirectoryID: "dir"}},
-		{name: "uninitialized_service", req: &entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{CSP: "AZURE", DirectoryID: "dir", Groups: "g"}},
+		{name: "empty_csp", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{}},
+		{name: "aws_rejected", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AWS", DirectoryID: "dir", Groups: "g"}},
+		{name: "gcp_rejected", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", DirectoryID: "dir", Groups: "g"}},
+		{name: "missing_directory_id", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", Groups: "g"}},
+		{name: "missing_groups", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", DirectoryID: "dir"}},
+		{name: "uninitialized_service", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", DirectoryID: "dir", Groups: "g"}},
 	}
 
 	for _, tt := range tests {
@@ -362,11 +362,11 @@ func TestElevate_validation_table(t *testing.T) {
 
 // TestElevate_NonAzureCSP_ErrorMessage verifies the error message names the rejected CSP.
 func TestElevate_NonAzureCSP_ErrorMessage(t *testing.T) {
-	svc := &IdsecSCAEntraGroupsService{}
+	svc := &IdsecSCAGroupAccessService{}
 	for _, csp := range []string{"AWS", "GCP", "ibm"} {
 		csp := csp
 		t.Run("csp_"+csp, func(t *testing.T) {
-			_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+			_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 				CSP: csp, DirectoryID: "dir", Groups: "g",
 			})
 			require.Error(t, err)
@@ -376,10 +376,10 @@ func TestElevate_NonAzureCSP_ErrorMessage(t *testing.T) {
 }
 
 func TestElevate_ExceedsMaxGroupIDs(t *testing.T) {
-	svc := &IdsecSCAEntraGroupsService{}
+	svc := &IdsecSCAGroupAccessService{}
 	ids := strings.Repeat("g,", 51)
 	ids = ids[:len(ids)-1]
-	_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "AZURE", DirectoryID: "dir", Groups: ids,
 	})
 	require.Error(t, err)
@@ -398,7 +398,8 @@ func TestElevate_Success(t *testing.T) {
 			"results": [
 				{
 					"sessionId": "86a4378e-ea61-408b-bdcb-337cc68657e2",
-					"groupId": "57f03571-ee70-4717-a506-1eb908a4a310"
+					"groupId": "57f03571-ee70-4717-a506-1eb908a4a310",
+					"groupName": "AccessGroupsAutomation"
 				}
 			]
 		}
@@ -413,8 +414,8 @@ func TestElevate_Success(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
-	resp, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+	svc := setupGroupAccessService(client)
+	resp, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "AZURE", DirectoryID: "c5a5de91-6a2f-467e-aefa-b3f62876ec6a", Groups: "57f03571-ee70-4717-a506-1eb908a4a310",
 	})
 
@@ -424,7 +425,62 @@ func TestElevate_Success(t *testing.T) {
 	require.Equal(t, "AZURE", resp.Response.CSP)
 	require.Len(t, resp.Response.Results, 1)
 	require.Equal(t, "57f03571-ee70-4717-a506-1eb908a4a310", resp.Response.Results[0].GroupID)
+	require.Equal(t, "AccessGroupsAutomation", resp.Response.Results[0].GroupName)
 	require.NotEmpty(t, resp.Response.Results[0].SessionID)
+	require.Nil(t, resp.Response.Results[0].ErrorInfo)
+}
+
+func TestElevate_PartialSuccess_PreservesErrorInfo(t *testing.T) {
+	responseJSON := `{
+		"response": {
+			"directoryId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+			"csp": "AZURE",
+			"results": [
+				{
+					"sessionId": "3a29bd4d-6a2a-403b-a4dd-8df9e413921d",
+					"groupId": "01badfd4-24d0-41eb-82f4-cb76aa284c28",
+					"groupName": "AccessGroupsAutomation"
+				},
+				{
+					"sessionId": "",
+					"groupId": "00a8d846-00ca-4655-8b63-8d56",
+					"errorInfo": {
+						"code": "CA1009",
+						"message": "We can't connect you to the cloud console",
+						"description": "It looks like your user is not eligible to access this target",
+						"link": "https://docs.cyberark.com/sca/latest/en/Content/Troubleshooting/sca_error-codes.htm"
+					}
+				}
+			]
+		}
+	}`
+
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return r.Method == http.MethodPost },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	svc := setupGroupAccessService(client)
+	resp, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
+		CSP: "AZURE", DirectoryID: "c5a5de91-6a2f-467e-aefa-b3f62876ec6a", Groups: "01badfd4-24d0-41eb-82f4-cb76aa284c28,00a8d846-00ca-4655-8b63-8d56",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Response.Results, 2)
+	require.Equal(t, "AccessGroupsAutomation", resp.Response.Results[0].GroupName)
+	require.NotEmpty(t, resp.Response.Results[0].SessionID)
+	require.Nil(t, resp.Response.Results[0].ErrorInfo)
+
+	require.Equal(t, "00a8d846-00ca-4655-8b63-8d56", resp.Response.Results[1].GroupID)
+	require.Empty(t, resp.Response.Results[1].SessionID)
+	require.NotNil(t, resp.Response.Results[1].ErrorInfo)
+	require.Equal(t, "CA1009", resp.Response.Results[1].ErrorInfo.Code)
+	require.Equal(t, "We can't connect you to the cloud console", resp.Response.Results[1].ErrorInfo.Message)
 }
 
 func TestElevate_CommaSeparatedGroupIDs(t *testing.T) {
@@ -442,8 +498,8 @@ func TestElevate_CommaSeparatedGroupIDs(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
-	_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+	svc := setupGroupAccessService(client)
+	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "AZURE", DirectoryID: "tenant-1", Groups: "grp-a,grp-b,grp-c",
 	})
 
@@ -477,8 +533,8 @@ func TestElevate_URLPath(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
-	_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+	svc := setupGroupAccessService(client)
+	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "azure", DirectoryID: "tenant-001", Groups: "grp-abc",
 	})
 
@@ -497,8 +553,8 @@ func TestElevate_400BadRequest(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupEntraGroupsService(client)
-	_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+	svc := setupGroupAccessService(client)
+	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "AZURE", DirectoryID: "dir", Groups: "g",
 	})
 
@@ -508,8 +564,8 @@ func TestElevate_400BadRequest(t *testing.T) {
 
 func TestElevate_ErrorPropagation(t *testing.T) {
 	scainternal.TestServiceErrorPropagation(t, func(client *isp.IdsecISPServiceClient) error {
-		svc := setupEntraGroupsService(client)
-		_, err := svc.Elevate(&entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest{
+		svc := setupGroupAccessService(client)
+		_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 			CSP: "AZURE", DirectoryID: "dir", Groups: "g",
 		})
 		return err

@@ -66,6 +66,9 @@ func (s *IdsecPolicyCloudAccessService) deserializeTargets(policy *cloudaccessmo
 func (s *IdsecPolicyCloudAccessService) CreatePolicy(createPolicy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy) (*cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, error) {
 	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
 	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
+	// if createPolicy.Metadata.PolicyEntitlement.TargetCategory == "" {
+	// 	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
+	// }
 	if createPolicy.Metadata.PolicyTags == nil {
 		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}

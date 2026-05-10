@@ -1,4 +1,4 @@
-package entragroups
+package groupaccess
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
-	entragroupsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups/models"
+	groupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess/models"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
@@ -22,15 +22,15 @@ const (
 	maxGroupIDs             = 50
 )
 
-// IdsecSCAEntraGroupsService provides SCA Entra ID group eligibility and elevate operations (AZURE-only).
-type IdsecSCAEntraGroupsService struct {
+// IdsecSCAGroupAccessService provides SCA Entra ID group eligibility and elevate operations (AZURE-only).
+type IdsecSCAGroupAccessService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
 }
 
-// NewIdsecSCAEntraGroupsService creates a new service instance. Requires an "isp" authenticator.
-func NewIdsecSCAEntraGroupsService(authenticators ...auth.IdsecAuth) (*IdsecSCAEntraGroupsService, error) {
-	svc := &IdsecSCAEntraGroupsService{}
+// NewIdsecSCAGroupAccessService creates a new service instance. Requires an "isp" authenticator.
+func NewIdsecSCAGroupAccessService(authenticators ...auth.IdsecAuth) (*IdsecSCAGroupAccessService, error) {
+	svc := &IdsecSCAGroupAccessService{}
 	base, err := services.NewIdsecBaseService(svc, authenticators...)
 	if err != nil {
 		return nil, err
@@ -52,13 +52,13 @@ func NewIdsecSCAEntraGroupsService(authenticators ...auth.IdsecAuth) (*IdsecSCAE
 	return svc, nil
 }
 
-func (s *IdsecSCAEntraGroupsService) refreshAuth(client *common.IdsecClient) error {
+func (s *IdsecSCAGroupAccessService) refreshAuth(client *common.IdsecClient) error {
 	return isp.RefreshClient(client, s.ISPAuth())
 }
 
 // ListTargets retrieves eligible Entra ID group targets via
 // GET /api/access/{csp}/eligibility/groups. Only AZURE is supported.
-func (s *IdsecSCAEntraGroupsService) ListTargets(req *scamodels.IdsecSCAListTargetsRequest) (*entragroupsmodels.IdsecSCAListGroupTargetsResponse, error) { //nolint:revive
+func (s *IdsecSCAGroupAccessService) ListTargets(req *scamodels.IdsecSCAListTargetsRequest) (*groupaccessmodels.IdsecSCAListGroupTargetsResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
@@ -66,10 +66,10 @@ func (s *IdsecSCAEntraGroupsService) ListTargets(req *scamodels.IdsecSCAListTarg
 		return nil, fmt.Errorf("csp cannot be empty")
 	}
 	if strings.ToUpper(req.CSP) != "AZURE" {
-		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for entragroups targets", req.CSP)
+		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for groupaccess targets", req.CSP)
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca entragroups service not initialized")
+		return nil, fmt.Errorf("sca groupaccess service not initialized")
 	}
 	params := map[string]string{}
 	if req.WorkspaceID != "" {
@@ -99,7 +99,7 @@ func (s *IdsecSCAEntraGroupsService) ListTargets(req *scamodels.IdsecSCAListTarg
 	if !ok {
 		return nil, fmt.Errorf("unexpected response format from eligibility groups API")
 	}
-	var response entragroupsmodels.IdsecSCAListGroupTargetsResponse
+	var response groupaccessmodels.IdsecSCAListGroupTargetsResponse
 	if err = mapstructure.Decode(dataMap, &response); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (s *IdsecSCAEntraGroupsService) ListTargets(req *scamodels.IdsecSCAListTarg
 // Elevate requests just-in-time membership to one or more Entra ID groups
 // via POST /api/access/elevate/groups. The --groups flag accepts comma-separated
 // group IDs (max 50).
-func (s *IdsecSCAEntraGroupsService) Elevate(req *entragroupsmodels.IdsecSCAEntraGroupsElevateActionRequest) (*entragroupsmodels.IdsecSCAEntraGroupsElevateResponse, error) { //nolint:revive
+func (s *IdsecSCAGroupAccessService) Elevate(req *groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest) (*groupaccessmodels.IdsecSCAGroupAccessElevateResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
@@ -117,7 +117,7 @@ func (s *IdsecSCAEntraGroupsService) Elevate(req *entragroupsmodels.IdsecSCAEntr
 		return nil, fmt.Errorf("csp cannot be empty")
 	}
 	if strings.ToUpper(req.CSP) != "AZURE" {
-		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for entragroups elevate", req.CSP)
+		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for groupaccess elevate", req.CSP)
 	}
 	if strings.TrimSpace(req.DirectoryID) == "" {
 		return nil, fmt.Errorf("directoryId cannot be empty")
@@ -132,7 +132,7 @@ func (s *IdsecSCAEntraGroupsService) Elevate(req *entragroupsmodels.IdsecSCAEntr
 	}
 
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca entragroups service not initialized")
+		return nil, fmt.Errorf("sca groupaccess service not initialized")
 	}
 
 	targets := make([]map[string]interface{}, len(groupIDs))
@@ -161,7 +161,7 @@ func (s *IdsecSCAEntraGroupsService) Elevate(req *entragroupsmodels.IdsecSCAEntr
 	if !ok {
 		return nil, fmt.Errorf("unexpected response format from elevate groups API")
 	}
-	var response entragroupsmodels.IdsecSCAEntraGroupsElevateResponse
+	var response groupaccessmodels.IdsecSCAGroupAccessElevateResponse
 	if err = mapstructure.Decode(dataMap, &response); err != nil {
 		return nil, err
 	}
@@ -169,6 +169,6 @@ func (s *IdsecSCAEntraGroupsService) Elevate(req *entragroupsmodels.IdsecSCAEntr
 }
 
 // ServiceConfig returns the service configuration (implements services.IdsecService).
-func (s *IdsecSCAEntraGroupsService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
+func (s *IdsecSCAGroupAccessService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
 	return ServiceConfig
 }

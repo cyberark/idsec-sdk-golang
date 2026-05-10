@@ -557,6 +557,9 @@ func (s *IdsecIdentityWebappsService) Get(getWebapp *webappsmodels.IdsecIdentity
 	if _, ok := webappSnakeInfoMap["o_auth_profile"]; ok {
 		if val, ok := webappSnakeInfoMap["o_auth_profile"].(map[string]interface{})["allowed_auth"]; ok {
 			allowedAuthStr := val.(string)
+			if !ok {
+				return nil, fmt.Errorf("failed to parse allowed auth: %w", err)
+			}
 			allowedAuthArr := strings.Split(allowedAuthStr, ",")
 			webappSnakeInfoMap["o_auth_profile"].(map[string]interface{})["allowed_auth"] = allowedAuthArr
 		}
@@ -665,23 +668,38 @@ func (s *IdsecIdentityWebappsService) listApps(pageSize int, limit int, pageNumb
 					State:                 webappRow["State"].(string),
 				}
 				if value, ok := webappRow["Category"]; ok && value != nil {
-					stringVal := value.(string)
+					stringVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webapp.Category = &stringVal
 				}
 				if value, ok := webappRow["WebAppLoginType"]; ok && value != nil {
-					stringVal := value.(string)
+					stringVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webapp.WebappLoginType = &stringVal
 				}
 				if value, ok := webappRow["IsScaEnabled"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webapp.IsScaEnabled = &boolVal
 				}
 				if value, ok := webappRow["IsSwsEnabled"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webapp.IsSwsEnabled = &boolVal
 				}
 				if value, ok := webappRow["Generic"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webapp.Generic = &boolVal
 				}
 				webapps = append(webapps, &webapp)
@@ -765,7 +783,14 @@ func (s *IdsecIdentityWebappsService) SetPermissions(setPermissions *webappsmode
 			}
 			if g.PrincipalId != nil {
 				grantMap["PrincipalId"] = *g.PrincipalId
-			} else {
+			}
+			if g.DirectoryServiceUuid != nil {
+				grantMap["DirectoryServiceUuid"] = *g.DirectoryServiceUuid
+			}
+			if g.ExternalUuid != nil {
+				grantMap["ExternalUuid"] = *g.ExternalUuid
+			}
+			if g.PrincipalId == nil || ((g.PrincipalType == webappsmodels.PrincipalTypeUser || g.PrincipalType == webappsmodels.PrincipalTypeGroup) && (g.DirectoryServiceUuid == nil || g.ExternalUuid == nil)) {
 				var entityType string
 				switch g.PrincipalType {
 				case webappsmodels.PrincipalTypeGroup:
@@ -965,7 +990,10 @@ func (s *IdsecIdentityWebappsService) GetPermissions(getPermissions *webappsmode
 		} else {
 			webappGrant.Type = common.Ptr("User")
 		}
-		grantBits := grantMap["Grant"].(float64)
+		grantBits, ok := grantMap["Grant"].(float64)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse grants: %w", err)
+		}
 		parsedGrants, err := s.parseGrants(int(grantBits))
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse grants: %w", err)
@@ -1097,35 +1125,59 @@ func (s *IdsecIdentityWebappsService) listAppsTemplates(pageSize int, limit int,
 					WebappTypeDisplayName: webappTemplateRow["WebAppTypeDisplayName"].(string),
 				}
 				if value, ok := webappTemplateRow["Category"]; ok && value != nil {
-					strVal := value.(string)
+					strVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webappTemplate.Category = &strVal
 				}
 				if value, ok := webappTemplateRow["Version"]; ok && value != nil {
-					strVal := value.(string)
+					strVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webappTemplate.Version = &strVal
 				}
 				if value, ok := webappTemplateRow["WebAppLoginType"]; ok && value != nil {
-					strVal := value.(string)
+					strVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webappTemplate.WebappLoginType = &strVal
 				}
 				if value, ok := webappTemplateRow["ServiceName"]; ok && value != nil {
-					strVal := value.(string)
+					strVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webappTemplate.ServiceName = &strVal
 				}
 				if value, ok := webappTemplateRow["TemplateName"]; ok && value != nil {
-					strVal := value.(string)
+					strVal, ok := value.(string)
+					if !ok {
+						continue
+					}
 					webappTemplate.TemplateName = &strVal
 				}
 				if value, ok := webappTemplateRow["IsSwsEnabled"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webappTemplate.IsSwsEnabled = &boolVal
 				}
 				if value, ok := webappTemplateRow["IsScaEnabled"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webappTemplate.IsScaEnabled = &boolVal
 				}
 				if value, ok := webappTemplateRow["Generic"]; ok && value != nil {
-					boolVal := value.(bool)
+					boolVal, ok := value.(bool)
+					if !ok {
+						continue
+					}
 					webappTemplate.Generic = &boolVal
 				}
 				webappsTemplates = append(webappsTemplates, &webappTemplate)
@@ -1212,39 +1264,66 @@ func (s *IdsecIdentityWebappsService) ListCustomTemplates() (*webappsmodels.Idse
 			WebappTypeDisplayName: templateRow["WebAppTypeDisplayName"].(string),
 		}
 		if value, ok := templateRow["Category"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.Category = &strVal
 		}
 		if value, ok := templateRow["UserNameStrategy"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.UserNameStrategy = &strVal
 		}
 		if value, ok := templateRow["Version"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.Version = &strVal
 		}
 		if value, ok := templateRow["WebAppLoginType"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.WebappLoginType = &strVal
 		}
 		if value, ok := templateRow["ServiceName"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.ServiceName = &strVal
 		}
 		if value, ok := templateRow["TemplateName"]; ok && value != nil {
-			strVal := value.(string)
+			strVal, ok := value.(string)
+			if !ok {
+				continue
+			}
 			webappTemplate.TemplateName = &strVal
 		}
 		if value, ok := templateRow["IsSwsEnabled"]; ok && value != nil {
-			boolVal := value.(bool)
+			boolVal, ok := value.(bool)
+			if !ok {
+				continue
+			}
 			webappTemplate.IsSwsEnabled = &boolVal
 		}
 		if value, ok := templateRow["IsScaEnabled"]; ok && value != nil {
-			boolVal := value.(bool)
+			boolVal, ok := value.(bool)
+			if !ok {
+				continue
+			}
 			webappTemplate.IsScaEnabled = &boolVal
 		}
 		if value, ok := templateRow["Generic"]; ok && value != nil {
-			boolVal := value.(bool)
+			boolVal, ok := value.(bool)
+			if !ok {
+				continue
+			}
 			webappTemplate.Generic = &boolVal
 		}
 		customTemplates.Templates = append(customTemplates.Templates, &webappTemplate)
@@ -1306,7 +1385,10 @@ func (s *IdsecIdentityWebappsService) ListTemplatesCategories() (*webappsmodels.
 		Categories: []string{},
 	}
 	for _, item := range categoriesData["Categories"].([]interface{}) {
-		category := item.(string)
+		category, ok := item.(string)
+		if !ok {
+			continue
+		}
 		categories.Categories = append(categories.Categories, category)
 	}
 	return categories, nil

@@ -25,8 +25,6 @@ func TestGetBaseURL(t *testing.T) {
 		defer os.Unsetenv(common.DeployEnv)
 		assert.Equal(t, "https://us-east-1-featureadopt.featureadopt.cyberark.cloud", getBaseURL())
 	})
-
-
 	t.Run("default prod when DEPLOY_ENV unset", func(t *testing.T) {
 		_ = os.Unsetenv(common.DeployEnv)
 		assert.Equal(t, "https://us-east-1-featureadopt.featureadopt.cyberark.cloud", getBaseURL())

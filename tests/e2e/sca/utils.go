@@ -3,120 +3,29 @@
 package sca
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
-	"time"
-	"unicode"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
-	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	policycloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/models"
-	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 	groupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess/models"
-	cloudconsoleservice "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole"
-	cloudconsolemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole/models"
-	entragroupsservice "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups"
-	entragroupsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups/models"
+	scacloudaccesssvc "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess"
+	scacloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/models"
+	scagroupaccesssvc "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
+	scagroupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess/models"
+	k8sservice "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
+	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
+	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
-
-// ---------------------------------------------------------------------------
-// Policy name builder
-// ---------------------------------------------------------------------------
-
-func buildPolicyName(prefix, principalName string) string {
-	const maxPolicyNameLength = 200
-
-	userDisplayName := strings.TrimSpace(principalName)
-	if idx := strings.Index(userDisplayName, "@"); idx > 0 {
-		userDisplayName = userDisplayName[:idx]
-	}
-	userDisplayName = sanitizePolicyNameSegment(userDisplayName)
-	if userDisplayName == "" {
-		userDisplayName = "user"
-	}
-
-	timestamp := time.Now().UTC().Format("20060102_150405")
-	policyName := prefix + "_" + userDisplayName + "_" + timestamp
-	if len(policyName) <= maxPolicyNameLength {
-		return policyName
-	}
-
-	maxUserLen := maxPolicyNameLength - len(prefix) - len(timestamp) - 2
-	if maxUserLen < 1 {
-		return prefix + "_" + timestamp
-	}
-	if len(userDisplayName) > maxUserLen {
-		userDisplayName = userDisplayName[:maxUserLen]
-	}
-	return prefix + "_" + userDisplayName + "_" + timestamp
-}
-
-func sanitizePolicyNameSegment(value string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
-		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
-			b.WriteRune(r)
-		case r == '_', r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return strings.Trim(b.String(), "_")
-}
-
-// ---------------------------------------------------------------------------
-// Policy active poller
-// ---------------------------------------------------------------------------
-
-// waitForPolicyActive polls fetchStatus until the returned status is "Active",
-// or fails after maxAttempts. Works for any policy type — the caller extracts
-// the status string from its own typed GetPolicy response.
-func waitForPolicyActive(
-	t *testing.T,
-	policyID string,
-	fetchStatus func() (string, error),
-) error {
-	t.Helper()
-
-	const (
-		maxAttempts  = 6
-		sleepBetween = 5 * time.Second
-	)
-
-	var lastStatus string
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		status, err := fetchStatus()
-		if err == nil {
-			status = strings.TrimSpace(status)
-			switch strings.ToLower(status) {
-			case "active":
-				return nil
-			case "failed", "error", "invalid", "rejected", "denied":
-				return fmt.Errorf("policy %s entered terminal failure status %q", policyID, status)
-			default:
-				lastStatus = status
-			}
-		}
-
-		if attempt == maxAttempts {
-			if err != nil {
-				return fmt.Errorf("policy %s did not become active after %d attempts: %w", policyID, maxAttempts, err)
-			}
-			return fmt.Errorf("policy %s did not become active after %d attempts (last status: %q)", policyID, maxAttempts, lastStatus)
-		}
-
-		time.Sleep(sleepBetween)
-	}
-
-	return fmt.Errorf("policy %s did not become active", policyID)
-}
 
 func buildPrincipalISPAuthenticator(
 	t *testing.T,
@@ -177,11 +86,11 @@ func buildPrincipalISPAuthenticator(
 	return ispAuthenticator, nil
 }
 
-func buildPrincipalCloudConsoleService(
+func buildPrincipalCloudAccessService(
 	t *testing.T,
 	authCfg map[string]interface{},
 	principalCfg map[string]interface{},
-) (*cloudconsoleservice.IdsecSCACloudConsoleService, error) {
+) (*scacloudaccesssvc.IdsecSCACloudAccessService, error) {
 	t.Helper()
 
 	authenticator, err := buildPrincipalISPAuthenticator(t, authCfg, principalCfg)
@@ -190,14 +99,14 @@ func buildPrincipalCloudConsoleService(
 	}
 
 	t.Logf("Principal auth successful for ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
-	return cloudconsoleservice.NewIdsecSCACloudConsoleService(authenticator)
+	return scacloudaccesssvc.NewIdsecSCACloudAccessService(authenticator)
 }
 
-func buildPrincipalEntraGroupsService(
+func buildPrincipalGroupAccessService(
 	t *testing.T,
 	authCfg map[string]interface{},
 	principalCfg map[string]interface{},
-) (*entragroupsservice.IdsecSCAEntraGroupsService, error) {
+) (*scagroupaccesssvc.IdsecSCAGroupAccessService, error) {
 	t.Helper()
 
 	authenticator, err := buildPrincipalISPAuthenticator(t, authCfg, principalCfg)
@@ -205,14 +114,510 @@ func buildPrincipalEntraGroupsService(
 		return nil, err
 	}
 
-	t.Logf("Principal auth successful for Entra Groups ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
-	return entragroupsservice.NewIdsecSCAEntraGroupsService(authenticator)
+	t.Logf("Principal auth successful for Group Access ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
+	return scagroupaccesssvc.NewIdsecSCAGroupAccessService(authenticator)
 }
 
-func verifyCloudConsoleTargetInListTargets(
+func buildPrincipalK8sService(
+	t *testing.T,
+	authCfg map[string]interface{},
+	principalCfg map[string]interface{},
+) (*k8sservice.IdsecSCAK8sService, error) {
+	t.Helper()
+
+	authenticator, err := buildPrincipalISPAuthenticator(t, authCfg, principalCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	t.Logf("Principal auth successful for K8s ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
+	return k8sservice.NewIdsecSCAK8sService(authenticator)
+}
+
+func loadListTargetsTestContext(t *testing.T, configBlockKey string) *k8sTestContext {
+	t.Helper()
+
+	cfg := LoadSCATestConfig(t)
+	block := cspBlock(cfg, configBlockKey)
+	authCfg := cspBlock(cfg, "auth")
+	require.NotNil(t, block, "%s block is required in JSON config", configBlockKey)
+	require.NotNil(t, authCfg, "auth block is required in JSON config")
+
+	principal := principalBlock(block)
+	require.NotNil(t, principal, "%s.principal block is required", configBlockKey)
+
+	return &k8sTestContext{
+		AuthBlock:      authCfg,
+		PrincipalBlock: principal,
+		Targets:        configTargets(block),
+	}
+}
+
+func buildPrincipalFields(principalCfg map[string]interface{}) principalFields {
+	return principalFields{
+		ID:            strVal(principalCfg, "principal_id"),
+		Name:          strVal(principalCfg, "principal_name"),
+		SourceDirName: strVal(principalCfg, "source_directory_name"),
+		SourceDirID:   strVal(principalCfg, "source_directory_id"),
+	}
+}
+
+func buildCloudAccessEligibleTargetFromConfig(targetCfg map[string]interface{}) *scacloudaccessmodels.IdsecSCAEligibleTarget {
+	return &scacloudaccessmodels.IdsecSCAEligibleTarget{
+		WorkspaceID:    strVal(targetCfg, "workspaceId"),
+		WorkspaceName:  strVal(targetCfg, "workspaceName"),
+		OrganizationID: strVal(targetCfg, "orgId"),
+		WorkspaceType:  strVal(targetCfg, "workspaceType"),
+		RoleInfo: scacloudaccessmodels.IdsecSCARoleInfo{
+			ID:   strVal(targetCfg, "roleId"),
+			Name: strVal(targetCfg, "roleName"),
+		},
+	}
+}
+
+func buildGroupAccessTargetFromConfig(targetCfg map[string]interface{}) groupaccessmodels.IdsecPolicyGroupAccessTargetItem {
+	return groupaccessmodels.IdsecPolicyGroupAccessTargetItem{
+		GroupID:     strVal(targetCfg, "groupId"),
+		DirectoryID: strVal(targetCfg, "directoryId"),
+		GroupName:   strVal(targetCfg, "groupName"),
+	}
+}
+
+func buildAWSK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetConfig {
+	target := buildCloudAccessEligibleTargetFromConfig(targetCfg)
+	return k8sTargetConfig{
+		PolicyTarget: target,
+		VerifyTarget: target,
+		Scope:        strVal(targetCfg, "scope"),
+		ClusterID:    strVal(targetCfg, "clusterId"),
+		FQDN:         strVal(targetCfg, "fqdn"),
+	}
+}
+
+func buildAzureK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetConfig {
+	policyTarget := buildCloudAccessEligibleTargetFromConfig(targetCfg)
+	verifyTarget := buildCloudAccessEligibleTargetFromConfig(targetCfg)
+	verifyTarget.WorkspaceType = ""
+
+	return k8sTargetConfig{
+		PolicyTarget: policyTarget,
+		VerifyTarget: verifyTarget,
+		Scope:        strVal(targetCfg, "scope"),
+		ClusterID:    strVal(targetCfg, "clusterId"),
+		FQDN:         strVal(targetCfg, "fqdn"),
+	}
+}
+
+func setupCloudAccessListTargetsTest(t *testing.T, cfg cloudAccessListTargetsConfig, requireConfiguredTarget bool) *k8sTestContext {
+	t.Helper()
+	skipUnlessSupportedSCAEnv(t)
+
+	testCtx := loadListTargetsTestContext(t, cfg.configBlockKey)
+	if requireConfiguredTarget {
+		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.configBlockKey)
+	}
+	return testCtx
+}
+
+func cloudAccessPrincipalFromConfig(t *testing.T, testCtx *k8sTestContext) principalFields {
+	t.Helper()
+
+	principal := buildPrincipalFields(testCtx.PrincipalBlock)
+	t.Logf("Using principal from config: %s (%s)", principal.Name, principal.ID)
+	return principal
+}
+
+func cloudAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIndex int) *scacloudaccessmodels.IdsecSCAEligibleTarget {
+	t.Helper()
+	require.Greater(t, len(testCtx.Targets), targetIndex, "configured target index %d is required", targetIndex)
+
+	target := buildCloudAccessEligibleTargetFromConfig(testCtx.Targets[targetIndex])
+	t.Logf("Using target from config: workspaceId=%s workspaceName=%s roleId=%s roleName=%s orgId=%s workspaceType=%s",
+		target.WorkspaceID, target.WorkspaceName, target.RoleInfo.ID, target.RoleInfo.Name, target.OrganizationID, target.WorkspaceType)
+	return target
+}
+
+func mustPrincipalCloudAccessService(t *testing.T, testCtx *k8sTestContext) *scacloudaccesssvc.IdsecSCACloudAccessService {
+	t.Helper()
+
+	cloudAccessSvc, err := buildPrincipalCloudAccessService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
+	require.NoError(t, err)
+	return cloudAccessSvc
+}
+
+func listCloudAccessTargets(
+	t *testing.T,
+	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
+	csp string,
+	workspaceID string,
+	limit int,
+) *scacloudaccessmodels.IdsecSCAListTargetsResponse {
+	t.Helper()
+
+	resp, err := cloudAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
+		CSP:         csp,
+		WorkspaceID: workspaceID,
+		Limit:       limit,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	return resp
+}
+
+func listCloudAccessTargetsWithNextToken(
+	t *testing.T,
+	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
+	cfg cloudAccessListTargetsConfig,
+) (*scacloudaccessmodels.IdsecSCAListTargetsResponse, *scacloudaccessmodels.IdsecSCAListTargetsResponse) {
+	t.Helper()
+
+	page1, err := cloudAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
+		CSP:   cfg.csp,
+		Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, page1.Response, 1, "expected exactly one cloudaccess target on the first page with limit=1")
+	if page1.Total < 2 || strings.TrimSpace(page1.NextToken) == "" {
+		t.Skipf("live CloudAccess ListTargets did not return a second page: total=%d nextToken=%q", page1.Total, page1.NextToken)
+	}
+
+	page2, err := cloudAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
+		CSP:       cfg.csp,
+		Limit:     1,
+		NextToken: page1.NextToken,
+	})
+	require.NoError(t, err)
+	require.Len(t, page2.Response, 1, "expected exactly one cloudaccess target on the second page with limit=1")
+	return page1, page2
+}
+
+func verifyCloudAccessPagination(
+	t *testing.T,
+	page1 *scacloudaccessmodels.IdsecSCAListTargetsResponse,
+	page2 *scacloudaccessmodels.IdsecSCAListTargetsResponse,
+) {
+	t.Helper()
+
+	require.NotEqual(t, cloudAccessPaginationTargetKey(page1.Response[0]), cloudAccessPaginationTargetKey(page2.Response[0]),
+		"expected pagination to return a different cloudaccess target on the second page")
+	t.Logf("Pagination: page1=%d targets, page2=%d targets, nextToken=%q",
+		len(page1.Response), len(page2.Response), page2.NextToken)
+}
+
+func verifyCloudAccessFilteredTargets(
+	t *testing.T,
+	cfg cloudAccessListTargetsConfig,
+	fetchedPolicy *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy,
+	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
+	filteredResp *scacloudaccessmodels.IdsecSCAListTargetsResponse,
+) {
+	t.Helper()
+
+	require.NotEmpty(t, filteredResp.Response, "Workspace-filtered CloudAccess ListTargets response should not be empty")
+	cfg.verifyTarget(t, fetchedPolicy, target, filteredResp.Response)
+}
+
+func elevateCloudAccessTarget(
+	t *testing.T,
+	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
+	cfg cloudAccessListTargetsConfig,
+	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
+) *scacloudaccessmodels.IdsecSCACloudAccessElevateResponse {
+	t.Helper()
+
+	elevateResp, err := cloudAccessSvc.Elevate(&scacloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:            cfg.csp,
+		WorkspaceID:    target.WorkspaceID,
+		RoleIDs:        target.RoleInfo.ID,
+		OrganizationID: target.OrganizationID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, elevateResp)
+	return elevateResp
+}
+
+func verifyAWSCloudAccessElevate(
+	t *testing.T,
+	elevateResp *scacloudaccessmodels.IdsecSCACloudAccessElevateResponse,
+	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
+) {
+	t.Helper()
+
+	require.Equal(t, awsCloudAccessListTargetsConfig.csp, strings.ToUpper(strings.TrimSpace(elevateResp.Response.CSP)))
+	require.Len(t, elevateResp.Response.Results, 1, "expected one AWS elevate result")
+
+	result := elevateResp.Response.Results[0]
+	require.Equal(t, target.WorkspaceID, strings.TrimSpace(result.WorkspaceID), "Elevate: workspace ID mismatch")
+	require.Equal(t, target.RoleInfo.ID, strings.TrimSpace(result.RoleID), "Elevate: role ID mismatch")
+	require.Nil(t, result.ErrorInfo, "Elevate returned per-target error: %+v", result.ErrorInfo)
+	require.NotEmpty(t, result.SessionID, "Elevate: expected session ID")
+	require.NotEmpty(t, result.AccessCredentials, "Elevate: expected AWS access credentials")
+	awsCreds := requireAWSAccessCredentials(t, result.AccessCredentials)
+	verifyAWSAccessCredentialsIdentity(t, awsCreds, target)
+}
+
+func setupGroupAccessListTargetsTest(t *testing.T, requireConfiguredTarget bool) *k8sTestContext {
+	t.Helper()
+	skipUnlessSupportedSCAEnv(t)
+
+	testCtx := loadListTargetsTestContext(t, "azure_groupaccess")
+	if requireConfiguredTarget {
+		require.NotEmpty(t, testCtx.Targets, "azure_groupaccess.targets.targets array is required")
+	}
+	return testCtx
+}
+
+func groupAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIndex int) groupaccessmodels.IdsecPolicyGroupAccessTargetItem {
+	t.Helper()
+	require.Greater(t, len(testCtx.Targets), targetIndex, "configured group target index %d is required", targetIndex)
+
+	target := buildGroupAccessTargetFromConfig(testCtx.Targets[targetIndex])
+	t.Logf("Using group target from config: groupId=%s directoryId=%s groupName=%s",
+		target.GroupID, target.DirectoryID, target.GroupName)
+	return target
+}
+
+func mustPrincipalGroupAccessService(t *testing.T, testCtx *k8sTestContext) *scagroupaccesssvc.IdsecSCAGroupAccessService {
+	t.Helper()
+
+	groupAccessSvc, err := buildPrincipalGroupAccessService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
+	require.NoError(t, err)
+	return groupAccessSvc
+}
+
+func listGroupAccessTargets(
+	t *testing.T,
+	groupAccessSvc *scagroupaccesssvc.IdsecSCAGroupAccessService,
+	limit int,
+) *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse {
+	t.Helper()
+
+	resp, err := groupAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
+		CSP:   "AZURE",
+		Limit: limit,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	return resp
+}
+
+func listGroupAccessTargetsWithNextToken(
+	t *testing.T,
+	groupAccessSvc *scagroupaccesssvc.IdsecSCAGroupAccessService,
+) (*scagroupaccessmodels.IdsecSCAListGroupTargetsResponse, *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse) {
+	t.Helper()
+
+	page1 := listGroupAccessTargets(t, groupAccessSvc, 1)
+	require.Len(t, page1.Response, 1, "expected exactly one group target on the first page with limit=1")
+	if page1.Total < 2 || strings.TrimSpace(page1.NextToken) == "" {
+		t.Skipf("live GroupAccess ListTargets did not return a second page: total=%d nextToken=%q", page1.Total, page1.NextToken)
+	}
+
+	page2, err := groupAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
+		CSP:       "AZURE",
+		Limit:     1,
+		NextToken: page1.NextToken,
+	})
+	require.NoError(t, err)
+	require.Len(t, page2.Response, 1, "expected exactly one group target on the second page with limit=1")
+	return page1, page2
+}
+
+func verifyGroupAccessPagination(
+	t *testing.T,
+	page1 *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse,
+	page2 *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse,
+) {
+	t.Helper()
+
+	require.NotEqual(t, groupAccessPaginationTargetKey(page1.Response[0]), groupAccessPaginationTargetKey(page2.Response[0]),
+		"expected pagination to return a different group target on the second page")
+	t.Logf("Pagination: page1=%d groups, page2=%d groups, nextToken=%q",
+		len(page1.Response), len(page2.Response), page2.NextToken)
+}
+
+func setupK8sListTargetsTest(t *testing.T, cfg k8sListTargetsConfig, requireConfiguredTarget bool) *k8sTestContext {
+	t.Helper()
+	skipUnlessSupportedSCAEnv(t)
+
+	testCtx := loadListTargetsTestContext(t, cfg.configBlockKey)
+	if requireConfiguredTarget {
+		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.configBlockKey)
+	}
+	return testCtx
+}
+
+func k8sTargetFromConfig(t *testing.T, cfg k8sListTargetsConfig, testCtx *k8sTestContext, targetIndex int) k8sTargetConfig {
+	t.Helper()
+	require.Greater(t, len(testCtx.Targets), targetIndex, "configured k8s target index %d is required", targetIndex)
+
+	target := cfg.buildTarget(testCtx.Targets[targetIndex])
+	t.Logf("Using target from config: workspaceId=%s workspaceName=%s roleId=%s roleName=%s orgId=%s workspaceType=%s clusterId=%s scope=%s",
+		target.PolicyTarget.WorkspaceID, target.PolicyTarget.WorkspaceName, target.PolicyTarget.RoleInfo.ID, target.PolicyTarget.RoleInfo.Name,
+		target.PolicyTarget.OrganizationID, target.PolicyTarget.WorkspaceType, target.ClusterID, target.Scope)
+	return target
+}
+
+func mustPrincipalK8sService(t *testing.T, testCtx *k8sTestContext) *k8sservice.IdsecSCAK8sService {
+	t.Helper()
+
+	k8sSvc, err := buildPrincipalK8sService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
+	require.NoError(t, err)
+	return k8sSvc
+}
+
+func listK8sTargets(
+	t *testing.T,
+	k8sSvc *k8sservice.IdsecSCAK8sService,
+	csp string,
+	workspaceID string,
+	limit int,
+) *k8smodels.IdsecSCAk8sListClustersResponse {
+	t.Helper()
+
+	resp, err := k8sSvc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{
+		CSP:         csp,
+		WorkspaceID: workspaceID,
+		Limit:       limit,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	return resp
+}
+
+func listK8sTargetsWithNextToken(
+	t *testing.T,
+	k8sSvc *k8sservice.IdsecSCAK8sService,
+	cfg k8sListTargetsConfig,
+) (*k8smodels.IdsecSCAk8sListClustersResponse, *k8smodels.IdsecSCAk8sListClustersResponse) {
+	t.Helper()
+
+	page1 := listK8sTargets(t, k8sSvc, cfg.csp, "", 1)
+	require.Len(t, page1.Response, 1, "expected exactly one cluster target on the first page with limit=1")
+	if page1.Total < 2 || page1.NextToken == nil || strings.TrimSpace(*page1.NextToken) == "" {
+		t.Skipf("live K8s ListTargets did not return a second page: total=%d nextToken=%q", page1.Total, k8sNextTokenString(page1.NextToken))
+	}
+
+	page2, err := k8sSvc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{
+		CSP:       cfg.csp,
+		Limit:     1,
+		NextToken: *page1.NextToken,
+	})
+	require.NoError(t, err)
+	require.Len(t, page2.Response, 1, "expected exactly one cluster target on the second page with limit=1")
+	return page1, page2
+}
+
+func verifyK8sPagination(
+	t *testing.T,
+	page1 *k8smodels.IdsecSCAk8sListClustersResponse,
+	page2 *k8smodels.IdsecSCAk8sListClustersResponse,
+) {
+	t.Helper()
+
+	require.NotEqual(t, k8sPaginationTargetKey(page1.Response[0]), k8sPaginationTargetKey(page2.Response[0]),
+		"expected pagination to return a different cluster target on the second page")
+	t.Logf("Pagination: page1=%d targets, page2=%d targets, nextToken=%q",
+		len(page1.Response), len(page2.Response), k8sNextTokenString(page2.NextToken))
+}
+
+func verifyK8sFilteredTargets(
+	t *testing.T,
+	target k8sTargetConfig,
+	filteredResp *k8smodels.IdsecSCAk8sListClustersResponse,
+) {
+	t.Helper()
+
+	require.NotEmpty(t, filteredResp.Response, "Workspace-filtered K8s ListTargets response should not be empty")
+	verifyK8sClusterTargetInListTargets(t, target.VerifyTarget, target.ClusterID, target.Scope, target.FQDN, filteredResp.Response)
+}
+
+func k8sNextTokenString(nextToken *string) string {
+	if nextToken == nil {
+		return ""
+	}
+	return *nextToken
+}
+
+func verifyK8sClusterTargetInListTargets(
+	t *testing.T,
+	expectedTarget *scacloudaccessmodels.IdsecSCAEligibleTarget,
+	expectedClusterID string,
+	expectedScope string,
+	expectedFQDN string,
+	listResponse []k8smodels.IdsecSCAk8sListClustersEligibleTarget,
+) {
+	t.Helper()
+
+	require.NotNil(t, expectedTarget, "Expected K8s target must not be nil")
+
+	expectedRoleID := strings.TrimSpace(expectedTarget.RoleInfo.ID)
+	expectedRoleName := strings.TrimSpace(expectedTarget.RoleInfo.Name)
+	expectedWorkspaceID := strings.TrimSpace(expectedTarget.WorkspaceID)
+	expectedWorkspaceName := strings.TrimSpace(expectedTarget.WorkspaceName)
+	expectedOrganizationID := strings.TrimSpace(expectedTarget.OrganizationID)
+	expectedWorkspaceType := strings.TrimSpace(expectedTarget.WorkspaceType)
+	expectedClusterID = strings.TrimSpace(expectedClusterID)
+	expectedScope = strings.TrimSpace(expectedScope)
+	expectedFQDN = strings.TrimSpace(expectedFQDN)
+	t.Logf("Expected K8s target: roleId=%s roleName=%s workspaceId=%s workspaceName=%s orgId=%s workspaceType=%s clusterId=%s scope=%s fqdn=%s",
+		expectedRoleID, expectedRoleName, expectedWorkspaceID, expectedWorkspaceName, expectedOrganizationID, expectedWorkspaceType, expectedClusterID, expectedScope, expectedFQDN)
+
+	require.NotEmpty(t, listResponse, "K8s ListTargets: response should not be empty")
+
+	for _, actualTarget := range listResponse {
+		actualRoleID := strings.TrimSpace(actualTarget.Role.ID)
+		actualRoleName := strings.TrimSpace(actualTarget.Role.Name)
+		actualWorkspaceID := strings.TrimSpace(actualTarget.WorkspaceID)
+		actualWorkspaceName := strings.TrimSpace(actualTarget.WorkspaceName)
+		actualWorkspaceType := strings.TrimSpace(actualTarget.WorkspaceType)
+		actualClusterID := strings.TrimSpace(actualTarget.Target.ClusterID)
+		actualScope := strings.TrimSpace(actualTarget.Target.Scope)
+		var actualFQDN string
+		if actualTarget.Target.FQDN != nil {
+			actualFQDN = strings.TrimSpace(*actualTarget.Target.FQDN)
+		}
+		var actualOrganizationID string
+		if actualTarget.OrganizationID != nil {
+			actualOrganizationID = strings.TrimSpace(*actualTarget.OrganizationID)
+		}
+		if actualRoleID == expectedRoleID && actualWorkspaceID == expectedWorkspaceID {
+			if expectedRoleName != "" {
+				require.Equal(t, expectedRoleName, actualRoleName, "K8s ListTargets: role name mismatch")
+			}
+			if expectedWorkspaceName != "" {
+				require.Equal(t, expectedWorkspaceName, actualWorkspaceName, "K8s ListTargets: workspace name mismatch")
+			}
+			if expectedOrganizationID != "" {
+				require.Equal(t, expectedOrganizationID, actualOrganizationID, "K8s ListTargets: organization ID mismatch")
+			}
+			if expectedWorkspaceType != "" {
+				require.Equal(t, expectedWorkspaceType, actualWorkspaceType, "K8s ListTargets: workspace type mismatch")
+			}
+			if expectedClusterID != "" {
+				require.Equal(t, expectedClusterID, actualClusterID, "K8s ListTargets: cluster ID mismatch")
+			}
+			if expectedScope != "" {
+				require.Equal(t, expectedScope, actualScope, "K8s ListTargets: scope mismatch")
+			}
+			if expectedFQDN != "" {
+				require.Equal(t, expectedFQDN, actualFQDN, "K8s ListTargets: fqdn mismatch")
+			}
+			t.Logf("K8s policy target validated via ListTargets: roleId=%s roleName=%s workspaceId=%s workspaceName=%s orgId=%s workspaceType=%s clusterId=%s scope=%s fqdn=%s",
+				actualRoleID, actualRoleName, actualWorkspaceID, actualWorkspaceName, actualOrganizationID, actualWorkspaceType, actualClusterID, actualScope, actualFQDN)
+			return
+		}
+	}
+
+	require.Failf(t, "K8s ListTargets target mismatch",
+		"Expected K8s target not found in ListTargets response: roleId=%s roleName=%s workspaceId=%s workspaceName=%s orgId=%s workspaceType=%s clusterId=%s scope=%s fqdn=%s",
+		expectedRoleID, expectedRoleName, expectedWorkspaceID, expectedWorkspaceName, expectedOrganizationID, expectedWorkspaceType, expectedClusterID, expectedScope, expectedFQDN)
+}
+
+func verifyCloudAccessTargetInListTargets(
 	t *testing.T,
 	fetchedPolicy *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy,
-	listResponse []cloudconsolemodels.IdsecSCAEligibleTarget,
+	listResponse []scacloudaccessmodels.IdsecSCAEligibleTarget,
 ) {
 	t.Helper()
 
@@ -252,15 +657,15 @@ func verifyCloudConsoleTargetInListTargets(
 		expectedRoleID, expectedWorkspaceID, expectedOrganizationID, expectedWorkspaceType)
 }
 
-func verifyEntraGroupsTargetInListTargets(
+func verifyGroupAccessTargetInListTargets(
 	t *testing.T,
 	fetchedPolicy *groupaccessmodels.IdsecPolicyGroupAccessPolicy,
-	listResponse []entragroupsmodels.IdsecSCAGroupsEligibleTarget,
+	listResponse []scagroupaccessmodels.IdsecSCAGroupsEligibleTarget,
 ) {
 	t.Helper()
 
 	require.NotNil(t, fetchedPolicy, "GetPolicy response must not be nil")
-	require.Len(t, fetchedPolicy.Targets.Targets, 1, "GetPolicy: expected exactly one Entra group target")
+	require.Len(t, fetchedPolicy.Targets.Targets, 1, "GetPolicy: expected exactly one group access target")
 
 	// The policy target and eligibility response use the same group/directory keys,
 	// so a direct field comparison is enough for this E2E validation.
@@ -295,148 +700,138 @@ func verifyEntraGroupsTargetInListTargets(
 		expectedGroupID, expectedDirectoryID, expectedGroupName)
 }
 
+// k8sPaginationTargetKey returns a compound key used to compare two eligible
+// K8s targets for equality during pagination verification.
+func k8sPaginationTargetKey(target k8smodels.IdsecSCAk8sListClustersEligibleTarget) string {
+	var organizationID string
+	if target.OrganizationID != nil {
+		organizationID = strings.TrimSpace(*target.OrganizationID)
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(target.WorkspaceID),
+		strings.TrimSpace(target.Role.ID),
+		organizationID,
+		strings.TrimSpace(target.WorkspaceType),
+		strings.TrimSpace(target.Target.Scope),
+		strings.TrimSpace(target.Target.ClusterID),
+	}, "|")
+}
+
 // ---------------------------------------------------------------------------
-// Non-fatal policy cleanup
+// AWS Cloud Access target verification
 // ---------------------------------------------------------------------------
 
-func deletePolicyBestEffort(t *testing.T, policyID string, deleteFn func(*policycommonmodels.IdsecPolicyDeletePolicyRequest) error) {
+// verifyAWSCloudAccessTargetInListTargets checks that the AWS account target
+// appears in the ListTargets response. Matches on roleId and workspaceId.
+func verifyAWSCloudAccessTargetInListTargets(
+	t *testing.T,
+	expectedTarget *scacloudaccessmodels.IdsecSCAEligibleTarget,
+	listResponse []scacloudaccessmodels.IdsecSCAEligibleTarget,
+) {
 	t.Helper()
 
-	err := deleteFn(&policycommonmodels.IdsecPolicyDeletePolicyRequest{
-		PolicyID: policyID,
+	require.NotNil(t, expectedTarget, "Expected AWS target must not be nil")
+
+	expectedRoleID := strings.TrimSpace(expectedTarget.RoleInfo.ID)
+	expectedRoleName := strings.TrimSpace(expectedTarget.RoleInfo.Name)
+	expectedWorkspaceID := strings.TrimSpace(expectedTarget.WorkspaceID)
+	expectedWorkspaceName := strings.TrimSpace(expectedTarget.WorkspaceName)
+	expectedOrganizationID := strings.TrimSpace(expectedTarget.OrganizationID)
+	expectedWorkspaceType := strings.TrimSpace(expectedTarget.WorkspaceType)
+	t.Logf("Expected AWS target: roleId=%s roleName=%s workspaceId=%s workspaceName=%s orgId=%s workspaceType=%s",
+		expectedRoleID, expectedRoleName, expectedWorkspaceID, expectedWorkspaceName, expectedOrganizationID, expectedWorkspaceType)
+
+	require.NotEmpty(t, listResponse, "ListTargets: response should not be empty")
+
+	for _, actualTarget := range listResponse {
+		actualRoleID := strings.TrimSpace(actualTarget.RoleInfo.ID)
+		actualWorkspaceID := strings.TrimSpace(actualTarget.WorkspaceID)
+		if actualRoleID == expectedRoleID && actualWorkspaceID == expectedWorkspaceID {
+			if expectedRoleName != "" {
+				require.Equal(t, expectedRoleName, strings.TrimSpace(actualTarget.RoleInfo.Name), "ListTargets: role name mismatch")
+			}
+			if expectedWorkspaceName != "" {
+				require.Equal(t, expectedWorkspaceName, strings.TrimSpace(actualTarget.WorkspaceName), "ListTargets: workspace name mismatch")
+			}
+			t.Logf("AWS policy target validated via ListTargets: roleId=%s workspaceId=%s", actualRoleID, actualWorkspaceID)
+			return
+		}
+	}
+
+	require.Failf(t, "ListTargets target mismatch",
+		"Expected AWS target not found in ListTargets: roleId=%s workspaceId=%s",
+		expectedRoleID, expectedWorkspaceID)
+}
+
+type awsAccessCredentials struct {
+	AccessKeyID     string `json:"aws_access_key"`
+	SecretAccessKey string `json:"aws_secret_access_key"`
+	SessionToken    string `json:"aws_session_token"`
+}
+
+func requireAWSAccessCredentials(t *testing.T, accessCredentials string) awsAccessCredentials {
+	t.Helper()
+
+	var awsCreds awsAccessCredentials
+	require.NoError(t, json.Unmarshal([]byte(accessCredentials), &awsCreds), "Elevate: accessCredentials should be JSON")
+	require.NotEmpty(t, awsCreds.AccessKeyID, "Elevate: expected aws_access_key")
+	require.NotEmpty(t, awsCreds.SecretAccessKey, "Elevate: expected aws_secret_access_key")
+	require.NotEmpty(t, awsCreds.SessionToken, "Elevate: expected aws_session_token")
+	return awsCreds
+}
+
+func verifyAWSAccessCredentialsIdentity(
+	t *testing.T,
+	awsCreds awsAccessCredentials,
+	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
+) {
+	t.Helper()
+
+	// Use the returned temporary credentials against AWS STS to prove they are
+	// accepted by AWS, then verify they belong to the requested account and role.
+	stsClient := sts.NewFromConfig(aws.Config{
+		Region: "us-east-1",
+		Credentials: credentials.NewStaticCredentialsProvider(
+			awsCreds.AccessKeyID,
+			awsCreds.SecretAccessKey,
+			awsCreds.SessionToken,
+		),
 	})
-	if err != nil {
-		t.Logf("WARNING: policy delete failed (non-fatal): %v", err)
-	} else {
-		t.Logf("Policy deleted — ID: %s", policyID)
+	identity, err := stsClient.GetCallerIdentity(context.Background(), &sts.GetCallerIdentityInput{})
+	require.NoError(t, err, "Elevate: returned AWS credentials should be usable with STS GetCallerIdentity")
+	require.NotNil(t, identity, "Elevate: STS GetCallerIdentity response should not be nil")
+
+	require.Equal(t, strings.TrimSpace(target.WorkspaceID), strings.TrimSpace(aws.ToString(identity.Account)),
+		"Elevate: AWS credentials account should match requested workspace")
+	if roleName := strings.TrimSpace(target.RoleInfo.Name); roleName != "" {
+		require.Contains(t, strings.TrimSpace(aws.ToString(identity.Arn)), ":assumed-role/"+roleName+"/",
+			"Elevate: AWS credentials should be for the requested role")
 	}
+}
+
+// cloudAccessPaginationTargetKey returns a compound key used to compare
+// two eligible targets for equality during pagination verification.
+func cloudAccessPaginationTargetKey(target scacloudaccessmodels.IdsecSCAEligibleTarget) string {
+	return strings.Join([]string{
+		strings.TrimSpace(target.WorkspaceID),
+		strings.TrimSpace(target.RoleInfo.ID),
+		strings.TrimSpace(target.OrganizationID),
+		strings.TrimSpace(target.WorkspaceType),
+	}, "|")
+}
+
+// groupAccessPaginationTargetKey returns a compound key used to compare
+// two eligible group targets for equality during pagination verification.
+func groupAccessPaginationTargetKey(target scagroupaccessmodels.IdsecSCAGroupsEligibleTarget) string {
+	return strings.Join([]string{
+		strings.TrimSpace(target.GroupID),
+		strings.TrimSpace(target.DirectoryID),
+	}, "|")
 }
 
 // ---------------------------------------------------------------------------
-// Cloud Console policy builder
+// Shared Azure Cloud Access E2E flows
 // ---------------------------------------------------------------------------
-
-func buildAzurePolicyFromBodyTemplate(
-	policyName string,
-	policyPrincipalID string,
-	policyPrincipalName string,
-	sourceDirectoryName string,
-	sourceDirectoryID string,
-	target *cloudconsolemodels.IdsecSCAEligibleTarget,
-) *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy {
-	return &policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{
-		IdsecPolicyCommonAccessPolicy: policycommonmodels.IdsecPolicyCommonAccessPolicy{
-			Metadata: policycommonmodels.IdsecPolicyMetadata{
-				Name:        policyName,
-				Description: "",
-				Status: policycommonmodels.IdsecPolicyStatus{
-					Status: policycommonmodels.StatusTypeValidating,
-				},
-				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{
-					FromTime: "",
-					ToTime:   "",
-				},
-				PolicyEntitlement: policycommonmodels.IdsecPolicyEntitlement{
-					TargetCategory: commonmodels.CategoryTypeCloudConsole,
-					LocationType:   "Azure",
-					PolicyType:     policycommonmodels.PolicyTypeRecurring,
-				},
-				PolicyTags: []string{},
-				TimeZone:   "Asia/Calcutta",
-			},
-			Principals: []policycommonmodels.IdsecPolicyPrincipal{
-				{
-					ID:                  policyPrincipalID,
-					Name:                policyPrincipalName,
-					SourceDirectoryName: sourceDirectoryName,
-					SourceDirectoryID:   sourceDirectoryID,
-					Type:                policycommonmodels.PrincipalTypeUser,
-				},
-			},
-			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
-		},
-		Conditions: policycommonmodels.IdsecPolicyConditions{
-			AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-				DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
-				FromHour:      "",
-				ToHour:        "",
-			},
-			MaxSessionDuration: 1,
-		},
-		Targets: policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
-			AzureTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAzureTarget{
-				{
-					IdsecPolicyCloudAccessTarget: policycloudaccessmodels.IdsecPolicyCloudAccessTarget{
-						RoleID:      target.RoleInfo.ID,
-						WorkspaceID: target.WorkspaceID,
-					},
-					OrgID:         target.OrganizationID,
-					WorkspaceType: normalizeAzureWorkspaceType(target.WorkspaceType),
-				},
-			},
-		},
-	}
-}
-
-func buildAzureEntraGroupsPolicyFromBodyTemplate(
-	policyName string,
-	policyPrincipalID string,
-	policyPrincipalName string,
-	sourceDirectoryName string,
-	sourceDirectoryID string,
-	target groupaccessmodels.IdsecPolicyGroupAccessTargetItem,
-) *groupaccessmodels.IdsecPolicyGroupAccessPolicy {
-	// Keep the Entra Groups policy body aligned with the cloud-console E2E flow:
-	// one principal, one target, recurring access window, and short session duration.
-	return &groupaccessmodels.IdsecPolicyGroupAccessPolicy{
-		IdsecPolicyCommonAccessPolicy: policycommonmodels.IdsecPolicyCommonAccessPolicy{
-			Metadata: policycommonmodels.IdsecPolicyMetadata{
-				Name:        policyName,
-				Description: "",
-				Status: policycommonmodels.IdsecPolicyStatus{
-					Status: policycommonmodels.StatusTypeValidating,
-				},
-				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{
-					FromTime: "",
-					ToTime:   "",
-				},
-				PolicyEntitlement: policycommonmodels.IdsecPolicyEntitlement{
-					TargetCategory: commonmodels.CategoryTypeGroupAccess,
-					LocationType:   "Azure",
-					PolicyType:     policycommonmodels.PolicyTypeRecurring,
-				},
-				PolicyTags: []string{},
-				TimeZone:   "Asia/Calcutta",
-			},
-			Principals: []policycommonmodels.IdsecPolicyPrincipal{
-				{
-					ID:                  policyPrincipalID,
-					Name:                policyPrincipalName,
-					SourceDirectoryName: sourceDirectoryName,
-					SourceDirectoryID:   sourceDirectoryID,
-					Type:                policycommonmodels.PrincipalTypeUser,
-				},
-			},
-			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
-		},
-		Conditions: policycommonmodels.IdsecPolicyConditions{
-			AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-				DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
-				FromHour:      "",
-				ToHour:        "",
-			},
-			MaxSessionDuration: 1,
-		},
-		Targets: groupaccessmodels.IdsecPolicyGroupAccessTarget{
-			Targets: []groupaccessmodels.IdsecPolicyGroupAccessTargetItem{
-				{
-					GroupID:     target.GroupID,
-					DirectoryID: target.DirectoryID,
-				},
-			},
-		},
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Workspace type normalizer

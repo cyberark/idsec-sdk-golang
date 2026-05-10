@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -102,7 +103,8 @@ func (s *IdsecSIACertificatesService) Create(addCertificate *certificatesmodels.
 	if addCertificate.CertificateBody != "" {
 		certBody = addCertificate.CertificateBody
 	} else if addCertificate.File != "" {
-		fileContent, err := os.ReadFile(addCertificate.File)
+		filePath := strings.TrimSuffix(common.ExpandFolder(addCertificate.File), "/")
+		fileContent, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +116,7 @@ func (s *IdsecSIACertificatesService) Create(addCertificate *certificatesmodels.
 		if addCertificate.CertDescription == "" {
 			addCertificate.CertDescription = fmt.Sprintf("Certificate imported from file %s", fileName)
 		}
-		addCertificate.Labels["file_name"] = fileName
+		addCertificate.Labels["fileName"] = fileName
 	} else {
 		return nil, fmt.Errorf("either CertificateBody or File must be provided")
 	}

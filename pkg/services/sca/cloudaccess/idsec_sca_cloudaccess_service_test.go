@@ -1,4 +1,4 @@
-package cloudconsole
+package cloudaccess
 
 import (
 	"encoding/json"
@@ -12,20 +12,20 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	cloudconsolemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole/models"
+	cloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/models"
 	scainternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
-// setupCloudConsoleService creates an IdsecSCACloudConsoleService with the given mock ISP client injected.
-func setupCloudConsoleService(client *isp.IdsecISPServiceClient) *IdsecSCACloudConsoleService {
+// setupCloudAccessService creates an IdsecSCACloudAccessService with the given mock ISP client injected.
+func setupCloudAccessService(client *isp.IdsecISPServiceClient) *IdsecSCACloudAccessService {
 	ispBase := &services.IdsecISPBaseService{}
 	v := reflect.ValueOf(ispBase).Elem()
 	clientField := v.FieldByName("client")
 	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
 	clientField.Set(reflect.ValueOf(client))
 
-	return &IdsecSCACloudConsoleService{
+	return &IdsecSCACloudAccessService{
 		IdsecBaseService: &services.IdsecBaseService{
 			Logger: common.GlobalLogger,
 		},
@@ -38,7 +38,7 @@ func setupCloudConsoleService(client *isp.IdsecISPServiceClient) *IdsecSCACloudC
 // ---------------------------------------------------------------------------
 
 func TestListTargets_validation_table(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
+	svc := &IdsecSCACloudAccessService{}
 	tests := []struct {
 		name string
 		req  *scamodels.IdsecSCAListTargetsRequest
@@ -94,7 +94,7 @@ func TestListTargets_Success_AWS(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestListTargets_Success_MultipleTargets(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestListTargets_EmptyResponse(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestListTargets_EmptyResponse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestListTargets_URLPath verifies the exact eligibility path is used for each CSP,
-// and that the path never includes /groups (which belongs to entragroups).
+// and that the path never includes /groups (which belongs to groupaccess).
 func TestListTargets_URLPath(t *testing.T) {
 	tests := []struct {
 		inputCSP     string
@@ -191,7 +191,7 @@ func TestListTargets_URLPath(t *testing.T) {
 			})
 			defer cleanup()
 
-			svc := setupCloudConsoleService(client)
+			svc := setupCloudAccessService(client)
 			_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: tt.inputCSP})
 
 			require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestListTargets_WorkspaceID(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
 		CSP:         "AWS",
 		WorkspaceID: "ws-filter-123",
@@ -248,7 +248,7 @@ func TestListTargets_Pagination(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
 		CSP:       "GCP",
 		Limit:     10,
@@ -278,7 +278,7 @@ func TestListTargets_WorkspaceID_NotSentWhenEmpty(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestListTargets_400BadRequest(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.Error(t, err)
@@ -319,7 +319,7 @@ func TestListTargets_404NotFound(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.Error(t, err)
@@ -337,7 +337,7 @@ func TestListTargets_500InternalServerError(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
+	svc := setupCloudAccessService(client)
 	_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 
 	require.Error(t, err)
@@ -348,7 +348,7 @@ func TestListTargets_500InternalServerError(t *testing.T) {
 // This uses the shared helper which runs 400, 404, 500 as sub-tests automatically.
 func TestListTargets_ErrorPropagation(t *testing.T) {
 	scainternal.TestServiceErrorPropagation(t, func(client *isp.IdsecISPServiceClient) error {
-		svc := setupCloudConsoleService(client)
+		svc := setupCloudAccessService(client)
 		_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"})
 		return err
 	})
@@ -356,7 +356,7 @@ func TestListTargets_ErrorPropagation(t *testing.T) {
 
 // TestListTargets_UnsupportedCSP_ErrorMessage verifies the error message names the invalid CSP.
 func TestListTargets_UnsupportedCSP_ErrorMessage(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
+	svc := &IdsecSCACloudAccessService{}
 	unsupportedCSPs := []string{"ibm", "IBM", "oracle", "alicloud"}
 
 	for _, csp := range unsupportedCSPs {
@@ -397,12 +397,12 @@ func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 			})
 			defer cleanup()
 
-			svc := setupCloudConsoleService(client)
+			svc := setupCloudAccessService(client)
 			_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: tt.csp})
 
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedPath, capturedPath)
-			// Must never hit the entragroups endpoint
+			// Must never hit the groupaccess endpoint
 			require.False(t, strings.HasSuffix(capturedPath, "/groups"))
 		})
 	}
@@ -413,48 +413,48 @@ func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestElevate_validation_nil_request(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
+	svc := &IdsecSCACloudAccessService{}
 	_, err := svc.Elevate(nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil")
 }
 
 func TestElevate_validation_empty_csp(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		WorkspaceID: "ws-1",
-		RoleID:      "role-1",
+		RoleIDs:     "role-1",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "csp")
 }
 
 func TestElevate_validation_missing_workspace_id(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
-		CSP:    "AWS",
-		RoleID: "test-role-id",
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:     "AWS",
+		RoleIDs: "test-role-id",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "workspaceId")
 }
 
 func TestElevate_validation_missing_role(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "test-workspace-id",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "roleId")
+	require.Contains(t, err.Error(), "roleIds")
 }
 
 func TestElevate_validation_uninitialized_service(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "test-workspace-id",
-		RoleID:      "test-role-id",
+		RoleIDs:     "test-role-id",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not initialized")
@@ -477,11 +477,11 @@ func TestElevate_Success_AWS(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	resp, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	resp, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "test-workspace-id",
-		RoleID:      "test-role-id",
+		RoleIDs:     "test-role-id",
 	})
 
 	require.NoError(t, err)
@@ -525,11 +525,11 @@ func TestElevate_Success_NotEligible(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	resp, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	resp, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "test-workspace-id",
-		RoleID:      "test-role-id",
+		RoleIDs:     "test-role-id",
 	})
 
 	require.NoError(t, err)
@@ -564,11 +564,11 @@ func TestElevate_URL_Method(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "ws-1",
-		RoleID:      "role-1",
+		RoleIDs:     "role-1",
 	})
 
 	require.NoError(t, err)
@@ -595,11 +595,11 @@ func TestElevate_RequestBody(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "test-workspace-id",
-		RoleID:      "test-role-id",
+		RoleIDs:     "test-role-id",
 	})
 
 	require.NoError(t, err)
@@ -628,9 +628,9 @@ func TestElevate_400BadRequest(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
-		CSP: "AWS", WorkspaceID: "ws-1", RoleID: "role-1",
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP: "AWS", WorkspaceID: "ws-1", RoleIDs: "role-1",
 	})
 
 	require.Error(t, err)
@@ -647,9 +647,9 @@ func TestElevate_404NotFound(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
-		CSP: "AWS", WorkspaceID: "ws-1", RoleID: "role-1",
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP: "AWS", WorkspaceID: "ws-1", RoleIDs: "role-1",
 	})
 
 	require.Error(t, err)
@@ -666,9 +666,9 @@ func TestElevate_500InternalServerError(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
-		CSP: "AWS", WorkspaceID: "ws-1", RoleID: "role-1",
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP: "AWS", WorkspaceID: "ws-1", RoleIDs: "role-1",
 	})
 
 	require.Error(t, err)
@@ -690,11 +690,11 @@ func TestElevate_CommaSeparatedRoleIDs_AZURE(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:            "AZURE",
 		WorkspaceID:    "ws-1",
-		RoleID:         "role-a,role-b,role-c",
+		RoleIDs:        "role-a,role-b,role-c",
 		OrganizationID: "org-1",
 	})
 
@@ -711,51 +711,27 @@ func TestElevate_CommaSeparatedRoleIDs_AZURE(t *testing.T) {
 	}
 }
 
-func TestElevate_CommaSeparatedRoleIDs_AWS(t *testing.T) {
-	var capturedBody []byte
-	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
-		{
-			Matcher:      func(r *http.Request) bool { return true },
-			StatusCode:   http.StatusOK,
-			ResponseBody: `{"response":{"organizationId":"","csp":"AWS","results":[]}}`,
-			OnRequest: func(r *http.Request) {
-				capturedBody = make([]byte, r.ContentLength)
-				_, _ = r.Body.Read(capturedBody)
-			},
-		},
-	})
-	defer cleanup()
-
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+func TestElevate_CommaSeparatedRoleIDs_AWS_ReturnsError(t *testing.T) {
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AWS",
 		WorkspaceID: "aws-account-1",
-		RoleID:      "role-a,role-b,role-c",
+		RoleIDs:     "role-a,role-b,role-c",
 	})
 
-	require.NoError(t, err)
-	var body map[string]interface{}
-	require.NoError(t, json.Unmarshal(capturedBody, &body))
-	require.Equal(t, "AWS", body["csp"])
-	targets, ok := body["targets"].([]interface{})
-	require.True(t, ok)
-	require.Len(t, targets, 3)
-	for i, expectedRole := range []string{"role-a", "role-b", "role-c"} {
-		target := targets[i].(map[string]interface{})
-		require.Equal(t, "aws-account-1", target["workspaceId"])
-		require.Equal(t, expectedRole, target["roleId"])
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maximum 1 role IDs allowed for AWS")
 }
 
-func TestElevate_ExceedsMaxRoleIDs(t *testing.T) {
-	svc := &IdsecSCACloudConsoleService{}
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+func TestElevate_ExceedsMaxRoleIDs_AZURE(t *testing.T) {
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:         "AZURE",
 		WorkspaceID: "ws-1",
-		RoleID:      "r1,r2,r3,r4,r5,r6",
+		RoleIDs:     "r1,r2,r3,r4,r5,r6",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "maximum")
+	require.Contains(t, err.Error(), "maximum 5 role IDs allowed for AZURE")
 }
 
 func TestElevate_RequestBody_WithOrganizationID(t *testing.T) {
@@ -773,11 +749,11 @@ func TestElevate_RequestBody_WithOrganizationID(t *testing.T) {
 	})
 	defer cleanup()
 
-	svc := setupCloudConsoleService(client)
-	_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 		CSP:            "AZURE",
 		WorkspaceID:    "test-workspace-id",
-		RoleID:         "test-role-id",
+		RoleIDs:        "test-role-id",
 		OrganizationID: "test-org-id",
 	})
 
@@ -796,9 +772,9 @@ func TestElevate_RequestBody_WithOrganizationID(t *testing.T) {
 
 func TestElevate_ErrorPropagation(t *testing.T) {
 	scainternal.TestServiceErrorPropagation(t, func(client *isp.IdsecISPServiceClient) error {
-		svc := setupCloudConsoleService(client)
-		_, err := svc.Elevate(&cloudconsolemodels.IdsecSCACloudConsoleElevateActionRequest{
-			CSP: "AWS", WorkspaceID: "ws-1", RoleID: "role-1",
+		svc := setupCloudAccessService(client)
+		_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+			CSP: "AWS", WorkspaceID: "ws-1", RoleIDs: "role-1",
 		})
 		return err
 	})

@@ -4,6 +4,7 @@ builds:
   - skip: true
 
 changelog:
+  disable: true
   sort: asc
   filters:
     exclude:

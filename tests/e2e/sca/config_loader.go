@@ -37,6 +37,7 @@ func LoadSCATestConfig(t *testing.T) map[string]interface{} {
 	t.Logf("Loaded SCA test config from %s", configPath)
 
 	if auth, ok := cfg["auth"].(map[string]interface{}); ok {
+		setEnv("IDSEC_E2E_ISP_USERNAME", strVal(auth, "username"))
 		setEnv("IDSEC_E2E_ISP_AUTH_METHOD", strVal(auth, "method"))
 		setEnv("IDSEC_E2E_ISP_IDENTITY_URL", strVal(auth, "identity_url"))
 	}
@@ -89,7 +90,7 @@ func strVal(m map[string]interface{}, key string) string {
 	return ""
 }
 
-// cspBlock extracts a CSP section (e.g. "azure_cloud_console") from the config.
+// cspBlock extracts a CSP section (e.g. "azure_cloudaccess") from the config.
 func cspBlock(cfg map[string]interface{}, key string) map[string]interface{} {
 	if block, ok := cfg[key].(map[string]interface{}); ok {
 		return block

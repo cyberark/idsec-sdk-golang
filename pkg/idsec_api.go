@@ -79,8 +79,8 @@ import (
 	groupaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
 	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
-	cloudconsole "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudconsole"
-	entragroups "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/entragroups"
+	cloudaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess"
+	groupaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
 	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	configurations "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
@@ -557,29 +557,29 @@ func (api *IdsecAPI) Sca() (*sca.IdsecSCAService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) ScaCloudconsole() (*cloudconsole.IdsecSCACloudConsoleService, error) {
-	if serviceIfs, ok := api.services[cloudconsole.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*cloudconsole.IdsecSCACloudConsoleService), nil
+func (api *IdsecAPI) ScaCloudaccess() (*cloudaccess2.IdsecSCACloudAccessService, error) {
+	if serviceIfs, ok := api.services[cloudaccess2.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*cloudaccess2.IdsecSCACloudAccessService), nil
 	}
-	service, err := cloudconsole.ServiceGenerator(api.loadServiceAuthenticators(cloudconsole.ServiceConfig)...)
+	service, err := cloudaccess2.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess2.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[cloudconsole.ServiceConfig.ServiceName] = &baseService
+	api.services[cloudaccess2.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
-func (api *IdsecAPI) ScaEntragroups() (*entragroups.IdsecSCAEntraGroupsService, error) {
-	if serviceIfs, ok := api.services[entragroups.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*entragroups.IdsecSCAEntraGroupsService), nil
+func (api *IdsecAPI) ScaGroupaccess() (*groupaccess2.IdsecSCAGroupAccessService, error) {
+	if serviceIfs, ok := api.services[groupaccess2.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*groupaccess2.IdsecSCAGroupAccessService), nil
 	}
-	service, err := entragroups.ServiceGenerator(api.loadServiceAuthenticators(entragroups.ServiceConfig)...)
+	service, err := groupaccess2.ServiceGenerator(api.loadServiceAuthenticators(groupaccess2.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[entragroups.ServiceConfig.ServiceName] = &baseService
+	api.services[groupaccess2.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

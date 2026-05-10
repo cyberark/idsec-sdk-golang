@@ -1,0 +1,76 @@
+{
+  "auth": {
+    "method": "identity",
+    "username": "k8s_cli_automation_admin_user_dev@cyberark.cloud.613581",
+    "secret": "",
+    "identity_url": "https://asj5909.id.integration-cyberark.cloud"
+  },
+  "aws_cloudaccess": {
+    "principal": {
+      "principal_id": "d7f17672-4aa6-4649-b85b-1bb17dba8d86",
+      "principal_name": "teste2euser@cyberark.cloud.613581",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "arn:aws:iam::764334536120:role/CloudopsReadOnlyRole",
+          "roleName": "CloudopsReadOnlyRole",
+          "workspaceId": "764334536120",
+          "workspaceName": "COM-NP-Int H-CloudSec-CRC-Test-4613",
+          "orgId": "general",
+          "workspaceType": "account"
+        }
+      ]
+    }
+  },
+  "k8s_aws_clusters": {
+    "principal": {
+      "principal_id": "12a31475-d2bf-4be4-ad11-784808621c1c",
+      "principal_name": "teste2euser@cyberark.cloud.613581",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "arn:aws:iam::134672441550:role/cusomt-role-ravish-cluster-viewonly",
+          "roleName": "cusomt-role-ravish-cluster-viewonly",
+          "workspaceId": "134672441550",
+          "workspaceName": "cusomt-role-ravish-cluster-viewonly",
+          "orgId": "",
+          "workspaceType": "account",
+          "scope": "cluster",
+          "clusterId": "arn:aws:eks:us-east-1:134672441550:cluster/test-ravish-cluster",
+          "namespaceId": "",
+          "fqdn": "https://934EDA9A7C57AAA7C9A341C21CD75844.gr7.us-east-1.eks.amazonaws.com"
+        }
+      ]
+    }
+  },
+  "k8s_azure_clusters": {
+    "principal": {
+      "principal_id": "d7f17672-4aa6-4649-b85b-1bb17dba8d86",
+      "principal_name": "teste2euser@cyberark.cloud.613581",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "/subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72/providers/Microsoft.Authorization/roleDefinitions/20cf746c-c765-402a-885e-c389c64478ce",
+          "roleName": "Azure Kubernetes Fleet Manager ABAC Custom Resources Reader",
+          "workspaceId": "subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72",
+          "workspaceName": "COM-NP-R&D-CloudSec-SCA-Dev",
+          "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceType": "subscription",
+          "scope": "cluster",
+          "clusterId": "test_cluster",
+          "namespaceId": "",
+          "fqdn": "test_fqdn"
+        }
+      ]
+    }
+  }
+}

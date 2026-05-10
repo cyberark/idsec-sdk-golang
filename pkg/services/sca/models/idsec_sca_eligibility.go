@@ -1,11 +1,11 @@
 // Package models provides shared request/input structures for SCA eligibility operations.
 // Response and target types are defined in the respective sub-service model packages:
-//   - cloud-console types: pkg/services/sca/cloudconsole/models
-//   - entragroups types:   pkg/services/sca/entragroups/models
+//   - cloudaccess types:   pkg/services/sca/cloudaccess/models
+//   - groupaccess types:   pkg/services/sca/groupaccess/models
 package models
 
 // IdsecSCAListTargetsRequest is the shared input for listing eligible targets.
-// It is used by both the cloud-console and entragroups sub-services.
+// It is used by both the cloudaccess and groupaccess sub-services.
 //
 // The CSP is passed as a URL path parameter, not a query param.
 // WorkspaceID is an optional filter; when provided the API returns only targets

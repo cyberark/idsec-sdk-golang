@@ -1088,10 +1088,12 @@ func TestSetPermissions(t *testing.T) {
 				WebappID: "webapp-123",
 				Grants: []webappsmodels.IdsecIdentityWebappGrant{
 					{
-						Principal:     "john.doe@example.com",
-						PrincipalType: "User",
-						Rights:        []string{"View"},
-						PrincipalId:   strPtr("user-principal-id"),
+						Principal:            "john.doe@example.com",
+						PrincipalType:        "User",
+						Rights:               []string{"View"},
+						PrincipalId:          strPtr("user-principal-id"),
+						DirectoryServiceUuid: strPtr("dir-service-uuid"),
+						ExternalUuid:         strPtr("external-uuid"),
 					},
 				},
 			},

@@ -50,6 +50,12 @@ var defaultPolicySettings = map[string]interface{}{
 	"/Core/Authentication/AllowLoginMfaCache":              "false",
 }
 
+var systemSettings = []string{
+	"/Core/Authentication/ChallengeDefinitionId",
+	"/Core/Authentication/AdminService/Portal/Strong/Authentication/ChallengeDefinitionId",
+	"Core/Authentication/Applications/PersonalAppChallengeRules/ChallengeDefinitionId",
+}
+
 var ignoredMessageIDs = []string{
 	"_I18N_AdminLockoutPolicyChange",
 	"_I18N_AdminLockoutPlinksChange",
@@ -365,14 +371,16 @@ func (s *IdsecIdentityPoliciesService) Create(createPolicy *policymodels.IdsecId
 					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
 				}
 				return s.Get(&policymodels.IdsecIdentityGetPolicy{
-					PolicyName: createPolicy.PolicyName,
+					PolicyName:           createPolicy.PolicyName,
+					FilterSystemSettings: createPolicy.FilterSystemSettings,
 				})
 			}
 		}
 		return nil, fmt.Errorf("failed to create identity policy - [%v]", result)
 	}
 	return s.Get(&policymodels.IdsecIdentityGetPolicy{
-		PolicyName: createPolicy.PolicyName,
+		PolicyName:           createPolicy.PolicyName,
+		FilterSystemSettings: createPolicy.FilterSystemSettings,
 	})
 }
 
@@ -411,7 +419,8 @@ func (s *IdsecIdentityPoliciesService) Update(updatePolicy *policymodels.IdsecId
 	// Fetch existing policy in parallel
 	go func() {
 		policy, err := s.Get(&policymodels.IdsecIdentityGetPolicy{
-			PolicyName: updatePolicy.PolicyName,
+			PolicyName:           updatePolicy.PolicyName,
+			FilterSystemSettings: updatePolicy.FilterSystemSettings,
 		})
 		existingPolicyChan <- existingPolicyResult{policy: policy, err: err}
 	}()
@@ -653,7 +662,8 @@ func (s *IdsecIdentityPoliciesService) Update(updatePolicy *policymodels.IdsecId
 					s.Logger.Warning("Received ignored MessageID [%s] when creating identity policy, attempting to retrieve policy details", messageID)
 				}
 				return s.Get(&policymodels.IdsecIdentityGetPolicy{
-					PolicyName: updatePolicy.PolicyName,
+					PolicyName:           updatePolicy.PolicyName,
+					FilterSystemSettings: updatePolicy.FilterSystemSettings,
 				})
 			}
 		}
@@ -676,7 +686,8 @@ func (s *IdsecIdentityPoliciesService) Update(updatePolicy *policymodels.IdsecId
 		}
 	}
 	return s.Get(&policymodels.IdsecIdentityGetPolicy{
-		PolicyName: updatePolicy.PolicyName,
+		PolicyName:           updatePolicy.PolicyName,
+		FilterSystemSettings: updatePolicy.FilterSystemSettings,
 	})
 }
 
@@ -684,14 +695,15 @@ func (s *IdsecIdentityPoliciesService) Update(updatePolicy *policymodels.IdsecId
 func (s *IdsecIdentityPoliciesService) UpdateDefault(updatePolicy *policymodels.IdsecIdentityUpdateDefaultPolicy) (*policymodels.IdsecIdentityPolicy, error) {
 	s.Logger.Debug("Updating default identity policy")
 	return s.Update(&policymodels.IdsecIdentityUpdatePolicy{
-		PolicyName:      "Default Policy",
-		PolicyStatus:    updatePolicy.PolicyStatus,
-		Description:     updatePolicy.Description,
-		RoleNames:       updatePolicy.RoleNames,
-		AuthProfileName: updatePolicy.AuthProfileName,
-		Settings:        updatePolicy.Settings,
-		BeforePolicy:    updatePolicy.BeforePolicy,
-		AfterPolicy:     updatePolicy.AfterPolicy,
+		PolicyName:           "Default Policy",
+		PolicyStatus:         updatePolicy.PolicyStatus,
+		Description:          updatePolicy.Description,
+		RoleNames:            updatePolicy.RoleNames,
+		AuthProfileName:      updatePolicy.AuthProfileName,
+		Settings:             updatePolicy.Settings,
+		FilterSystemSettings: updatePolicy.FilterSystemSettings,
+		BeforePolicy:         updatePolicy.BeforePolicy,
+		AfterPolicy:          updatePolicy.AfterPolicy,
 	})
 }
 
@@ -952,6 +964,11 @@ func (s *IdsecIdentityPoliciesService) Get(getPolicy *policymodels.IdsecIdentity
 	policyInfo.AuthProfileName = authProfileRes.name
 	if settings, ok := policyData["Settings"].(map[string]interface{}); ok {
 		policyInfo.Settings = settings
+	}
+	if getPolicy.FilterSystemSettings {
+		for _, setting := range systemSettings {
+			delete(policyInfo.Settings, setting)
+		}
 	}
 
 	return policyInfo, nil
