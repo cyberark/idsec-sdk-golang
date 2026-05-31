@@ -77,11 +77,12 @@ import (
 	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
 	db "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db"
 	groupaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
+	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/k8s"
 	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	cloudaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess"
 	groupaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
-	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
+	k8s2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	configurations "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
 	scans "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans"
@@ -93,11 +94,12 @@ import (
 	certificates "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/certificates"
 	db2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
 	dbstrongaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/dbstrongaccounts"
-	k8s2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
+	k8s3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
 	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsdb"
 	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm"
 	settings "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/settings"
 	shortenedconnectionstring "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/shortenedconnectionstring"
+	ssh "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/ssh"
 	sshca "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca"
 	sso "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
 	db3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb"
@@ -531,6 +533,19 @@ func (api *IdsecAPI) PolicyGroupaccess() (*groupaccess.IdsecPolicyGroupAccessSer
 	return service, nil
 }
 
+func (api *IdsecAPI) PolicyK8s() (*k8s.IdsecPolicyK8sService, error) {
+	if serviceIfs, ok := api.services[k8s.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*k8s.IdsecPolicyK8sService), nil
+	}
+	service, err := k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[k8s.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) PolicyVm() (*vm.IdsecPolicyVMService, error) {
 	if serviceIfs, ok := api.services[vm.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*vm.IdsecPolicyVMService), nil
@@ -583,16 +598,16 @@ func (api *IdsecAPI) ScaGroupaccess() (*groupaccess2.IdsecSCAGroupAccessService,
 	return service, nil
 }
 
-func (api *IdsecAPI) ScaK8s() (*k8s.IdsecSCAK8sService, error) {
-	if serviceIfs, ok := api.services[k8s.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s.IdsecSCAK8sService), nil
+func (api *IdsecAPI) ScaK8s() (*k8s2.IdsecSCAK8sService, error) {
+	if serviceIfs, ok := api.services[k8s2.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*k8s2.IdsecSCAK8sService), nil
 	}
-	service, err := k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	service, err := k8s2.ServiceGenerator(api.loadServiceAuthenticators(k8s2.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[k8s.ServiceConfig.ServiceName] = &baseService
+	api.services[k8s2.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -739,16 +754,16 @@ func (api *IdsecAPI) SiaDbstrongaccounts() (*dbstrongaccounts.IdsecSIADBStrongAc
 	return service, nil
 }
 
-func (api *IdsecAPI) SiaK8s() (*k8s2.IdsecSIAK8SService, error) {
-	if serviceIfs, ok := api.services[k8s2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s2.IdsecSIAK8SService), nil
+func (api *IdsecAPI) SiaK8s() (*k8s3.IdsecSIAK8SService, error) {
+	if serviceIfs, ok := api.services[k8s3.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*k8s3.IdsecSIAK8SService), nil
 	}
-	service, err := k8s2.ServiceGenerator(api.loadServiceAuthenticators(k8s2.ServiceConfig)...)
+	service, err := k8s3.ServiceGenerator(api.loadServiceAuthenticators(k8s3.ServiceConfig)...)
 	if err != nil {
 		return nil, err
 	}
 	var baseService services.IdsecService = service
-	api.services[k8s2.ServiceConfig.ServiceName] = &baseService
+	api.services[k8s3.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -801,6 +816,19 @@ func (api *IdsecAPI) SiaShortenedconnectionstring() (*shortenedconnectionstring.
 	}
 	var baseService services.IdsecService = service
 	api.services[shortenedconnectionstring.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) SiaSsh() (*ssh.IdsecSIASSHService, error) {
+	if serviceIfs, ok := api.services[ssh.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*ssh.IdsecSIASSHService), nil
+	}
+	service, err := ssh.ServiceGenerator(api.loadServiceAuthenticators(ssh.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[ssh.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

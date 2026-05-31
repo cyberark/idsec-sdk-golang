@@ -1,0 +1,84 @@
+{
+  "auth": {
+    "method": "identity",
+    "username": "tf_sca@cyberark.cloud.42070",
+    "identity_url": "https://aca4698.id.cyberark.cloud"
+  },
+  "azure_cloudaccess": {
+    "principal": {
+      "principal_id": "2f6930b0-d62d-453e-9216-606d24a9f7c9",
+      "principal_name": "k8s_cli_automation_eva_user_prod@cyberark.cloud.42070",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "3f1acade-1e04-4fbc-9b69-f0302cd84aef",
+          "roleName": "Edge Administrator",
+          "workspaceId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceName": "CybrSCA",
+          "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceType": "directory"
+        }
+      ]
+    }
+  },
+  "azure_groupaccess": {
+    "principal": {
+      "principal_id": "2f6930b0-d62d-453e-9216-606d24a9f7c9",
+      "principal_name": "k8s_cli_automation_eva_user_prod@cyberark.cloud.42070",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "groupId": "00a8d846-00ca-4655-8b63-8d56a9e5141e",
+          "directoryId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "groupName": "access-apis-216"
+        }
+      ]
+    }
+  },
+  "azure_cloudaccess_resource": {
+    "principal": {
+      "principal_id": "2f6930b0-d62d-453e-9216-606d24a9f7c9",
+      "principal_name": "k8s_cli_automation_eva_user_prod@cyberark.cloud.42070",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "/subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72/providers/Microsoft.Authorization/roleDefinitions/4c6569b6-f23e-4295-9b90-bd4cc4ff3292",
+          "roleName": "DevCenter Owner",
+          "workspaceId": "subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72",
+          "workspaceName": "COM-NP-R&D-CloudSec-SCA-Dev",
+          "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceType": "subscription"
+        }
+      ]
+    }
+  },
+  "aws_cloudaccess": {
+    "principal": {
+      "principal_id": "2f6930b0-d62d-453e-9216-606d24a9f7c9",
+      "principal_name": "k8s_cli_automation_eva_user_prod@cyberark.cloud.42070",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "arn:aws:iam::858960673597:role/Bug_Bash_Role",
+          "roleName": "Bug_Bash_Role",
+          "workspaceId": "858960673597",
+          "workspaceName": "COM-NP-INT H-RND-CYBRSCA-DEV2",
+          "orgId": "general",
+          "workspaceType": "account"
+        }
+      ]
+    }
+  }
+}

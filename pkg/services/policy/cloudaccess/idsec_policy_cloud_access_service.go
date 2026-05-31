@@ -58,6 +58,17 @@ func (s *IdsecPolicyCloudAccessService) serializeTargets(policy *cloudaccessmode
 	return err
 }
 
+func normalizeCloudAccessApprovalPayload(policy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, policyJSON map[string]interface{}) {
+	if !policy.Conditions.AccessApproval.Required {
+		return
+	}
+	conditions, ok := policyJSON["conditions"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delete(conditions, "accessWindow")
+}
+
 func (s *IdsecPolicyCloudAccessService) deserializeTargets(policy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, policyJSON map[string]interface{}) error {
 	return policy.Targets.DeserializeTargets(policyJSON["targets"].(map[string]interface{}))
 }
@@ -65,10 +76,9 @@ func (s *IdsecPolicyCloudAccessService) deserializeTargets(policy *cloudaccessmo
 // CreatePolicy creates a new policy with the given information.
 func (s *IdsecPolicyCloudAccessService) CreatePolicy(createPolicy *cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy) (*cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy, error) {
 	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
-	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
-	// if createPolicy.Metadata.PolicyEntitlement.TargetCategory == "" {
-	// 	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
-	// }
+	if createPolicy.Metadata.PolicyEntitlement.TargetCategory == "" {
+		createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeCloudConsole
+	}
 	if createPolicy.Metadata.PolicyTags == nil {
 		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}
@@ -76,6 +86,7 @@ func (s *IdsecPolicyCloudAccessService) CreatePolicy(createPolicy *cloudaccessmo
 	if err != nil {
 		return nil, err
 	}
+	normalizeCloudAccessApprovalPayload(createPolicy, policyJSON)
 	err = s.serializeTargets(createPolicy, policyJSON)
 	if err != nil {
 		return nil, err
@@ -117,6 +128,7 @@ func (s *IdsecPolicyCloudAccessService) UpdatePolicy(updatePolicy *cloudaccessmo
 	if err != nil {
 		return nil, err
 	}
+	normalizeCloudAccessApprovalPayload(updatePolicy, policyJSON)
 	err = s.serializeTargets(updatePolicy, policyJSON)
 	if err != nil {
 		return nil, err

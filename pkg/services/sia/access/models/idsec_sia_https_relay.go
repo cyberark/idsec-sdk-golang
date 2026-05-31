@@ -1,7 +1,7 @@
 // Package models provides request and response model types for the SIA access service.
 package models
 
-// IdsecSIAHTTPSRelayStatusCodes represents the numeric status of an HTTPS relay.
+// IdsecSIAHTTPSRelayStatusCodes represents the numeric status of an HTTPS relay
 // 0 = INACTIVE, 1 = ACTIVE, 2 = INACTIVE+BLOCKED.
 type IdsecSIAHTTPSRelayStatusCodes int
 
@@ -16,7 +16,7 @@ const (
 
 // IdsecSIAHTTPSRelay represents an HTTPS relay in the connector management service.
 type IdsecSIAHTTPSRelay struct {
-	ID                       string                        `json:"id" mapstructure:"id" flag:"id" desc:"The ID of the HTTPS relay." min_length:"2"`
+	HTTPSRelayID             string                        `json:"https_relay_id" mapstructure:"https_relay_id" flag:"https-relay-id" desc:"The ID of the HTTPS relay." min_length:"2"`
 	HostIP                   string                        `json:"host_ip,omitempty" mapstructure:"host_ip,omitempty" flag:"host-ip" desc:"The IP address of the host machine."`
 	HostName                 string                        `json:"host_name,omitempty" mapstructure:"host_name,omitempty" flag:"host-name" desc:"The host name of the relay."`
 	Version                  string                        `json:"version,omitempty" mapstructure:"version,omitempty" flag:"version" desc:"The HTTPS relay version."`

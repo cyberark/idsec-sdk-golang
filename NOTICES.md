@@ -30,6 +30,10 @@ idsec-sdk-golang is using the following open source components:
 14) aws-sdk-go-v2-credentials (https://github.com/aws/aws-sdk-go-v2/credentials) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 15) aws-sdk-go-v2-service-sts (https://github.com/aws/aws-sdk-go-v2/service/sts) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 16) smithy-go (https://github.com/aws/smithy-go) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+17) azure-sdk-for-go-sdk-azcore (https://github.com/Azure/azure-sdk-for-go/sdk/azcore) : MIT License Copyright (c) Microsoft Corporation.
+18) azure-sdk-for-go-sdk-azidentity (https://github.com/Azure/azure-sdk-for-go/sdk/azidentity) : MIT License Copyright (c) Microsoft Corporation.
+19) azure-sdk-for-go-sdk-resourcemanager-authorization-armauthorization (https://github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization) : MIT License Copyright (c) Microsoft Corporation.
+20) validator (https://github.com/go-playground/validator) : MIT License Copyright (c) 2015 Dean Karn
 
 =====================================================================
 1) Apache-2.0 License

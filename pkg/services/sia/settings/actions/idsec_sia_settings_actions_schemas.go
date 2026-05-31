@@ -46,4 +46,6 @@ var ActionToSchemaMap = map[string]interface{}{
 	"set-zsp-list":                                   &settingsmodels.IdsecSIASettingsZspList{},
 	"rdp-file-signing":                               nil,
 	"set-rdp-file-signing":                           &settingsmodels.IdsecSIASettingsRdpFileSigning{},
+	"https-relay":                                    nil,
+	"set-https-relay":                                &settingsmodels.IdsecSIASettingsHTTPSRelay{},
 }

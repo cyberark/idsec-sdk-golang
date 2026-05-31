@@ -4,7 +4,7 @@ package models
 // IdsecSIAUninstallRelay represents the details required to uninstall an HTTPS relay.
 type IdsecSIAUninstallRelay struct {
 	HTTPSRelayOS       string `json:"https_relay_os" mapstructure:"https_relay_os" flag:"https-relay-os" desc:"The type of the operating system for the HTTPS relay to uninstall (linux, windows)." default:"linux" choices:"linux,windows"`
-	ID                 string `json:"https_relay_id" mapstructure:"https_relay_id" flag:"https-relay-id" desc:"The HTTPS relay ID to be uninstalled." validate:"required"`
+	HTTPSRelayID       string `json:"https_relay_id" mapstructure:"https_relay_id" flag:"https-relay-id" desc:"The HTTPS relay ID to be uninstalled." validate:"required"`
 	TargetMachine      string `json:"target_machine" mapstructure:"target_machine" flag:"target-machine" desc:"The target machine on which to uninstall the HTTPS relay."`
 	Username           string `json:"username" mapstructure:"username" flag:"username" desc:"The username used to connect to the target machine."`
 	Password           string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password used to connect to the target machine."`

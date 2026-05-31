@@ -5,7 +5,8 @@ import (
 )
 
 // IdsecPolicyCloudAccessConditions wraps policy-level time conditions for Cloud Access.
-// It currently mirrors IdsecPolicyConditions but exists for future Cloud Access extensions.
+// It extends IdsecPolicyConditions with AccessApproval, which is specific to Cloud Access policies.
 type IdsecPolicyCloudAccessConditions struct {
 	policycommonmodels.IdsecPolicyConditions `mapstructure:",squash"`
+	AccessApproval                           policycommonmodels.IdsecPolicyAccessApprovalCondition `json:"access_approval,omitempty" mapstructure:"access_approval,omitempty" flag:"access-approval" desc:"Determines whether additional approval is required before access to a target for an eligible identity can be elevated"`
 }

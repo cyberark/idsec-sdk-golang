@@ -4,9 +4,7 @@ package sechub
 
 import (
 	"fmt"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,8 +30,35 @@ const (
 func TestCreateAndDeleteSyncPolicy(t *testing.T) {
 	framework.Run(t, func(ctx *framework.TestContext) {
 		framework.LogSection(t, "Test: Create and Delete Sync Policy")
-		err, _ := setUpSyncPolicy(ctx, t)
+		err, _ := setUpSyncPolicy(ctx, t, e2eTransformationPasswordOnlyPlainText())
 		require.NoError(t, err, "Failed to set up sync policy")
+	}, syncpolicy.ServiceConfig)
+}
+
+// TestCreateGetDeleteSyncPolicyWithoutTransformationPredefined verifies Create -> Get when the create body
+// omits transformation (omitzero): transformation.predefined must not appear on the policy returned from
+// Create (after its internal GET) nor on a follow-up Get—both model an absent predefined as an empty string.
+// Sync policy teardown uses the same TrackResource cleanup registered by setUpSyncPolicy as other tests.
+func TestCreateGetDeleteSyncPolicyWithoutTransformationPredefined(t *testing.T) {
+	framework.Run(t, func(ctx *framework.TestContext) {
+		framework.LogSection(t, "Test: Create -> GET (no transformation.predefined); policy deleted via setUpSyncPolicy cleanup")
+
+		err, created := setUpSyncPolicy(ctx, t, nil)
+		require.NoError(t, err, "setUpSyncPolicy without transformation should succeed")
+		require.NotNil(t, created)
+		assert.Empty(t, created.Transformation.Predefined,
+			"Create must not surface transformation.predefined when it was omitted from the create body (internal GET + no merge)")
+
+		syncPolicySvc, svcErr := ctx.API.SechubSyncpolicies()
+		require.NoError(t, svcErr)
+
+		t.Logf("GET policy %s after create (no predefined in create body)", created.ID)
+		fetched, err := syncPolicySvc.Get(&syncpoliciesmodels.IdsecSecHubGetSyncPolicy{
+			PolicyID: created.ID,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, fetched.Transformation.Predefined,
+			"Get response must not include transformation.predefined when create omitted it (API-only decode; no client fill)")
 	}, syncpolicy.ServiceConfig)
 }
 
@@ -41,7 +66,7 @@ func DeleteSyncPolicyWithSateAlreadyDisabledStillDeletesThePolicy(t *testing.T) 
 	framework.Run(t, func(ctx *framework.TestContext) {
 		framework.LogSection(t, "Test: Create and Delete Sync Policy That Is already Disabled")
 		syncPolicySvc, err := ctx.API.SechubSyncpolicies()
-		err, syncPolicy := setUpSyncPolicy(ctx, t)
+		err, syncPolicy := setUpSyncPolicy(ctx, t, e2eTransformationPasswordOnlyPlainText())
 		state := syncpoliciesmodels.IdsecSecHubSetSyncPolicyState{
 			PolicyID: syncPolicy.ID,
 			Action:   "disable",
@@ -91,7 +116,7 @@ func TestListSyncPolicies(t *testing.T) {
 		require.NoError(t, err, "Failed to create api service")
 
 		// Create a sync policy so we have at least one to list
-		err, createdPolicy := setUpSyncPolicy(ctx, t)
+		err, createdPolicy := setUpSyncPolicy(ctx, t, e2eTransformationPasswordOnlyPlainText())
 		require.NoError(t, err, "Failed to set up sync policy")
 
 		// List all sync policies and verify the created one is present
@@ -122,45 +147,27 @@ func TestListSyncPolicies(t *testing.T) {
 		assert.Equal(t, createdPolicy.Description, retrievedSyncPolicy.Description)
 		assert.Equal(t, createdPolicy.Source.ID, retrievedSyncPolicy.Source.ID)
 		assert.Equal(t, createdPolicy.Target.ID, retrievedSyncPolicy.Target.ID)
-		assert.Equal(t, createdPolicy.Filter.Type, retrievedSyncPolicy.Filter.Type)
-		assert.Equal(t, createdPolicy.Filter.Data.SafeName, retrievedSyncPolicy.Filter.Data.SafeName)
-		assert.Equal(t, createdPolicy.Transformation.Predefined, retrievedSyncPolicy.Transformation.Predefined)
-
 		t.Log("List sync policies test completed successfully")
 	}, syncpolicy.ServiceConfig)
 }
 
-func TestSyncPolicyLifecycle(t *testing.T) {
-	framework.Run(t, func(ctx *framework.TestContext) {
-		framework.LogSection(t, "Test: Create, Get and Delete Sync Policy")
-		syncPolicySvc, err := ctx.API.SechubSyncpolicies()
-
-		// Get the tenant pcloud source store
-		err, syncPolicy := setUpSyncPolicy(ctx, t)
-
-		// Verify sync policy exists by getting it
-		t.Log("Step 2: Verifying sync policy exists...")
-		retrievedSyncPolicy, err := syncPolicySvc.Get(&syncpoliciesmodels.IdsecSecHubGetSyncPolicy{
-			PolicyID: syncPolicy.ID,
-		})
-		require.NoError(t, err, "Failed to retrieve sync policy")
-		assert.Equal(t, syncPolicy.Name, retrievedSyncPolicy.Name)
-		assert.Equal(t, syncPolicy.ID, retrievedSyncPolicy.ID)
-		assert.Equal(t, syncPolicy.Description, retrievedSyncPolicy.Description)
-		assert.Equal(t, syncPolicy.Source.ID, retrievedSyncPolicy.Source.ID)
-		assert.Equal(t, syncPolicy.Target.ID, retrievedSyncPolicy.Target.ID)
-		assert.Equal(t, syncPolicy.Filter.Type, retrievedSyncPolicy.Filter.Type)
-		assert.Equal(t, syncPolicy.Filter.Data.SafeName, retrievedSyncPolicy.Filter.Data.SafeName)
-		assert.Equal(t, syncPolicy.Transformation.Predefined, retrievedSyncPolicy.Transformation.Predefined)
-
-	}, syncpolicy.ServiceConfig)
+// e2eTransformationPasswordOnlyPlainText returns a pointer for setUpSyncPolicy when tests should send
+// Transformation.Predefined = password_only_plain_text on create.
+func e2eTransformationPasswordOnlyPlainText() *string {
+	s := "password_only_plain_text"
+	return &s
 }
 
-func setUpSyncPolicy(ctx *framework.TestContext, t *testing.T) (error, *syncpoliciesmodels.IdsecSecHubPolicy) {
+// setUpSyncPolicy creates source/target/safe resources and a sync policy via Create, and registers
+// framework cleanup to delete the sync policy when the test finishes.
+//
+// transformationPredefined: when non-nil, the create body includes Transformation with that Predefined
+// (omitzero otherwise). When nil, Transformation is omitted from create.
+func setUpSyncPolicy(ctx *framework.TestContext, t *testing.T, transformationPredefined *string) (error, *syncpoliciesmodels.IdsecSecHubPolicy) {
 	sourceId := getSourceStoreID(t, ctx, "PAM_PCLOUD")
 	// Create or get a secret store target
 
-	data := secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+	data := secretstoresmodels.IdsecSecHubSecretStoreData{
 		AccountAlias:         e2eSyncPolicyAccountAlias,
 		AccountID:            randomAWSAccountID(),
 		RegionID:             e2eSyncPolicyRegionID,
@@ -182,7 +189,7 @@ func setUpSyncPolicy(ctx *framework.TestContext, t *testing.T) (error, *syncpoli
 	require.NoError(t, err, "Failed to create api service")
 
 	// Create the sync policy per https://api-docs.cyberark.com/secretshub-api/docs/secrets-hub-api#/Sync%20Policies/policy-create-api-policies-post
-	syncPolicy, err := syncPolicySvc.Create(&syncpoliciesmodels.IdsecSechubCreateSyncPolicy{
+	createBody := &syncpoliciesmodels.IdsecSechubCreateSyncPolicy{
 		Name:        syncPolicyName,
 		Description: "E2E test sync policy",
 		Source: syncpoliciesmodels.IdsecSecHubPolicyStore{
@@ -197,27 +204,35 @@ func setUpSyncPolicy(ctx *framework.TestContext, t *testing.T) (error, *syncpoli
 			},
 			Type: e2eSyncPolicySafeType,
 		},
-		Transformation: syncpoliciesmodels.IdsecSecHubPolicyTransformation{
-			Predefined: "password_only_plain_text",
-		},
-	})
+	}
+	if transformationPredefined != nil {
+		createBody.Transformation = syncpoliciesmodels.IdsecSecHubPolicyTransformation{
+			Predefined: *transformationPredefined,
+		}
+	}
+	syncPolicy, err := syncPolicySvc.Create(createBody)
 	require.NoError(t, err)
 	require.NotNil(t, syncPolicy)
+
+	// Verify all fields from the Create request are present in the response
+	assert.Equal(t, syncPolicyName, syncPolicy.Name, "Sync policy name mismatch")
+	assert.Equal(t, "E2E test sync policy", syncPolicy.Description, "Sync policy description mismatch")
+	assert.Equal(t, sourceId, syncPolicy.Source.ID, "Sync policy source ID mismatch")
+	assert.Equal(t, targetStore.ID, syncPolicy.Target.ID, "Sync policy target ID mismatch")
+	assert.Equal(t, safeName.SafeName, syncPolicy.Filter.Data.SafeName, "Sync policy filter safe name mismatch")
+	assert.Equal(t, e2eSyncPolicySafeType, syncPolicy.Filter.Type, "Sync policy filter type mismatch")
+	if transformationPredefined != nil {
+		assert.Equal(t, *transformationPredefined, syncPolicy.Transformation.Predefined,
+			"Create should map input predefined onto the extended GET response when set")
+	}
+
 	t.Logf("Step 1: Created sync policy with ID: %s", syncPolicy.ID)
 
-	// Register cleanup
 	ctx.TrackResourceByType("SyncPolicy", syncPolicy.ID, func() error {
 		t.Logf("Finally: Cleaning up sync policy: %s", syncPolicy.ID)
-		time.Sleep(10 * time.Second)
-		err := syncPolicySvc.Delete(&syncpoliciesmodels.IdsecSecHubDeleteSyncPolicy{
+		return syncPolicySvc.Delete(&syncpoliciesmodels.IdsecSecHubDeleteSyncPolicy{
 			PolicyID: syncPolicy.ID,
 		})
-		// Ignore 404 — policy may have already been deleted by the test see DeleteSyncPolicyWithSateAlreadyDisabledStillDeletesThePolicy
-		if err != nil && strings.Contains(err.Error(), "404") {
-			t.Logf("Sync policy %s already deleted, skipping cleanup", syncPolicy.ID)
-			return nil
-		}
-		return err
 	})
 	return err, syncPolicy
 }

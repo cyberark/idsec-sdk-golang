@@ -1,21 +1,18 @@
 // Package models provides data structures for the SCA k8s service.
 package models
 
-// IdsecSCAK8sElevateTarget describes a single cluster-role target for elevation.
-//
-// Either FQDN alone OR (WorkspaceID + TargetID) must be provided.
-// Exactly one of RoleID or RoleName must be provided.
+// IdsecSCAK8sElevateTarget describes a single cluster-role target in the Elevate API
+// POST body (one element of targets[]).
 type IdsecSCAK8sElevateTarget struct {
-	WorkspaceID string `json:"workspaceId,omitempty"`
 	RoleID      string `json:"roleId,omitempty"`
-	RoleName    string `json:"roleName,omitempty"`
-	TargetID    string `json:"targetId,omitempty"` // EKS cluster ARN; used with WorkspaceID
-	FQDN        string `json:"fqdn,omitempty"`     // cluster endpoint; alternative to WorkspaceID+TargetID
+	FQDN        string `json:"fqdn,omitempty"`
+	NamespaceID string `json:"namespace,omitempty"` // optional; Azure namespace-scoped targets (CLI: --namespaceId)
 }
 
 // IdsecSCAK8sElevateRequest is the POST body sent to api/access/elevate/clusters.
 //
-// OrganizationID is optional and not relevant for AWS IAM; omit it for standard use.
+// OrganizationID is the Azure Entra Directory (tenant) ID; required for Azure
+// and omitted for AWS.
 type IdsecSCAK8sElevateRequest struct {
 	CSP            string                     `json:"csp"`
 	Targets        []IdsecSCAK8sElevateTarget `json:"targets"`
@@ -42,12 +39,15 @@ type IdsecSCAK8sAWSAccessCredentials struct {
 // TargetID is the cloud-provider cluster identifier returned by the API (e.g. an EKS
 // cluster ARN for AWS). For AWS, parse it with ParseEKSARN to extract region and cluster name.
 //
-// No ExpirationTime field is present; TTL is managed per-CSP via IdsecSCAK8sTokenProvider.ElevateTTL.
+// SessionExpTime is the SCA elevation session expiry (RFC3339/RFC3339Nano). Azure
+// responses include this; the kubectl-login cache uses it with a refresh buffer
+// instead of a fixed TTL. AWS may omit it — fallback TTL applies via ElevateTTL().
 type IdsecSCAK8sElevateResult struct {
 	WorkspaceID       string `json:"workspaceId"`
 	RoleID            string `json:"roleId,omitempty"`
 	RoleName          string `json:"roleName,omitempty"`
 	SessionID         string `json:"sessionId"`
+	SessionExpTime    string `json:"sessionExpTime,omitempty"`
 	AccessCredentials string `json:"accessCredentials,omitempty"`
 	TargetID          string `json:"targetId,omitempty"` // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
 }
@@ -71,23 +71,14 @@ type IdsecSCAK8sElevateResponse struct {
 // Elevate() accepts this flat struct and internally constructs the nested API body
 // (IdsecSCAK8sElevateRequest) before calling the backend.
 //
-// Field mapping to kubeconfig args (AWS kubeconfig always uses --fqdn):
+// Required for all CSPs: CSP, FQDN, RoleID.
+// Azure additionally uses OrganizationID (tenant) and optional NamespaceID.
 //
-//	--csp           → CSP (required)
-//	--role-id       → RoleID (IAM role ARN; one of role-id or role-name required)
-//	--role-name     → RoleName (human-readable name; alternative to role-id)
-//	--fqdn          → FQDN (cluster API endpoint; always used in kubeconfig)
-//	--target-id     → TargetID (EKS cluster ARN; alternative cluster identifier with --workspace-id)
-//	--workspace-id  → WorkspaceID (optional; only needed with --target-id)
-//	--tenant-id     → TenantID (Azure Entra tenant ID for future AKS/kubelogin support)
-//
-// Region and cluster name are derived from the targetId field in the elevate API response.
+// AWS region and cluster name are derived from targetId in the Elevate API response.
 type IdsecSCAK8sElevateKubectlRequest struct {
-	CSP         string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS | AZURE)"`
-	RoleID      string `json:"role_id,omitempty" mapstructure:"role_id,omitempty" flag:"role-id" desc:"IAM role ARN (AWS); provide either --role-id or --role-name"`
-	RoleName    string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"IAM role name; provide either --role-id or --role-name"`
-	FQDN        string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"Cluster API endpoint FQDN (always used in kubeconfig; alternative to --target-id + --workspace-id)"`
-	TargetID    string `json:"target_id,omitempty" mapstructure:"target_id,omitempty" flag:"target-id" desc:"EKS cluster ARN; alternative cluster identifier used with --workspace-id"`
-	WorkspaceID string `json:"workspace_id,omitempty" mapstructure:"workspace_id,omitempty" flag:"workspace-id" desc:"AWS account ID or Azure subscription ID (optional when --fqdn is provided)"`
-	TenantID    string `json:"tenant_id,omitempty" mapstructure:"tenant_id,omitempty" flag:"tenant-id" desc:"Azure Entra tenant ID (for future AKS support via kubelogin)"`
+	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS | AZURE)"`
+	RoleID         string `json:"role_id,omitempty" mapstructure:"role_id,omitempty" flag:"role-id" desc:"Cloud role ID to elevate (AWS IAM role ARN or Azure role definition resource ID)"`
+	FQDN           string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"Cluster API endpoint FQDN (always used in kubeconfig)"`
+	OrganizationID string `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty" flag:"organization-id" desc:"Azure Entra Directory ID (tenant) — required for Azure"`
+	NamespaceID    string `json:"namespace_id,omitempty" mapstructure:"namespace_id,omitempty" flag:"namespace-id" desc:"Optional Kubernetes namespace identifier (Azure)"`
 }

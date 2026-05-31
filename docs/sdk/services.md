@@ -77,6 +77,7 @@ The Secure Infrastructure Access (sia) service requires the IdsecISPAuth authent
 
 - **IdsecSIAAccessService** (access) - SIA access service
 - **IdsecSIASSHCAService** (ssh-ca) - SIA SSH CA Key service
+- **IdsecSIASSHService** (ssh) - SIA end-user SSH service.
 - **IdsecSIAK8SService** (Kubernetes) - SIA end-user Kubernetes service
 - **IdsecSIADBService** (Db) - SIA end-user Db service
 - **IdsecSIASecretsDBService** (secrets-db) - SIA DB secrets services

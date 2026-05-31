@@ -29,7 +29,7 @@ func TestCreateAndDeleteAWSSecretStore(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"E2E test secret store",
 			"AWS_ASM",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				AccountAlias:         "test-account-alias",
 				AccountID:            randomAWSAccountID(),
 				RegionID:             "eu-north-1",
@@ -64,14 +64,14 @@ func TestCreateAndDeleteAzureSecretStore(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"E2E test secret store (Azure)",
 			"AZURE_AKV",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				AppClientDirectoryID: "c389961d-a0cd-46ab-9f69-877f756a59c1",
 				AzureVaultURL:        randomAzureKeyVaultURL(),
 				AppClientID:          "11111111-2222-3333-4444-555555555555",
 				SubscriptionID:       "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 				SubscriptionName:     "test-subscription-name",
 				ResourceGroupName:    "test-resource-group_01",
-				ConnectionConfig: &secretstoresmodels.IdsecSecHubCreateSecretStoreConnectionConfig{
+				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
 					ConnectionType: "PUBLIC",
 				},
 				AuthenticationMethod: "FEDERATED_IDENTITY",
@@ -102,7 +102,7 @@ func TestCreateAndDeleteGCPSecretStore(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"E2E test secret store (GCP)",
 			"GCP_GSM",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				GcpProjectName:   "gcp-project-name-example",
 				GcpProjectNumber: randomGCPProjectNumber(),
 				GcpAuthentication: &secretstoresmodels.IdsecSecHubSecretStoreGcpAuthentication{
@@ -144,7 +144,7 @@ func TestSecretStoreLifecycleAWS(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"Initial description",
 			"AWS_ASM",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				AccountAlias:         "test-account-alias",
 				AccountID:            randomAWSAccountID(),
 				RegionID:             "eu-north-1",
@@ -209,7 +209,7 @@ func TestSecretStoreUpdateTFLifecycle(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"Initial TF description",
 			"AWS_ASM",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				AccountAlias:         "test-account-alias",
 				AccountID:            randomAWSAccountID(),
 				RegionID:             "eu-north-1",
@@ -315,7 +315,7 @@ func TestSecretStoreLifecycleGCP(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"Initial description",
 			"GCP_GSM",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				GcpProjectName:   "gcp-project-name-example",
 				GcpProjectNumber: randomGCPProjectNumber(),
 				GcpAuthentication: &secretstoresmodels.IdsecSecHubSecretStoreGcpAuthentication{
@@ -385,12 +385,12 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 			e2eSecretStoreNamePrefix,
 			"Initial description",
 			"HASHICORP_VAULT",
-			secretstoresmodels.IdsecSecHubCreateSecretStoreData{
+			secretstoresmodels.IdsecSecHubSecretStoreData{
 				HashiVaultURL:      randomHashiVaultURL(),
 				MountPath:          "secret",
 				RoleName:           "secrets-hub-role",
 				AuthenticationPath: "auth/jwt/login",
-				ConnectionConfig: &secretstoresmodels.IdsecSecHubCreateSecretStoreConnectionConfig{
+				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
 					ConnectionType: "PUBLIC",
 				},
 			})

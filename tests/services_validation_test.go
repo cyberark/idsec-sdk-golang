@@ -7,6 +7,7 @@ import (
 
 	api "github.com/cyberark/idsec-sdk-golang/pkg"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/models/actions"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 
 	// Import all service packages via the official auto-generated registry (idsec_api_services.go)
@@ -175,8 +176,9 @@ func validateCLIActionMethodSignatures(t *testing.T, config services.IdsecServic
 // validateCLIActionDefinitionSignatures validates method signatures for an action definition's schema map
 func validateCLIActionDefinitionSignatures(t *testing.T, serviceType reflect.Type, schemas map[string]interface{}) {
 	// Validate signatures for all actions in this definition's schema map
-	for actionName, schemaInterface := range schemas {
+	for actionName, rawSchema := range schemas {
 		t.Run(actionName, func(t *testing.T) {
+			schemaInterface, _ := actions.UnwrapSchema(rawSchema)
 			// Convert action name to method name using the production transformation
 			methodName := common.ConvertKeyToPascalCase(actionName)
 

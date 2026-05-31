@@ -1,7 +1,6 @@
 package k8s
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,18 +19,8 @@ type IdsecSCAK8sClusterContext struct {
 	// Elevate API response. Used as the x-k8s-aws-id header in the STS presign.
 	ClusterID string
 
-	// WorkspaceID is the cloud account / subscription / project identifier.
-	// Optional when FQDN is provided.
-	WorkspaceID string
-
-	// TenantID is the Azure Entra tenant ID (empty for non-Azure CSPs).
-	TenantID string
-
-	// RoleID is the cloud role ARN / ID (mutually exclusive with RoleName).
+	// RoleID is the cloud role ARN / ID from the kubectl-login flags.
 	RoleID string
-
-	// RoleName is the cloud role name (mutually exclusive with RoleID).
-	RoleName string
 
 	// Region is the AWS region, parsed from the targetId ARN in the Elevate API
 	// response (e.g. "us-east-1"). Not required for Azure.
@@ -40,6 +29,21 @@ type IdsecSCAK8sClusterContext struct {
 	// FQDN is the cluster API endpoint (e.g. "xxxx.gr7.us-east-1.eks.amazonaws.com").
 	// Always provided via the --fqdn CLI flag. Used as the cache key identifier.
 	FQDN string
+
+	// OrganizationID is the Azure Entra Directory (tenant) ID, passed via
+	// --organizationId. Empty for non-Azure CSPs. Used by AzureTokenProvider
+	// to scope the AKS-bound access token to the correct tenant.
+	OrganizationID string
+
+	// NamespaceID is the optional Kubernetes namespace, passed via --namespace-id.
+	// Forwarded to the SCA Elevate API target body as "namespace". Empty when omitted.
+	NamespaceID string
+
+	// ElevateToken is the raw idsec session JWT used as the Bearer token for
+	// the SCA Elevate API call. AzureTokenProvider decodes it to extract the
+	// elevated user's identity for validation against the az login session.
+	// Empty for non-Azure CSPs (AWS does not use it).
+	ElevateToken string
 }
 
 // IdsecSCAK8sTokenProvider is the interface each CSP token generator must satisfy.
@@ -68,18 +72,4 @@ func GetTokenProvider(csp string) (IdsecSCAK8sTokenProvider, error) {
 	default:
 		return nil, fmt.Errorf("unsupported CSP for kubectl-login: %q", csp)
 	}
-}
-
-// AzureTokenProvider is a forward-compatibility stub for Azure AKS.
-// Full implementation (az login + kubelogin) will be added in a future release.
-type AzureTokenProvider struct{}
-
-func (p *AzureTokenProvider) CSP() string               { return "AZURE" }
-func (p *AzureTokenProvider) ElevateTTL() time.Duration { return 0 }
-
-func (p *AzureTokenProvider) GenerateToken(
-	_ *k8smodels.IdsecSCAK8sElevateResult,
-	_ *IdsecSCAK8sClusterContext,
-) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	return nil, errors.New("azure aks token generation is not yet implemented; it will be added in a future release")
 }

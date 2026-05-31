@@ -1472,7 +1472,7 @@ func (s *IdsecIdentityRolesService) getRoleAttributeRecords(roleID string) ([]ma
 //
 // Each attribute echoes the schema column it refers to and carries the new value. An empty
 // Value clears the value for that attribute on the role.
-func buildRoleAttributesUpdateBody(roleID string, schemaColumns []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, valuesByName map[string]string) (map[string]interface{}, error) {
+func (s *IdsecIdentityRolesService) buildRoleAttributesUpdateBody(roleID string, schemaColumns []rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, valuesByName map[string]string) (map[string]interface{}, error) {
 	columnByName := make(map[string]rolesmodels.IdsecIdentityRoleAttributesSchemaColumn, len(schemaColumns))
 	for _, col := range schemaColumns {
 		columnByName[col.Name] = col
@@ -1481,7 +1481,8 @@ func buildRoleAttributesUpdateBody(roleID string, schemaColumns []rolesmodels.Id
 	for name, value := range valuesByName {
 		col, ok := columnByName[name]
 		if !ok {
-			return nil, fmt.Errorf("attribute [%s] not found in role attribute schema", name)
+			s.Logger.Debug("Attribute [%s] not found in role attribute schema for role [%s]", name, roleID)
+			continue
 		}
 		attributes = append(attributes, map[string]interface{}{
 			"Id":          col.ID,
@@ -1645,7 +1646,7 @@ func (s *IdsecIdentityRolesService) UpsertAttributes(upsertRoleAttributes *roles
 	if err != nil {
 		return nil, fmt.Errorf("failed to get role attribute schema: %w", err)
 	}
-	body, err := buildRoleAttributesUpdateBody(upsertRoleAttributes.RoleID, schema.Columns, upsertRoleAttributes.Attributes)
+	body, err := s.buildRoleAttributesUpdateBody(upsertRoleAttributes.RoleID, schema.Columns, upsertRoleAttributes.Attributes)
 	if err != nil {
 		return nil, err
 	}
@@ -1695,7 +1696,7 @@ func (s *IdsecIdentityRolesService) DeleteAttributes(deleteRoleAttributes *roles
 	if err != nil {
 		return nil, fmt.Errorf("failed to get role attribute schema: %w", err)
 	}
-	body, err := buildRoleAttributesUpdateBody(deleteRoleAttributes.RoleID, schema.Columns, valuesByName)
+	body, err := s.buildRoleAttributesUpdateBody(deleteRoleAttributes.RoleID, schema.Columns, valuesByName)
 	if err != nil {
 		return nil, err
 	}

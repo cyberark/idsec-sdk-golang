@@ -25,7 +25,19 @@ import (
 	k8sservice "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
+	"github.com/cyberark/idsec-sdk-golang/tests/e2e/framework"
 )
+
+func logJSON(t *testing.T, label string, value interface{}) {
+	t.Helper()
+
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Logf("%s: %+v", label, value)
+		return
+	}
+	t.Logf("%s:\n%s", label, string(data))
+}
 
 func buildPrincipalISPAuthenticator(
 	t *testing.T,
@@ -42,7 +54,7 @@ func buildPrincipalISPAuthenticator(
 		principalUsername = strings.TrimSpace(strVal(principalCfg, "principal_name"))
 	}
 	principalSecret := strings.TrimSpace(os.Getenv("IDSEC_E2E_SCA_PRINCIPAL_SECRET"))
-	t.Logf("Principal auth: using principal-specific secret for %s", principalUsername)
+	t.Log("Principal auth: using principal-specific secret for configured principal user")
 
 	require.NotEmpty(t, principalUsername, "principal_name is required for principal-auth ListTargets")
 	require.NotEmpty(t, principalSecret, "principal secret is required for principal-auth ListTargets")
@@ -79,10 +91,10 @@ func buildPrincipalISPAuthenticator(
 
 	_, err := ispAuthenticator.Authenticate(nil, authProfile, secret, false, false)
 	if err != nil {
-		return nil, fmt.Errorf("principal ISP authentication failed for %s: %w", principalUsername, err)
+		return nil, fmt.Errorf("principal ISP authentication failed for configured principal user: %w", err)
 	}
 
-	t.Logf("Principal auth successful: %s", principalUsername)
+	t.Log("Principal auth successful for configured principal user")
 	return ispAuthenticator, nil
 }
 
@@ -98,7 +110,7 @@ func buildPrincipalCloudAccessService(
 		return nil, err
 	}
 
-	t.Logf("Principal auth successful for ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
+	t.Log("Principal auth successful for configured principal user ListTargets")
 	return scacloudaccesssvc.NewIdsecSCACloudAccessService(authenticator)
 }
 
@@ -114,7 +126,7 @@ func buildPrincipalGroupAccessService(
 		return nil, err
 	}
 
-	t.Logf("Principal auth successful for Group Access ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
+	t.Log("Principal auth successful for configured principal user Group Access ListTargets")
 	return scagroupaccesssvc.NewIdsecSCAGroupAccessService(authenticator)
 }
 
@@ -130,11 +142,11 @@ func buildPrincipalK8sService(
 		return nil, err
 	}
 
-	t.Logf("Principal auth successful for K8s ListTargets: %s", strings.TrimSpace(strVal(principalCfg, "principal_name")))
+	t.Log("Principal auth successful for configured principal user K8s ListTargets")
 	return k8sservice.NewIdsecSCAK8sService(authenticator)
 }
 
-func loadListTargetsTestContext(t *testing.T, configBlockKey string) *k8sTestContext {
+func loadListTargetsTestContext(t *testing.T, configBlockKey string) *K8sTestContext {
 	t.Helper()
 
 	cfg := LoadSCATestConfig(t)
@@ -146,15 +158,15 @@ func loadListTargetsTestContext(t *testing.T, configBlockKey string) *k8sTestCon
 	principal := principalBlock(block)
 	require.NotNil(t, principal, "%s.principal block is required", configBlockKey)
 
-	return &k8sTestContext{
+	return &K8sTestContext{
 		AuthBlock:      authCfg,
 		PrincipalBlock: principal,
 		Targets:        configTargets(block),
 	}
 }
 
-func buildPrincipalFields(principalCfg map[string]interface{}) principalFields {
-	return principalFields{
+func buildPrincipalFields(principalCfg map[string]interface{}) PrincipalFields {
+	return PrincipalFields{
 		ID:            strVal(principalCfg, "principal_id"),
 		Name:          strVal(principalCfg, "principal_name"),
 		SourceDirName: strVal(principalCfg, "source_directory_name"),
@@ -183,9 +195,9 @@ func buildGroupAccessTargetFromConfig(targetCfg map[string]interface{}) groupacc
 	}
 }
 
-func buildAWSK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetConfig {
+func buildAWSK8sTargetFromConfig(targetCfg map[string]interface{}) K8sTargetConfig {
 	target := buildCloudAccessEligibleTargetFromConfig(targetCfg)
-	return k8sTargetConfig{
+	return K8sTargetConfig{
 		PolicyTarget: target,
 		VerifyTarget: target,
 		Scope:        strVal(targetCfg, "scope"),
@@ -194,12 +206,12 @@ func buildAWSK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetConf
 	}
 }
 
-func buildAzureK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetConfig {
+func buildAzureK8sTargetFromConfig(targetCfg map[string]interface{}) K8sTargetConfig {
 	policyTarget := buildCloudAccessEligibleTargetFromConfig(targetCfg)
 	verifyTarget := buildCloudAccessEligibleTargetFromConfig(targetCfg)
 	verifyTarget.WorkspaceType = ""
 
-	return k8sTargetConfig{
+	return K8sTargetConfig{
 		PolicyTarget: policyTarget,
 		VerifyTarget: verifyTarget,
 		Scope:        strVal(targetCfg, "scope"),
@@ -208,26 +220,26 @@ func buildAzureK8sTargetFromConfig(targetCfg map[string]interface{}) k8sTargetCo
 	}
 }
 
-func setupCloudAccessListTargetsTest(t *testing.T, cfg cloudAccessListTargetsConfig, requireConfiguredTarget bool) *k8sTestContext {
+func SetupCloudAccessListTargetsTest(t *testing.T, cfg CloudAccessListTargetsConfig, requireConfiguredTarget bool) *K8sTestContext {
 	t.Helper()
 	skipUnlessSupportedSCAEnv(t)
 
-	testCtx := loadListTargetsTestContext(t, cfg.configBlockKey)
+	testCtx := loadListTargetsTestContext(t, cfg.ConfigBlockKey)
 	if requireConfiguredTarget {
-		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.configBlockKey)
+		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.ConfigBlockKey)
 	}
 	return testCtx
 }
 
-func cloudAccessPrincipalFromConfig(t *testing.T, testCtx *k8sTestContext) principalFields {
+func CloudAccessPrincipalFromConfig(t *testing.T, testCtx *K8sTestContext) PrincipalFields {
 	t.Helper()
 
 	principal := buildPrincipalFields(testCtx.PrincipalBlock)
-	t.Logf("Using principal from config: %s (%s)", principal.Name, principal.ID)
+	t.Log("Using configured principal user from config")
 	return principal
 }
 
-func cloudAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIndex int) *scacloudaccessmodels.IdsecSCAEligibleTarget {
+func CloudAccessTargetFromConfig(t *testing.T, testCtx *K8sTestContext, targetIndex int) *scacloudaccessmodels.IdsecSCAEligibleTarget {
 	t.Helper()
 	require.Greater(t, len(testCtx.Targets), targetIndex, "configured target index %d is required", targetIndex)
 
@@ -237,7 +249,7 @@ func cloudAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIn
 	return target
 }
 
-func mustPrincipalCloudAccessService(t *testing.T, testCtx *k8sTestContext) *scacloudaccesssvc.IdsecSCACloudAccessService {
+func MustPrincipalCloudAccessService(t *testing.T, testCtx *K8sTestContext) *scacloudaccesssvc.IdsecSCACloudAccessService {
 	t.Helper()
 
 	cloudAccessSvc, err := buildPrincipalCloudAccessService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
@@ -245,7 +257,7 @@ func mustPrincipalCloudAccessService(t *testing.T, testCtx *k8sTestContext) *sca
 	return cloudAccessSvc
 }
 
-func listCloudAccessTargets(
+func ListCloudAccessTargets(
 	t *testing.T,
 	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
 	csp string,
@@ -264,15 +276,15 @@ func listCloudAccessTargets(
 	return resp
 }
 
-func listCloudAccessTargetsWithNextToken(
+func ListCloudAccessTargetsWithNextToken(
 	t *testing.T,
 	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
-	cfg cloudAccessListTargetsConfig,
+	cfg CloudAccessListTargetsConfig,
 ) (*scacloudaccessmodels.IdsecSCAListTargetsResponse, *scacloudaccessmodels.IdsecSCAListTargetsResponse) {
 	t.Helper()
 
 	page1, err := cloudAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
-		CSP:   cfg.csp,
+		CSP:   cfg.CSP,
 		Limit: 1,
 	})
 	require.NoError(t, err)
@@ -282,7 +294,7 @@ func listCloudAccessTargetsWithNextToken(
 	}
 
 	page2, err := cloudAccessSvc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
-		CSP:       cfg.csp,
+		CSP:       cfg.CSP,
 		Limit:     1,
 		NextToken: page1.NextToken,
 	})
@@ -291,7 +303,7 @@ func listCloudAccessTargetsWithNextToken(
 	return page1, page2
 }
 
-func verifyCloudAccessPagination(
+func VerifyCloudAccessPagination(
 	t *testing.T,
 	page1 *scacloudaccessmodels.IdsecSCAListTargetsResponse,
 	page2 *scacloudaccessmodels.IdsecSCAListTargetsResponse,
@@ -304,29 +316,63 @@ func verifyCloudAccessPagination(
 		len(page1.Response), len(page2.Response), page2.NextToken)
 }
 
-func verifyCloudAccessFilteredTargets(
+func VerifyCloudAccessFilteredTargets(
 	t *testing.T,
-	cfg cloudAccessListTargetsConfig,
+	cfg CloudAccessListTargetsConfig,
 	fetchedPolicy *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy,
 	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
 	filteredResp *scacloudaccessmodels.IdsecSCAListTargetsResponse,
 ) {
 	t.Helper()
 
+	logJSON(t, "Actual CloudAccess ListTargets response", filteredResp)
 	require.NotEmpty(t, filteredResp.Response, "Workspace-filtered CloudAccess ListTargets response should not be empty")
-	cfg.verifyTarget(t, fetchedPolicy, target, filteredResp.Response)
+	cfg.VerifyTarget(t, fetchedPolicy, target, filteredResp.Response)
 }
 
-func elevateCloudAccessTarget(
+func RunAzureCloudAccessElevateTest(
+	t *testing.T,
+	ctx *framework.TestContext,
+	testCtx *K8sTestContext,
+	cfg CloudAccessListTargetsConfig,
+	displayName string,
+	policyNamePrefix string,
+) {
+	t.Helper()
+
+	policySvc := MustPolicyCloudAccessService(t, ctx)
+	principal := CloudAccessPrincipalFromConfig(t, testCtx)
+	target := CloudAccessTargetFromConfig(t, testCtx, 0)
+	createdPolicyID := CreateCloudAccessPolicy(t, policySvc, cfg, principal, target, policyNamePrefix)
+	defer DeletePolicyBestEffort(t, createdPolicyID, policySvc.DeletePolicy)
+
+	fetchedPolicy := GetCloudAccessPolicy(t, policySvc, createdPolicyID)
+
+	cloudAccessSvc := MustPrincipalCloudAccessService(t, testCtx)
+	filteredResp := ListCloudAccessTargets(t, cloudAccessSvc, cfg.CSP, target.WorkspaceID, 20)
+	VerifyCloudAccessFilteredTargets(t, cfg, fetchedPolicy, target, filteredResp)
+
+	t.Logf("ListTargets validation passed; attempting %s for principal %s", displayName, principal.Name)
+	elevateResp, err := cloudAccessSvc.Elevate(&scacloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:            cfg.CSP,
+		WorkspaceID:    target.WorkspaceID,
+		RoleIDs:        target.RoleInfo.ID,
+		OrganizationID: target.OrganizationID,
+	})
+	require.Nil(t, elevateResp)
+	verifyAzureElevateFailsForNonEntraUser(t, err, "Azure CloudAccess elevation")
+}
+
+func ElevateCloudAccessTarget(
 	t *testing.T,
 	cloudAccessSvc *scacloudaccesssvc.IdsecSCACloudAccessService,
-	cfg cloudAccessListTargetsConfig,
+	cfg CloudAccessListTargetsConfig,
 	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
 ) *scacloudaccessmodels.IdsecSCACloudAccessElevateResponse {
 	t.Helper()
 
 	elevateResp, err := cloudAccessSvc.Elevate(&scacloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
-		CSP:            cfg.csp,
+		CSP:            cfg.CSP,
 		WorkspaceID:    target.WorkspaceID,
 		RoleIDs:        target.RoleInfo.ID,
 		OrganizationID: target.OrganizationID,
@@ -336,14 +382,14 @@ func elevateCloudAccessTarget(
 	return elevateResp
 }
 
-func verifyAWSCloudAccessElevate(
+func VerifyAWSCloudAccessElevate(
 	t *testing.T,
 	elevateResp *scacloudaccessmodels.IdsecSCACloudAccessElevateResponse,
 	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
 ) {
 	t.Helper()
 
-	require.Equal(t, awsCloudAccessListTargetsConfig.csp, strings.ToUpper(strings.TrimSpace(elevateResp.Response.CSP)))
+	require.Equal(t, AWSCloudAccessListTargetsConfig.CSP, strings.ToUpper(strings.TrimSpace(elevateResp.Response.CSP)))
 	require.Len(t, elevateResp.Response.Results, 1, "expected one AWS elevate result")
 
 	result := elevateResp.Response.Results[0]
@@ -356,7 +402,47 @@ func verifyAWSCloudAccessElevate(
 	verifyAWSAccessCredentialsIdentity(t, awsCreds, target)
 }
 
-func setupGroupAccessListTargetsTest(t *testing.T, requireConfiguredTarget bool) *k8sTestContext {
+func RunGroupAccessElevateTest(
+	t *testing.T,
+	ctx *framework.TestContext,
+	testCtx *K8sTestContext,
+	displayName string,
+	policyNamePrefix string,
+) {
+	t.Helper()
+
+	policySvc := MustPolicyGroupAccessService(t, ctx)
+	principal := CloudAccessPrincipalFromConfig(t, testCtx)
+	target := GroupAccessTargetFromConfig(t, testCtx, 0)
+	createdPolicyID := CreateGroupAccessPolicy(t, policySvc, principal, target, policyNamePrefix)
+	defer DeletePolicyBestEffort(t, createdPolicyID, policySvc.DeletePolicy)
+
+	fetchedPolicy := GetGroupAccessPolicy(t, policySvc, createdPolicyID)
+	groupAccessSvc := MustPrincipalGroupAccessService(t, testCtx)
+	listResp := ListGroupAccessTargets(t, groupAccessSvc, 20)
+	VerifyGroupAccessTargetInListTargets(t, fetchedPolicy, listResp.Response)
+
+	t.Logf("ListTargets validation passed; attempting %s for principal %s", displayName, principal.Name)
+	elevateResp, err := groupAccessSvc.Elevate(&scagroupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
+		CSP:         "AZURE",
+		DirectoryID: target.DirectoryID,
+		Groups:      target.GroupID,
+	})
+	require.Nil(t, elevateResp)
+	verifyAzureElevateFailsForNonEntraUser(t, err, "GroupAccess Azure elevation")
+}
+
+func verifyAzureElevateFailsForNonEntraUser(t *testing.T, err error, operation string) {
+	t.Helper()
+
+	require.Error(t, err, "%s should fail for a non-Entra ID federated user", operation)
+	t.Logf("%s failed as expected for non-Entra ID federated user: %v", operation, err)
+	errorMessage := err.Error()
+	require.Contains(t, errorMessage, "500")
+	require.Contains(t, strings.ToLower(errorMessage), "ca1040")
+}
+
+func SetupGroupAccessListTargetsTest(t *testing.T, requireConfiguredTarget bool) *K8sTestContext {
 	t.Helper()
 	skipUnlessSupportedSCAEnv(t)
 
@@ -367,7 +453,7 @@ func setupGroupAccessListTargetsTest(t *testing.T, requireConfiguredTarget bool)
 	return testCtx
 }
 
-func groupAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIndex int) groupaccessmodels.IdsecPolicyGroupAccessTargetItem {
+func GroupAccessTargetFromConfig(t *testing.T, testCtx *K8sTestContext, targetIndex int) groupaccessmodels.IdsecPolicyGroupAccessTargetItem {
 	t.Helper()
 	require.Greater(t, len(testCtx.Targets), targetIndex, "configured group target index %d is required", targetIndex)
 
@@ -377,7 +463,7 @@ func groupAccessTargetFromConfig(t *testing.T, testCtx *k8sTestContext, targetIn
 	return target
 }
 
-func mustPrincipalGroupAccessService(t *testing.T, testCtx *k8sTestContext) *scagroupaccesssvc.IdsecSCAGroupAccessService {
+func MustPrincipalGroupAccessService(t *testing.T, testCtx *K8sTestContext) *scagroupaccesssvc.IdsecSCAGroupAccessService {
 	t.Helper()
 
 	groupAccessSvc, err := buildPrincipalGroupAccessService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
@@ -385,7 +471,7 @@ func mustPrincipalGroupAccessService(t *testing.T, testCtx *k8sTestContext) *sca
 	return groupAccessSvc
 }
 
-func listGroupAccessTargets(
+func ListGroupAccessTargets(
 	t *testing.T,
 	groupAccessSvc *scagroupaccesssvc.IdsecSCAGroupAccessService,
 	limit int,
@@ -401,13 +487,13 @@ func listGroupAccessTargets(
 	return resp
 }
 
-func listGroupAccessTargetsWithNextToken(
+func ListGroupAccessTargetsWithNextToken(
 	t *testing.T,
 	groupAccessSvc *scagroupaccesssvc.IdsecSCAGroupAccessService,
 ) (*scagroupaccessmodels.IdsecSCAListGroupTargetsResponse, *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse) {
 	t.Helper()
 
-	page1 := listGroupAccessTargets(t, groupAccessSvc, 1)
+	page1 := ListGroupAccessTargets(t, groupAccessSvc, 1)
 	require.Len(t, page1.Response, 1, "expected exactly one group target on the first page with limit=1")
 	if page1.Total < 2 || strings.TrimSpace(page1.NextToken) == "" {
 		t.Skipf("live GroupAccess ListTargets did not return a second page: total=%d nextToken=%q", page1.Total, page1.NextToken)
@@ -423,7 +509,7 @@ func listGroupAccessTargetsWithNextToken(
 	return page1, page2
 }
 
-func verifyGroupAccessPagination(
+func VerifyGroupAccessPagination(
 	t *testing.T,
 	page1 *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse,
 	page2 *scagroupaccessmodels.IdsecSCAListGroupTargetsResponse,
@@ -436,29 +522,29 @@ func verifyGroupAccessPagination(
 		len(page1.Response), len(page2.Response), page2.NextToken)
 }
 
-func setupK8sListTargetsTest(t *testing.T, cfg k8sListTargetsConfig, requireConfiguredTarget bool) *k8sTestContext {
+func SetupK8sListTargetsTest(t *testing.T, cfg K8sListTargetsConfig, requireConfiguredTarget bool) *K8sTestContext {
 	t.Helper()
 	skipUnlessSupportedSCAEnv(t)
 
-	testCtx := loadListTargetsTestContext(t, cfg.configBlockKey)
+	testCtx := loadListTargetsTestContext(t, cfg.ConfigBlockKey)
 	if requireConfiguredTarget {
-		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.configBlockKey)
+		require.NotEmpty(t, testCtx.Targets, "%s.targets.targets array is required", cfg.ConfigBlockKey)
 	}
 	return testCtx
 }
 
-func k8sTargetFromConfig(t *testing.T, cfg k8sListTargetsConfig, testCtx *k8sTestContext, targetIndex int) k8sTargetConfig {
+func K8sTargetFromConfig(t *testing.T, cfg K8sListTargetsConfig, testCtx *K8sTestContext, targetIndex int) K8sTargetConfig {
 	t.Helper()
 	require.Greater(t, len(testCtx.Targets), targetIndex, "configured k8s target index %d is required", targetIndex)
 
-	target := cfg.buildTarget(testCtx.Targets[targetIndex])
+	target := cfg.BuildTarget(testCtx.Targets[targetIndex])
 	t.Logf("Using target from config: workspaceId=%s workspaceName=%s roleId=%s roleName=%s orgId=%s workspaceType=%s clusterId=%s scope=%s",
 		target.PolicyTarget.WorkspaceID, target.PolicyTarget.WorkspaceName, target.PolicyTarget.RoleInfo.ID, target.PolicyTarget.RoleInfo.Name,
 		target.PolicyTarget.OrganizationID, target.PolicyTarget.WorkspaceType, target.ClusterID, target.Scope)
 	return target
 }
 
-func mustPrincipalK8sService(t *testing.T, testCtx *k8sTestContext) *k8sservice.IdsecSCAK8sService {
+func MustPrincipalK8sService(t *testing.T, testCtx *K8sTestContext) *k8sservice.IdsecSCAK8sService {
 	t.Helper()
 
 	k8sSvc, err := buildPrincipalK8sService(t, testCtx.AuthBlock, testCtx.PrincipalBlock)
@@ -466,49 +552,62 @@ func mustPrincipalK8sService(t *testing.T, testCtx *k8sTestContext) *k8sservice.
 	return k8sSvc
 }
 
-func listK8sTargets(
+func ListK8sTargets(
 	t *testing.T,
 	k8sSvc *k8sservice.IdsecSCAK8sService,
-	csp string,
+	CSP string,
 	workspaceID string,
 	limit int,
 ) *k8smodels.IdsecSCAk8sListClustersResponse {
 	t.Helper()
 
 	resp, err := k8sSvc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{
-		CSP:         csp,
+		CSP:         CSP,
 		WorkspaceID: workspaceID,
 		Limit:       limit,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
+	logK8sListTargetsResponse(t, "K8s ListTargets response", resp)
 	return resp
 }
 
-func listK8sTargetsWithNextToken(
+func ListK8sTargetsWithNextToken(
 	t *testing.T,
 	k8sSvc *k8sservice.IdsecSCAK8sService,
-	cfg k8sListTargetsConfig,
+	cfg K8sListTargetsConfig,
 ) (*k8smodels.IdsecSCAk8sListClustersResponse, *k8smodels.IdsecSCAk8sListClustersResponse) {
 	t.Helper()
 
-	page1 := listK8sTargets(t, k8sSvc, cfg.csp, "", 1)
+	page1 := ListK8sTargets(t, k8sSvc, cfg.CSP, "", 1)
 	require.Len(t, page1.Response, 1, "expected exactly one cluster target on the first page with limit=1")
 	if page1.Total < 2 || page1.NextToken == nil || strings.TrimSpace(*page1.NextToken) == "" {
-		t.Skipf("live K8s ListTargets did not return a second page: total=%d nextToken=%q", page1.Total, k8sNextTokenString(page1.NextToken))
+		t.Skipf("%s pagination skipped: live K8s ListTargets did not return a second page: total=%d nextToken=%q", cfg.DisplayName, page1.Total, k8sNextTokenString(page1.NextToken))
 	}
 
 	page2, err := k8sSvc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{
-		CSP:       cfg.csp,
+		CSP:       cfg.CSP,
 		Limit:     1,
 		NextToken: *page1.NextToken,
 	})
 	require.NoError(t, err)
 	require.Len(t, page2.Response, 1, "expected exactly one cluster target on the second page with limit=1")
+	logK8sListTargetsResponse(t, "K8s ListTargets page 2 response", page2)
 	return page1, page2
 }
 
-func verifyK8sPagination(
+func logK8sListTargetsResponse(t *testing.T, label string, resp *k8smodels.IdsecSCAk8sListClustersResponse) {
+	t.Helper()
+
+	responseJSON, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		t.Logf("%s: unable to marshal response: %v", label, err)
+		return
+	}
+	t.Logf("%s:\n%s", label, string(responseJSON))
+}
+
+func VerifyK8sPagination(
 	t *testing.T,
 	page1 *k8smodels.IdsecSCAk8sListClustersResponse,
 	page2 *k8smodels.IdsecSCAk8sListClustersResponse,
@@ -521,9 +620,9 @@ func verifyK8sPagination(
 		len(page1.Response), len(page2.Response), k8sNextTokenString(page2.NextToken))
 }
 
-func verifyK8sFilteredTargets(
+func VerifyK8sFilteredTargets(
 	t *testing.T,
-	target k8sTargetConfig,
+	target K8sTargetConfig,
 	filteredResp *k8smodels.IdsecSCAk8sListClustersResponse,
 ) {
 	t.Helper()
@@ -657,13 +756,14 @@ func verifyCloudAccessTargetInListTargets(
 		expectedRoleID, expectedWorkspaceID, expectedOrganizationID, expectedWorkspaceType)
 }
 
-func verifyGroupAccessTargetInListTargets(
+func VerifyGroupAccessTargetInListTargets(
 	t *testing.T,
 	fetchedPolicy *groupaccessmodels.IdsecPolicyGroupAccessPolicy,
 	listResponse []scagroupaccessmodels.IdsecSCAGroupsEligibleTarget,
 ) {
 	t.Helper()
 
+	logJSON(t, "Actual GroupAccess ListTargets response", listResponse)
 	require.NotNil(t, fetchedPolicy, "GetPolicy response must not be nil")
 	require.Len(t, fetchedPolicy.Targets.Targets, 1, "GetPolicy: expected exactly one group access target")
 

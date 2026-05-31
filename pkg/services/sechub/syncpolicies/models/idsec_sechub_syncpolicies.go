@@ -23,7 +23,7 @@ type IdsecSecHubPolicy struct {
 
 // IdsecSecHubPolicyStore represents a reference to a store with details.
 type IdsecSecHubPolicyStore struct {
-	ID              string                 `json:"id" mapstructure:"id" desc:"Unique identifier of the store"`
+	ID              string                 `json:"id" mapstructure:"id" desc:"Unique identifier of the store" flag:"id" validate:"required"`
 	Type            string                 `json:"type,omitempty" mapstructure:"type,omitempty" desc:"Type of the store"`
 	Behaviors       []string               `json:"behaviors,omitempty" mapstructure:"behaviors,omitempty" desc:"Behaviors of the store"`
 	CreatedAt       string                 `json:"created_at,omitempty" mapstructure:"created_at,omitempty" desc:"Timestamp when the store was created"`
@@ -40,15 +40,15 @@ type IdsecSecHubPolicyStore struct {
 // IdsecSecHubPolicyFilter represents a reference to a filter with details.
 // a filter can be ether FilterInput with data and safe name or FilterIdPolicyInputAndOutput with id
 type IdsecSecHubPolicyFilter struct {
-	ID   string                          `json:"id,omitempty" mapstructure:"id" desc:"Unique identifier of the filter"`
-	Type string                          `json:"type,omitempty" mapstructure:"type,omitempty" desc:"Type of the filter"`
-	Data IdsecSechubSyncPolicyFilterData `json:"data,omitempty" mapstructure:"data,omitempty" desc:"Filter-specific data"`
+	ID   string                          `json:"id,omitempty" mapstructure:"id" desc:"Unique identifier of the filter" flag:"id,omitempty"`
+	Type string                          `json:"type,omitempty" mapstructure:"type,omitempty" desc:"Type of the filter" flag:"data,omitempty"`
+	Data IdsecSechubSyncPolicyFilterData `json:"data,omitempty" mapstructure:"data,omitempty" desc:"Filter-specific data" flag:"type,omitempty" choices:"PAM_SAFE"`
 }
 
 // IdsecSecHubPolicyTransformation represents a reference to a transformation.
 type IdsecSecHubPolicyTransformation struct {
 	ID         string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"Unique identifier of the transformation"`
-	Predefined string `json:"predefined" mapstructure:"predefined" desc:"Predefined transformation to apply (password_only_plain_text,default)" flag:"predefined" choices:"password_only_plain_text,default"`
+	Predefined string `json:"predefined" mapstructure:"predefined" desc:"Predefined transformation to apply (password_only_plain_text)" flag:"predefined" choices:"password_only_plain_text"`
 }
 
 // IdsecSecHubPolicyState represents the current state of the policy.

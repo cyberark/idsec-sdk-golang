@@ -64,13 +64,15 @@ func main() {
 					},
 				},
 			},
-			Conditions: commonpolicymodels.IdsecPolicyConditions{
-				AccessWindow: commonpolicymodels.IdsecPolicyTimeCondition{
-					DaysOfTheWeek: []int{1, 2, 3, 4, 5},
-					FromHour:      "09:00:00",
-					ToHour:        "17:00:00",
+			Conditions: policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
+				IdsecPolicyConditions: commonpolicymodels.IdsecPolicyConditions{
+					AccessWindow: commonpolicymodels.IdsecPolicyTimeCondition{
+						DaysOfTheWeek: []int{1, 2, 3, 4, 5},
+						FromHour:      "09:00:00",
+						ToHour:        "17:00:00",
+					},
+					MaxSessionDuration: 4,
 				},
-				MaxSessionDuration: 4,
 			},
 			Targets: policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
 				AwsAccountTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAWSAccountTarget{

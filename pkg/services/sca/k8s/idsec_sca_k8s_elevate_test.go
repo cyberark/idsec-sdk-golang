@@ -87,9 +87,7 @@ func TestElevate_WhitespaceCSP(t *testing.T) {
 	require.Contains(t, err.Error(), "csp cannot be empty")
 }
 
-// TestElevate_MissingClusterIdentifier verifies that a request without FQDN and
-// without both WorkspaceID+TargetID is rejected.
-func TestElevate_MissingClusterIdentifier(t *testing.T) {
+func TestElevate_MissingFQDN(t *testing.T) {
 	svc := getMockService(t)
 	got, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
 		CSP:    "AWS",
@@ -97,38 +95,10 @@ func TestElevate_MissingClusterIdentifier(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "fqdn or (workspaceId + targetId)")
+	require.Contains(t, err.Error(), "fqdn cannot be empty")
 }
 
-// TestElevate_WorkspaceIDWithoutTargetID verifies that WorkspaceID alone (without
-// TargetID or FQDN) is rejected.
-func TestElevate_WorkspaceIDWithoutTargetID(t *testing.T) {
-	svc := getMockService(t)
-	got, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
-		CSP:         "AWS",
-		WorkspaceID: "111111111111",
-		RoleID:      "arn:aws:iam::111111111111:role/test-role",
-	})
-	require.Error(t, err)
-	require.Nil(t, got)
-	require.Contains(t, err.Error(), "fqdn or (workspaceId + targetId)")
-}
-
-// TestElevate_TargetIDWithoutWorkspaceID verifies that TargetID alone (without
-// WorkspaceID or FQDN) is rejected.
-func TestElevate_TargetIDWithoutWorkspaceID(t *testing.T) {
-	svc := getMockService(t)
-	got, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
-		CSP:      "AWS",
-		TargetID: "arn:aws:eks:us-east-1:111111111111:cluster/my-cluster",
-		RoleID:   "arn:aws:iam::111111111111:role/test-role",
-	})
-	require.Error(t, err)
-	require.Nil(t, got)
-	require.Contains(t, err.Error(), "fqdn or (workspaceId + targetId)")
-}
-
-func TestElevate_MissingRoleIDAndRoleName(t *testing.T) {
+func TestElevate_MissingRoleID(t *testing.T) {
 	svc := getMockService(t)
 	got, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
 		CSP:  "AWS",
@@ -136,7 +106,7 @@ func TestElevate_MissingRoleIDAndRoleName(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "roleId or roleName")
+	require.Contains(t, err.Error(), "roleId cannot be empty")
 }
 
 func TestElevate_UninitializedService(t *testing.T) {
@@ -179,60 +149,6 @@ func TestElevate_Success_AWS(t *testing.T) {
 	require.NotEmpty(t, result.AccessCredentials)
 	// TargetID is returned by the API and used to derive region + cluster name
 	require.Equal(t, "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster", result.TargetID)
-}
-
-// TestElevate_Success_WorkspaceIDAndTargetID verifies the alternative path where
-// both WorkspaceID and TargetID are provided (instead of FQDN).
-func TestElevate_Success_WorkspaceIDAndTargetID(t *testing.T) {
-	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
-		{
-			Matcher:      func(r *http.Request) bool { return true },
-			StatusCode:   http.StatusOK,
-			ResponseBody: mockElevateResponse,
-		},
-	})
-	defer cleanup()
-
-	svc := setupK8sElevateService(client)
-	resp, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
-		CSP:         "AWS",
-		WorkspaceID: "123456789012",
-		TargetID:    "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster",
-		RoleID:      "arn:aws:iam::123456789012:role/k8s_sca_test_role",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Len(t, resp.Response.Results, 1)
-	require.Equal(t, "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster", resp.Response.Results[0].TargetID)
-}
-
-// TestElevate_WithRoleName verifies that roleName can be used instead of roleId.
-func TestElevate_WithRoleName(t *testing.T) {
-	const mockResp = `{
-  "response": {
-    "organizationId": "general",
-    "csp": "AWS",
-    "results": [{"workspaceId": "123", "roleName": "my-role", "sessionId": "sess-1", "accessCredentials": "{}"}]
-  }
-}`
-	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
-		{
-			Matcher:      func(r *http.Request) bool { return true },
-			StatusCode:   http.StatusOK,
-			ResponseBody: mockResp,
-		},
-	})
-	defer cleanup()
-
-	svc := setupK8sElevateService(client)
-	resp, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
-		CSP:      "AWS",
-		FQDN:     "cluster.gr7.us-east-1.eks.amazonaws.com",
-		RoleName: "my-role",
-	})
-	require.NoError(t, err)
-	require.Len(t, resp.Response.Results, 1)
-	require.Equal(t, "my-role", resp.Response.Results[0].RoleName)
 }
 
 // TestElevate_AzureEmptyAccessCredentials verifies that Azure responses with no
@@ -329,9 +245,10 @@ func TestElevate_RequestBody_FQDN(t *testing.T) {
 	require.Equal(t, "arn:aws:iam::123456789012:role/k8s_sca_test_role", target["roleId"])
 }
 
-// TestElevate_RequestBody_WorkspaceAndTargetID verifies the POST body when using
-// the WorkspaceID+TargetID path.
-func TestElevate_RequestBody_WorkspaceAndTargetID(t *testing.T) {
+// TestElevate_CSPNormalizedToUppercase verifies that a lowercase / mixed-case
+// CSP value supplied by the caller is uppercased before being sent on the wire
+// and before being matched downstream.
+func TestElevate_CSPNormalizedToUppercase(t *testing.T) {
 	var capturedBody []byte
 	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
 		{
@@ -349,22 +266,62 @@ func TestElevate_RequestBody_WorkspaceAndTargetID(t *testing.T) {
 
 	svc := setupK8sElevateService(client)
 	_, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
-		CSP:         "AWS",
-		WorkspaceID: "123456789012",
-		TargetID:    "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster",
-		RoleID:      "arn:aws:iam::123456789012:role/k8s_sca_test_role",
+		CSP:    "aws",
+		FQDN:   "cluster.gr7.us-east-1.eks.amazonaws.com",
+		RoleID: "arn:aws:iam::123456789012:role/test-role",
 	})
 	require.NoError(t, err)
 
 	var body map[string]interface{}
 	require.NoError(t, json.Unmarshal(capturedBody, &body))
-	require.Equal(t, "AWS", body["csp"])
+	require.Equal(t, "AWS", body["csp"], "csp must be uppercased on the wire regardless of caller casing")
+}
+
+// TestElevate_RequestBody_Azure verifies the POST body when called with the Azure
+// flags (organizationId + namespaceId) so that namespace is sent on the wire.
+func TestElevate_RequestBody_Azure(t *testing.T) {
+	const azureMockResp = `{
+  "response": {
+    "organizationId": "00000000-1111-2222-3333-444444444444",
+    "csp": "AZURE",
+    "results": [{"workspaceId": "sub-1", "roleId": "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y", "sessionId": "sess-az"}]
+  }
+}`
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: azureMockResp,
+			OnRequest: func(r *http.Request) {
+				buf := new(bytes.Buffer)
+				_, _ = buf.ReadFrom(r.Body)
+				capturedBody = buf.Bytes()
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	_, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
+		CSP:            "AZURE",
+		RoleID:         "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y",
+		FQDN:           "mycluster.hcp.eastus.azmk8s.io",
+		OrganizationID: "00000000-1111-2222-3333-444444444444",
+		NamespaceID:    "ns-prod",
+	})
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "AZURE", body["csp"])
+	require.Equal(t, "00000000-1111-2222-3333-444444444444", body["organizationId"])
 
 	targets := body["targets"].([]interface{})
 	target := targets[0].(map[string]interface{})
-	require.Equal(t, "123456789012", target["workspaceId"])
-	require.Equal(t, "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster", target["targetId"])
-	require.Equal(t, "arn:aws:iam::123456789012:role/k8s_sca_test_role", target["roleId"])
+	require.Equal(t, "mycluster.hcp.eastus.azmk8s.io", target["fqdn"])
+	require.Equal(t, "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y", target["roleId"])
+	require.Equal(t, "ns-prod", target["namespace"])
 }
 
 // ---------------------------------------------------------------------------
@@ -466,11 +423,23 @@ func TestGetTokenProvider_Unsupported(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported")
 }
 
-func TestAzureTokenProvider_GenerateToken_NotImplemented(t *testing.T) {
+func TestAzureTokenProvider_GenerateToken_NilResult(t *testing.T) {
 	p := &AzureTokenProvider{}
-	_, err := p.GenerateToken(nil, nil)
+	_, err := p.GenerateToken(nil, &IdsecSCAK8sClusterContext{CSP: "AZURE"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not yet implemented")
+	require.Contains(t, err.Error(), "elevate result cannot be nil")
+}
+
+func TestAzureTokenProvider_GenerateToken_NilContext(t *testing.T) {
+	p := &AzureTokenProvider{}
+	_, err := p.GenerateToken(&k8smodels.IdsecSCAK8sElevateResult{}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cluster context cannot be nil")
+}
+
+func TestAzureTokenProvider_ElevateTTL(t *testing.T) {
+	p := &AzureTokenProvider{}
+	require.Equal(t, azureElevateTTL, p.ElevateTTL())
 }
 
 func TestAWSTokenProvider_GenerateToken_EmptyAccessCredentials(t *testing.T) {

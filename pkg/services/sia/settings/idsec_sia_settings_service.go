@@ -889,6 +889,40 @@ func (s *IdsecSIASettingsService) SetRdpFileSigning(rdpFileSigning *settingsmode
 	return s.RdpFileSigning()
 }
 
+// HttpsRelay retrieves the HTTPS Relay settings.
+//
+// Returns the current HTTPS Relay settings or an error if retrieval fails.
+func (s *IdsecSIASettingsService) HttpsRelay() (*settingsmodels.IdsecSIASettingsHTTPSRelay, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameHTTPSRelay)
+	if err != nil {
+		return nil, err
+	}
+	var httpsRelay settingsmodels.IdsecSIASettingsHTTPSRelay
+	err = mapstructure.Decode(settingJSON, &httpsRelay)
+	if err != nil {
+		return nil, err
+	}
+	return &httpsRelay, nil
+}
+
+// SetHttpsRelay sets the HTTPS Relay settings.
+//
+// Parameters:
+//   - httpsRelay: The settings to apply for HTTPS Relay.
+//
+// Returns an error if the operation fails.
+func (s *IdsecSIASettingsService) SetHttpsRelay(httpsRelay *settingsmodels.IdsecSIASettingsHTTPSRelay) (*settingsmodels.IdsecSIASettingsHTTPSRelay, error) {
+	settingJSON, err := common.SerializeJSONCamel(httpsRelay)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameHTTPSRelay, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.HttpsRelay()
+}
+
 // ServiceConfig returns the service configuration for the IdsecSIASettingsService.
 func (s *IdsecSIASettingsService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig

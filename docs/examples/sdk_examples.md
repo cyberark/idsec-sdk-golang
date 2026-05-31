@@ -864,6 +864,118 @@ func main() {
 }
 ```
 
+## SIA SSH connect
+
+In this example we authenticate to our ISP tenant and use the SIA SSH service to
+connect to a target host through the SIA SSH gateway. The service requests a
+short-lived SSH key from the SSO service in-memory, stages it into a temporary
+file with `0600` permissions for the lifetime of the spawned `ssh` child
+process, and removes it on exit — the key never lives in `~/.ssh` and never
+needs manual cleanup.
+
+The `Connect` entry point covers two modes:
+
+- **Interactive terminal** — leave `Command` empty. `stdin`/`stdout`/`stderr`
+  are wired to the current process, matching the UX of the DB service's
+  interactive `psql`/`mysql`/`sqlcmd` clients.
+- **Single remote command** — set `Command` to the command line that should run
+  on the target. Use `ForceTTY: true` when the remote command needs a TTY
+  (for example `sudo` prompting for a password).
+
+`AllowCaching: true` reuses a previously-issued short-lived SSH key from the SSO
+keyring cache (alongside the other short-lived token types) rather than
+fetching a fresh one on every call. `ExtraArgs` is passed through verbatim to
+the SSH client, so callers can add `-L`, `-p`, `-o StrictHostKeyChecking=...`,
+etc., without API changes.
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia"
+	sshmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/ssh/models"
+)
+
+func main() {
+	// Perform authentication using IdsecISPAuth to the platform
+	// First, create an ISP authentication class
+	// Afterwards, perform the authentication
+	ispAuth := auth.NewIdsecISPAuth(false)
+	_, err := ispAuth.Authenticate(
+		nil,
+		&authmodels.IdsecAuthProfile{
+			Username:           "user@cyberark.cloud.12345",
+			AuthMethod:         authmodels.Identity,
+			AuthMethodSettings: &authmodels.IdentityIdsecAuthMethodSettings{},
+		},
+		&authmodels.IdsecSecret{
+			Secret: os.Getenv("IDSEC_SECRET"),
+		},
+		false,
+		false,
+	)
+	if err != nil {
+		panic(err)
+	}
+	siaAPI, err := sia.NewIdsecSIAAPI(ispAuth.(*auth.IdsecISPAuth))
+	if err != nil {
+		panic(err)
+	}
+
+	// Mode 1: run a single command on the remote target through the SIA SSH
+	// gateway. Output is streamed to this process' stdout/stderr.
+	fmt.Println("Running single command via SIA SSH gateway...")
+	if err := siaAPI.Ssh().Connect(&sshmodels.IdsecSIASSHConnectExecution{
+		IdsecSIASSHBaseExecution: sshmodels.IdsecSIASSHBaseExecution{
+			TargetAddress:  "10.0.0.42",
+			TargetUsername: "ec2-user",
+		},
+		Command: "uname -a && id",
+	}); err != nil {
+		panic(err)
+	}
+
+	// Mode 2: run a privileged remote command that needs a TTY (sudo with a
+	// password prompt). ForceTTY translates to `ssh -t`.
+	fmt.Println("Running privileged remote command via SIA SSH gateway...")
+	if err := siaAPI.Ssh().Connect(&sshmodels.IdsecSIASSHConnectExecution{
+		IdsecSIASSHBaseExecution: sshmodels.IdsecSIASSHBaseExecution{
+			TargetAddress:  "10.0.0.42",
+			TargetUsername: "ec2-user",
+			NetworkName:    "prod-network",
+		},
+		Command:  "sudo systemctl status nginx",
+		ForceTTY: true,
+	}); err != nil {
+		panic(err)
+	}
+
+	// Mode 3: open an interactive terminal session through the SIA SSH
+	// gateway. Omit Command to get an interactive shell — stdin/stdout/stderr
+	// are wired to the parent process, matching the UX of the DB service's
+	// interactive clients. AllowCaching reuses a previously-issued short-lived
+	// SSH key from the SSO keyring cache when present. ExtraArgs is passed
+	// through verbatim to the SSH client.
+	fmt.Println("Opening interactive SSH terminal via SIA SSH gateway...")
+	if err := siaAPI.Ssh().Connect(&sshmodels.IdsecSIASSHConnectExecution{
+		IdsecSIASSHBaseExecution: sshmodels.IdsecSIASSHBaseExecution{
+			TargetAddress:  "10.0.0.42",
+			TargetUsername: "ec2-user",
+			TargetPort:     2222,
+		},
+		AllowCaching: true,
+		ExtraArgs:    []string{"-L", "8080:127.0.0.1:80"},
+	}); err != nil {
+		panic(err)
+	}
+}
+```
+
 ## pCloud Import Target Platform
 
 In this example we authenticate to our ISP tenant and add a certificate:

@@ -13,6 +13,7 @@ import (
 	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsdb"
 	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/settings"
+	siassh "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/ssh"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sshca"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
 	workspacesdb "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/workspacesdb"
@@ -30,6 +31,7 @@ type IdsecSIAAPI struct {
 	dbStrongAccountsService *dbstrongaccounts.IdsecSIADBStrongAccountsService
 	accessService           *access.IdsecSIAAccessService
 	sshCaService            *sshca.IdsecSIASSHCAService
+	sshService              *siassh.IdsecSIASSHService
 	dbService               *db.IdsecSIADBService
 	settingsService         *settings.IdsecSIASettingsService
 	certificatesService     *certificates.IdsecSIACertificatesService
@@ -84,6 +86,10 @@ func NewIdsecSIAAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSIAAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	sshService, err := siassh.NewIdsecSIASSHService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	dbService, err := db.NewIdsecSIADBService(baseIspAuth)
 	if err != nil {
 		return nil, err
@@ -106,6 +112,7 @@ func NewIdsecSIAAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSIAAPI, error) {
 		dbStrongAccountsService: dbStrongAccountsService,
 		accessService:           accessService,
 		sshCaService:            sshCaService,
+		sshService:              sshService,
 		dbService:               dbService,
 		settingsService:         settingsService,
 		certificatesService:     certificatesService,
@@ -156,6 +163,11 @@ func (api *IdsecSIAAPI) Access() *access.IdsecSIAAccessService {
 // SSHCa returns the ssh-ca service of the IdsecSIAAPI instance.
 func (api *IdsecSIAAPI) SSHCa() *sshca.IdsecSIASSHCAService {
 	return api.sshCaService
+}
+
+// Ssh returns the SSH service of the IdsecSIAAPI instance.
+func (api *IdsecSIAAPI) Ssh() *siassh.IdsecSIASSHService {
+	return api.sshService
 }
 
 // Db returns the DB service of the IdsecSIAAPI instance.

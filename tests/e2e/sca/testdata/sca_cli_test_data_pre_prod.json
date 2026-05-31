@@ -52,10 +52,12 @@
     "targets": {
       "targets": [
         {
-          "roleId": "/subscriptions/93de9312-0905-45fb-8399-ff46c652ea8a/providers/Microsoft.Authorization/roleDefinitions/c2f4ef07-c644-48eb-af81-4b1b4947fb11",
-          "workspaceId": "/subscriptions/93de9312-0905-45fb-8399-ff46c652ea8a/resourceGroups/cortex-m-o-72002-dc9c4e35b5",
+          "roleId": "/subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72/providers/Microsoft.Authorization/roleDefinitions/4c6569b6-f23e-4295-9b90-bd4cc4ff3292",
+          "roleName": "DevCenter Owner",
+          "workspaceId": "subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72",
+          "workspaceName": "COM-NP-R&D-CloudSec-SCA-Dev",
           "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
-          "workspaceType": "resource_group"
+          "workspaceType": "subscription"
         }
       ]
     }

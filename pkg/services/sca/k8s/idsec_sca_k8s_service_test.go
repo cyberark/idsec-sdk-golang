@@ -26,6 +26,15 @@ func getMockService(t *testing.T) *IdsecSCAK8sService {
 	return mockSvc
 }
 
+func TestSupportedCSPsForKubeconfigGeneration(t *testing.T) {
+	require.ElementsMatch(t, []string{"aws", "azure"}, SupportedCSPs)
+}
+
+func TestDPAGenerateKubeconfigCSPSegment(t *testing.T) {
+	require.Equal(t, "AWS", dpaGenerateKubeconfigCSPSegment("aws"))
+	require.Equal(t, "azure_resource", dpaGenerateKubeconfigCSPSegment("azure"))
+}
+
 // mockListTargetsResponse matches the API response from list-clusters (see terminal output).
 const mockListTargetsResponse = `{
   "response": [

@@ -45,6 +45,18 @@
           "clusterId": "arn:aws:eks:us-east-1:134672441550:cluster/test-ravish-cluster",
           "namespaceId": "",
           "fqdn": "https://934EDA9A7C57AAA7C9A341C21CD75844.gr7.us-east-1.eks.amazonaws.com"
+        },
+        {
+          "roleId": "arn:aws:iam::134672441550:role/k8s_sca_test_role",
+          "roleName": "k8s_sca_test_role",
+          "workspaceId": "134672441550",
+          "workspaceName": "COM-NP-Int H-CloudSec-CRC-Test-1302",
+          "orgId": "general",
+          "workspaceType": "account",
+          "scope": "cluster",
+          "clusterId": "arn:aws:eks:us-east-1:134672441550:cluster/test-ravish-cluster",
+          "namespaceId": "",
+          "fqdn": "https://934EDA9A7C57AAA7C9A341C21CD75844.gr7.us-east-1.eks.amazonaws.com"
         }
       ]
     }

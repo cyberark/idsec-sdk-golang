@@ -6,21 +6,50 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
+	sso "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
+	ssomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso/models"
 )
 
 const (
 	eligibilityRelURL = "/access/<csp>/eligibility/clusters"
 
+	// evaluateRelURL is the relative URL for evaluating cluster eligibility (contains <csp> placeholder).
+	evaluateRelURL = "/access/<csp>/eligibility/clusters/evaluate"
+
 	// elevateRelURL is the relative URL for the Elevate API (relative to the api/ base path).
-	elevateRelURL            = "access/elevate/clusters"
-	generateKubeconfigRelURL = "integration/k8s/generate-kubeconfig"
+	elevateRelURL = "access/elevate/clusters"
+
+	// generateKubeconfigDpaRelURL is the per-CSP DPA generate-kubeconfig endpoint
+	// (relative to https://<tenant>.dpa.<env>/api/). The CSP name (uppercase) is appended at call time:
+	// e.g. "k8s/kube-config/AWS".
+	generateKubeconfigDpaRelURL = "k8s/kube-config"
+)
+
+// SupportedCSPs defines the cloud providers currently supported for kubeconfig generation.
+var SupportedCSPs = []string{"aws", "azure"}
+
+type scaK8sProxyCertificateProvider interface {
+	ShortLivedClientCertificate(getShortLivedClientCertificate *ssomodels.IdsecSIASSOGetShortLivedClientCertificate) error
+}
+
+var (
+	newSCAProxyCertificateProvider = func(ispBaseService *services.IdsecISPBaseService) (scaK8sProxyCertificateProvider, error) {
+		return sso.NewIdsecSIASSOService(ispBaseService)
+	}
+	makeTempDir = os.MkdirTemp
+	removeAll   = os.RemoveAll
+	globFiles   = filepath.Glob
+	readFile    = os.ReadFile
 )
 
 // IdsecSCAK8sService provides SCA Kubernetes cluster discovery capabilities.
@@ -36,6 +65,15 @@ const (
 type IdsecSCAK8sService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
+
+	// dpaISP is a secondary ISP base service bound to the "dpa" subdomain.
+	// It is used exclusively by the DPA generate-kubeconfig endpoint
+	// (https://<tenant>.dpa.<env>/api/k8s/kube-config/<CSP>).
+	dpaISP *services.IdsecISPBaseService
+
+	// dpaSSOISP is bound to the DPA host without the /api base path because
+	// the shared SIA SSO service posts to absolute /api/adb/sso routes.
+	dpaSSOISP *services.IdsecISPBaseService
 }
 
 // NewIdsecSCAK8sService creates a new SCA K8s service instance using provided authenticators.
@@ -62,8 +100,22 @@ func NewIdsecSCAK8sService(authenticators ...auth.IdsecAuth) (*IdsecSCAK8sServic
 		return nil, err
 	}
 
+	// DPA base URL: https://<tenant>.dpa.<platformdomain>/api/
+	// Used only by the new per-CSP generate-kubeconfig endpoint.
+	dpaISPBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "api", scak8sservice.refreshScaAuth)
+	if err != nil {
+		return nil, err
+	}
+
+	dpaSSOBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", scak8sservice.refreshScaAuth)
+	if err != nil {
+		return nil, err
+	}
+
 	scak8sservice.IdsecBaseService = base
 	scak8sservice.IdsecISPBaseService = ispBaseService
+	scak8sservice.dpaISP = dpaISPBaseService
+	scak8sservice.dpaSSOISP = dpaSSOBaseService
 	return scak8sservice, nil
 }
 
@@ -139,12 +191,84 @@ func (s *IdsecSCAK8sService) ListTargets(req *k8smodels.IdsecSCAk8sListClustersR
 	return &result, nil
 }
 
-// Elevate calls the SCA Elevate API to obtain short-lived cloud credentials for
-// the requested workspace/role target.
+// EvaluateEligibility calls the internal eligibility evaluation API to determine
+// which connection method (direct or proxy) should be used for each target cluster.
 //
 // Parameters:
-//   - req: *IdsecSCAK8sElevateKubectlRequest with CSP (required), and either FQDN
-//     or (WorkspaceID + TargetID), plus either RoleID or RoleName.
+//   - req: *IdsecSCAK8sEvaluateRequest with at least one target. Each target must
+//     provide either FQDN or Name.
+//   - csp: Cloud service provider (AWS, AZURE, GCP). Case-insensitive.
+//
+// Returns *IdsecSCAK8sEvaluateResponse on success or an error when:
+//   - req is nil, csp is empty, or targets have neither FQDN nor Name
+//   - the network call fails or the response status is not 200
+//   - JSON decoding fails
+func (s *IdsecSCAK8sService) EvaluateEligibility(req *k8smodels.IdsecSCAK8sEvaluateRequest, csp string) (*k8smodels.IdsecSCAK8sEvaluateResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("evaluate request cannot be nil")
+	}
+	csp = strings.TrimSpace(csp)
+	if csp == "" {
+		return nil, fmt.Errorf("csp cannot be empty")
+	}
+	supported := map[string]struct{}{
+		"aws":   {},
+		"azure": {},
+		"gcp":   {},
+	}
+	if _, ok := supported[strings.ToLower(csp)]; !ok {
+		return nil, fmt.Errorf("unsupported csp '%s'", csp)
+	}
+	for i, target := range req.Targets {
+		if strings.TrimSpace(target.FQDN) == "" && strings.TrimSpace(target.Name) == "" {
+			return nil, fmt.Errorf("target[%d] must specify either fqdn or name", i)
+		}
+	}
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
+		return nil, fmt.Errorf("sca k8s service not initialized")
+	}
+
+	cspUpper := strings.ToUpper(csp)
+	s.Logger.Debug("calling evaluate eligibility API for CSP=%s targets=%d", cspUpper, len(req.Targets))
+
+	route := strings.TrimPrefix(strings.Replace(evaluateRelURL, "<csp>", cspUpper, 1), "/")
+
+	response, err := s.ISPClient().Post(context.Background(), route, req)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate eligibility API call failed: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(response.Body)
+		return nil, fmt.Errorf(
+			"evaluate eligibility API returned status %d. Response body: %s",
+			response.StatusCode, string(bodyBytes),
+		)
+	}
+
+	var result k8smodels.IdsecSCAK8sEvaluateResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode evaluate eligibility response: %w", err)
+	}
+
+	for i, r := range result.Response {
+		fqdn := "<nil>"
+		if r.Target.FQDN != nil {
+			fqdn = *r.Target.FQDN
+		}
+		s.Logger.Debug("evaluate result[%d]: connectionMethod=%s fqdn=%s", i, r.ConnectionMethod, fqdn)
+	}
+
+	return &result, nil
+}
+
+// Elevate calls the SCA Elevate API to obtain short-lived cloud credentials for
+// the requested cluster/role target.
+//
+// Parameters:
+//   - req: *IdsecSCAK8sElevateKubectlRequest with CSP, FQDN, and RoleID (all required).
+//     OrganizationID and NamespaceID are forwarded when set (Azure).
 //
 // Returns *IdsecSCAK8sElevateResponse on success or an error when:
 //   - req is nil, CSP is empty, or required target fields are missing
@@ -155,33 +279,33 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
 
-	if strings.TrimSpace(req.CSP) == "" {
+	// CSP is accepted in any case from the caller and always uppercased before
+	// being sent on the wire / matched in downstream logic.
+	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
+	if cspUpper == "" {
 		return nil, fmt.Errorf("csp cannot be empty")
 	}
-	hasFQDN := strings.TrimSpace(req.FQDN) != ""
-	hasWorkspaceAndTarget := strings.TrimSpace(req.WorkspaceID) != "" && strings.TrimSpace(req.TargetID) != ""
-	if !hasFQDN && !hasWorkspaceAndTarget {
-		return nil, fmt.Errorf("must specify either fqdn or (workspaceId + targetId)")
+	if strings.TrimSpace(req.FQDN) == "" {
+		return nil, fmt.Errorf("fqdn cannot be empty")
 	}
-	if strings.TrimSpace(req.RoleID) == "" && strings.TrimSpace(req.RoleName) == "" {
-		return nil, fmt.Errorf("must specify either roleId or roleName")
+	if strings.TrimSpace(req.RoleID) == "" {
+		return nil, fmt.Errorf("roleId cannot be empty")
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca k8s service not initialized")
 	}
-	s.Logger.Debug("calling elevate API for CSP=%s", req.CSP)
+	s.Logger.Debug("calling elevate API for CSP=%s", cspUpper)
 
 	apiReq := &k8smodels.IdsecSCAK8sElevateRequest{
-		CSP: req.CSP,
+		CSP: cspUpper,
 		Targets: []k8smodels.IdsecSCAK8sElevateTarget{
 			{
-				WorkspaceID: req.WorkspaceID,
 				RoleID:      req.RoleID,
-				RoleName:    req.RoleName,
-				TargetID:    req.TargetID,
 				FQDN:        req.FQDN,
+				NamespaceID: req.NamespaceID,
 			},
 		},
+		OrganizationID: req.OrganizationID,
 	}
 
 	response, err := s.ISPClient().Post(context.Background(), elevateRelURL, apiReq)
@@ -205,12 +329,226 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 	return &result, nil
 }
 
-// GenerateKubeconfig calls integration/k8s/generate-kubeconfig.
-// Always sends ?all=<true|false> to the API. When req.CSP is non-empty, also sends ?csp=<value>.
-// The backend Lambda reads both query_params["csp"] and query_params["all"].
-// If req.CSP is empty and req.All is "false", returns an error (no valid call).
-// Response is normalized to map[csp]yaml.
+// GenerateProxyExecCredential returns a kubectl ExecCredential for the proxy
+// connection method, dispatching to the CSP-specific proxy provider.
+//
+// Parameters:
+//   - csp: Cloud service provider (AWS, AZURE, GCP). Case-insensitive.
+//   - ctx: Optional cluster context (CSP, FQDN, role identifiers, region, etc.)
+//     for providers that need cluster-specific inputs. May be nil for CSPs that
+//     do not need it (currently AWS).
+//
+// Returns an error when the service is not initialized, when the CSP is not
+// supported, or when the underlying provider fails.
+func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
+	csp string,
+	ctx *IdsecSCAK8sClusterContext,
+) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
+		return nil, fmt.Errorf("sca k8s service not initialized")
+	}
+	provider, err := GetProxyProvider(csp)
+	if err != nil {
+		return nil, err
+	}
+	s.Logger.Debug("dispatching proxy ExecCredential generation to provider CSP=%s", provider.CSP())
+	return provider.GenerateExecCredential(s, ctx)
+}
+
+// generateDPAProxyExecCredential issues a kubectl ExecCredential containing a
+// short-lived client certificate/key pair fetched via the DPA SIA SSO service
+// ("DPA-K8S"). This is the shared flow currently used by the AWS proxy provider;
+// other CSPs may reuse it as their DPA proxy implementations land.
+func (s *IdsecSCAK8sService) generateDPAProxyExecCredential() (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	proxyISP := s.dpaSSOISP
+	if proxyISP == nil {
+		proxyISP = s.IdsecISPBaseService
+	}
+	proxyCertProvider, err := newSCAProxyCertificateProvider(proxyISP)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize sca proxy certificate provider: %w", err)
+	}
+
+	tmpDir, err := makeTempDir("", "idsec-k8s-proxy-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer func() { _ = removeAll(tmpDir) }()
+
+	err = proxyCertProvider.ShortLivedClientCertificate(&ssomodels.IdsecSIASSOGetShortLivedClientCertificate{
+		Service:      "DPA-K8S",
+		OutputFormat: ssomodels.File,
+		Folder:       tmpDir,
+		AllowCaching: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("proxy client certificate generation failed: %w", err)
+	}
+
+	certFiles, err := globFiles(filepath.Join(tmpDir, "*_client_cert.crt"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate proxy client certificate file: %w", err)
+	}
+	keyFiles, err := globFiles(filepath.Join(tmpDir, "*_client_key.pem"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate proxy client key file: %w", err)
+	}
+	if len(certFiles) == 0 || len(keyFiles) == 0 {
+		return nil, fmt.Errorf("proxy client certificate files not found after generation")
+	}
+
+	certData, err := readFile(certFiles[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read proxy client certificate: %w", err)
+	}
+	keyData, err := readFile(keyFiles[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read proxy client key: %w", err)
+	}
+
+	return &k8smodels.IdsecSCAK8sExecCredential{
+		APIVersion: "client.authentication.k8s.io/v1beta1",
+		Kind:       "ExecCredential",
+		Status: k8smodels.IdsecSCAK8sExecCredentialStatus{
+			ClientCertificateData: string(certData),
+			ClientKeyData:         string(keyData),
+		},
+	}, nil
+}
+
+// GenerateKubeconfig calls the DPA generate-kubeconfig endpoint:
+// https://<tenant>.dpa.<env>/api/k8s/kube-config[/<CSP>].
+// The response is normalized to map[csp]yaml.
 func (s *IdsecSCAK8sService) GenerateKubeconfig(req *k8smodels.IdsecSCAK8sGenerateKubeconfigRequest) (k8smodels.IdsecSCAK8sGenerateKubeconfigResponse, error) {
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
+		return nil, fmt.Errorf("sca k8s service not initialized")
+	}
+	return s.generateKubeconfigViaDpa(req)
+}
+
+// GenerateKubeconfigParallel fetches kubeconfigs for multiple CSPs concurrently.
+// It continues on individual failures and aggregates all results into a response
+// that separates successes from failures for partial success handling.
+//
+// Parameters:
+//   - ctx: Context for cancellation; if cancelled, in-flight requests may still complete
+//     but no new requests will be started.
+//   - csps: List of CSP names (aws, azure, gcp) to generate kubeconfigs for.
+//   - kubeconfigLocation: Optional custom file path (passed through to each request).
+//
+// Returns *IdsecSCAK8sGenerateKubeconfigParallelResponse with Succeeded and Failed slices.
+// The response is never nil; check HasFailures() to determine if any generations failed.
+func (s *IdsecSCAK8sService) GenerateKubeconfigParallel(
+	ctx context.Context,
+	csps []string,
+	kubeconfigLocation string,
+) *k8smodels.IdsecSCAK8sGenerateKubeconfigParallelResponse {
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
+		response := &k8smodels.IdsecSCAK8sGenerateKubeconfigParallelResponse{}
+		for _, csp := range csps {
+			response.Failed = append(response.Failed, k8smodels.IdsecSCAK8sKubeconfigOutcome{
+				CSP:   strings.ToLower(csp),
+				Error: "sca k8s service not initialized",
+			})
+		}
+		return response
+	}
+
+	if len(csps) == 0 {
+		return &k8smodels.IdsecSCAK8sGenerateKubeconfigParallelResponse{}
+	}
+
+	s.Logger.Info("Generating kubeconfigs in parallel for CSPs: %v", csps)
+
+	resultCh := make(chan k8smodels.IdsecSCAK8sKubeconfigOutcome, len(csps))
+	var wg sync.WaitGroup
+
+	for _, csp := range csps {
+		wg.Add(1)
+		go func(cspName string) {
+			defer wg.Done()
+
+			select {
+			case <-ctx.Done():
+				resultCh <- k8smodels.IdsecSCAK8sKubeconfigOutcome{
+					CSP:   strings.ToLower(cspName),
+					Error: ctx.Err().Error(),
+				}
+				return
+			default:
+			}
+
+			req := &k8smodels.IdsecSCAK8sGenerateKubeconfigRequest{
+				CSP:                cspName,
+				All:                "false",
+				KubeconfigLocation: kubeconfigLocation,
+			}
+
+			s.Logger.Debug("parallel generate-kubeconfig: starting CSP=%s", cspName)
+
+			cspResult, err := s.GenerateKubeconfig(req)
+			if err != nil {
+				s.Logger.Debug("parallel generate-kubeconfig: CSP=%s failed: %v", cspName, err)
+				resultCh <- k8smodels.IdsecSCAK8sKubeconfigOutcome{
+					CSP:   strings.ToLower(cspName),
+					Error: err.Error(),
+				}
+				return
+			}
+
+			kubeconfig := ""
+			cspLower := strings.ToLower(cspName)
+			if val, ok := cspResult[cspLower]; ok {
+				kubeconfig = val
+			} else if val, ok := cspResult["all"]; ok {
+				kubeconfig = val
+			} else if len(cspResult) == 1 {
+				for _, v := range cspResult {
+					kubeconfig = v
+					break
+				}
+			}
+
+			s.Logger.Debug("parallel generate-kubeconfig: CSP=%s succeeded (%d bytes)", cspName, len(kubeconfig))
+			resultCh <- k8smodels.IdsecSCAK8sKubeconfigOutcome{
+				CSP:        cspLower,
+				Kubeconfig: kubeconfig,
+			}
+		}(csp)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	response := &k8smodels.IdsecSCAK8sGenerateKubeconfigParallelResponse{}
+	for outcome := range resultCh {
+		if outcome.IsSuccess() {
+			response.Succeeded = append(response.Succeeded, outcome)
+		} else {
+			response.Failed = append(response.Failed, outcome)
+		}
+	}
+
+	s.Logger.Info("Parallel kubeconfig generation complete: %d succeeded, %d failed",
+		response.SuccessCount(), response.FailureCount())
+
+	return response
+}
+
+// generateKubeconfigViaDpa implements the DPA endpoint:
+//
+//	GET https://<tenant>.dpa.<env>/api/k8s/kube-config           (when --all=true and --csp is empty)
+//	GET https://<tenant>.dpa.<env>/api/k8s/kube-config/<CSP>     (when --csp is provided)
+//
+// Mirrors the legacy SCA endpoint's --csp/--all semantics: must specify --csp or have --all=true.
+// The response is wrapped into the same map[csp]yaml shape used by the legacy endpoint.
+func (s *IdsecSCAK8sService) generateKubeconfigViaDpa(req *k8smodels.IdsecSCAK8sGenerateKubeconfigRequest) (k8smodels.IdsecSCAK8sGenerateKubeconfigResponse, error) {
+	if s.dpaISP == nil || s.dpaISP.ISPClient() == nil {
+		return nil, fmt.Errorf("sca k8s service dpa client not initialized")
+	}
+
 	var csp string
 	allParam := "true"
 	if req != nil {
@@ -222,43 +560,28 @@ func (s *IdsecSCAK8sService) GenerateKubeconfig(req *k8smodels.IdsecSCAK8sGenera
 		allParam = norm
 	}
 
-	if csp == "" && req != nil && allParam == "false" {
+	if csp == "" && allParam == "false" {
 		return nil, fmt.Errorf("generate-kubeconfig: specify --csp or set --all true; --all false with no --csp is invalid")
 	}
 
+	route := generateKubeconfigDpaRelURL
+	cspDisplay := "all"
 	if csp != "" {
-		supported := map[string]struct{}{
-			"aws":   {},
-			"azure": {},
-			"gcp":   {},
+		if err := validateSupportedCSP(csp); err != nil {
+			return nil, err
 		}
-		if _, ok := supported[csp]; !ok {
-			return nil, fmt.Errorf("unsupported csp '%s'; must be one of: aws, azure, gcp", csp)
-		}
+		cspRouteSegment := dpaGenerateKubeconfigCSPSegment(csp)
+		route = generateKubeconfigDpaRelURL + "/" + cspRouteSegment
+		cspDisplay = cspRouteSegment
 	}
 
-	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca k8s service not initialized")
-	}
+	s.Logger.Info("Generating kubeconfig (dpa endpoint) for CSP [%s]", cspDisplay)
+	s.Logger.Debug("requesting generate-kubeconfig DPA API at route: %s", route)
 
-	cspDisplay := csp
-	// When no CSP is provided, treat as "all"
-	if cspDisplay == "" {
-		cspDisplay = "all"
-	}
-	s.Logger.Info("Generating kubeconfig for CSP [%s]", cspDisplay)
-
-	params := make(map[string]string)
-	params["all"] = allParam
-	if csp != "" {
-		params["csp"] = csp
-	}
-	s.Logger.Debug("requesting generate-kubeconfig API with params: %+v", params)
-	s.Logger.Info("generate-kubeconfig request — csp=%q, all=%q, params=%v", csp, allParam, params)
-
-	s.ISPClient().RemoveHeader("Content-Type")
-	response, err := s.ISPClient().Get(context.Background(), generateKubeconfigRelURL, params)
-	s.ISPClient().SetHeader("Content-Type", "application/json")
+	client := s.dpaISP.ISPClient()
+	client.RemoveHeader("Content-Type")
+	response, err := client.Get(context.Background(), route, nil)
+	client.SetHeader("Content-Type", "application/json")
 
 	if err != nil {
 		return nil, fmt.Errorf("generate-kubeconfig API call failed: %w", err)
@@ -277,16 +600,28 @@ func (s *IdsecSCAK8sService) GenerateKubeconfig(req *k8smodels.IdsecSCAK8sGenera
 		)
 	}
 
+	return s.parseGenerateKubeconfigBody(bodyBytes, csp)
+}
+
+func dpaGenerateKubeconfigCSPSegment(csp string) string {
+	if csp == "azure" {
+		return "azure_resource"
+	}
+	return strings.ToUpper(csp)
+}
+
+// parseGenerateKubeconfigBody normalizes the response body into the shared
+// IdsecSCAK8sGenerateKubeconfigResponse (map[csp]yaml) shape. Accepts a JSON map,
+// a JSON-quoted YAML string, or raw YAML.
+func (s *IdsecSCAK8sService) parseGenerateKubeconfigBody(bodyBytes []byte, csp string) (k8smodels.IdsecSCAK8sGenerateKubeconfigResponse, error) {
 	s.Logger.Debug("generate-kubeconfig raw response length: %d bytes", len(bodyBytes))
 
-	// Try JSON map first (all-CSPs response: {"aws":"...","azure":"...","gcp":"..."}).
 	var mapResult k8smodels.IdsecSCAK8sGenerateKubeconfigResponse
 	if err := json.Unmarshal(bodyBytes, &mapResult); err == nil && len(mapResult) > 0 {
 		s.Logger.Debug("parsed generate-kubeconfig response as JSON map with %d entries", len(mapResult))
 		return mapResult, nil
 	}
 
-	// Try JSON-quoted string (API returns the YAML wrapped in JSON quotes).
 	var stringResult string
 	if err := json.Unmarshal(bodyBytes, &stringResult); err == nil && strings.TrimSpace(stringResult) != "" {
 		s.Logger.Debug("parsed generate-kubeconfig response as JSON string")
@@ -307,6 +642,19 @@ func (s *IdsecSCAK8sService) GenerateKubeconfig(req *k8smodels.IdsecSCAK8sGenera
 		key = "all"
 	}
 	return k8smodels.IdsecSCAK8sGenerateKubeconfigResponse{key: rawBody}, nil
+}
+
+// validateSupportedCSP returns an error if csp is not one of the supported lowercase CSP names.
+func validateSupportedCSP(csp string) error {
+	supported := map[string]struct{}{
+		"aws":   {},
+		"azure": {},
+		"gcp":   {},
+	}
+	if _, ok := supported[csp]; !ok {
+		return fmt.Errorf("unsupported csp '%s'; must be one of: aws, azure, gcp", csp)
+	}
+	return nil
 }
 
 func (s *IdsecSCAK8sService) ServiceConfig() services.IdsecServiceConfig {

@@ -16,7 +16,7 @@ import (
 
 func creteSecretStoreResourceForTest(t *testing.T, ctx *framework.TestContext,
 	name string, desc string, sstype string,
-	data secretstoresmodels.IdsecSecHubCreateSecretStoreData) *secretstoresmodels.IdsecSecHubSecretStore {
+	data secretstoresmodels.IdsecSecHubSecretStoreData) *secretstoresmodels.IdsecSecHubSecretStore {
 	// Get the SecHub SecretStores service
 	secretStoresSvc, err := ctx.API.SechubSecretstores()
 	require.NoError(t, err)

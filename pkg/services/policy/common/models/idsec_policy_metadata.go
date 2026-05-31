@@ -15,7 +15,7 @@ type IdsecPolicyMetadata struct {
 	CreatedBy         IdsecPolicyChangeInfo  `json:"created_by,omitempty" mapstructure:"created_by,omitempty" flag:"created-by" desc:"The user who created the policy and when"`
 	UpdatedOn         IdsecPolicyChangeInfo  `json:"updated_on,omitempty" mapstructure:"updated_on,omitempty" flag:"updated-on" desc:"The user who updated the policy, and when"`
 	PolicyTags        []string               `json:"policy_tags" validate:"max=20" mapstructure:"policy_tags" flag:"policy-tags" desc:"Customized tags to help identify the policy and those similar to it - maximum 20 tags per policy"`
-	TimeZone          string                 `json:"time_zone" validate:"max=50,regexp=^\\w+$" mapstructure:"time_zone" flag:"time-zone" desc:"The time zone identifier - maxLength: 50, Default: GMT" default:"GMT"`
+	TimeZone          string                 `json:"time_zone" validate:"max=50,timezone" mapstructure:"time_zone" flag:"time-zone" desc:"The time zone identifier - maxLength: 50, Default: GMT" default:"GMT"`
 }
 
 // FilterNonePolicyTags filters out `nil` values from the PolicyTags field.

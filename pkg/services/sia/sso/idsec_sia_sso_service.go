@@ -37,6 +37,13 @@ const (
 	DefaultSSHFolderPath = "~/.ssh"
 )
 
+const (
+	sshKeyTokenType         = "ssh_key"
+	sshKeyTokenContentField = "key"
+	sshKeyTokenFormatField  = "format"
+	sshKeyCacheTTL          = 5 * time.Minute
+)
+
 // IdsecSIASSOService is a struct that implements the IdsecService interface and provides functionality for SSO services of SIA.
 type IdsecSIASSOService struct {
 	*services.IdsecBaseService
@@ -478,6 +485,18 @@ func (s *IdsecSIASSOService) ShortLivedRdpFile(getShortLivedRDPFile *ssomodels.I
 }
 
 // ShortLivedSshKey generates a short-lived SSH key for the user to connect to remote servers.
+//
+// The returned string depends on the OutputFormat:
+//
+//   - File (default): the key is written under getSSHKey.Folder with 0600 file
+//     permissions (as required by the OpenSSH client) and the full path is
+//     returned.
+//   - Raw: the key content is returned directly and no file is written.
+//
+// When AllowCaching is true the key is also stored in the SSO keyring cache —
+// using the same mechanism as the other short-lived token types (password,
+// client certificate, oracle wallet, rdp file) — keyed by tenant/user so it
+// can be reused across processes until the cache TTL elapses.
 func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGetSSHKey) (string, error) {
 	s.Logger.Info("Getting short lived ssh sso key")
 	format := getSSHKey.Format
@@ -487,8 +506,43 @@ func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGe
 	if format != ssomodels.OpenSSH && format != ssomodels.PPK {
 		return "", fmt.Errorf("invalid ssh key format [%s], supported formats are: %s, %s", format, ssomodels.OpenSSH, ssomodels.PPK)
 	}
-	queryParams := map[string]string{"format": format}
-	response, err := s.ISPClient().Get(context.Background(), sshSsoKeyURL, queryParams)
+	outputFormat := getSSHKey.OutputFormat
+	if outputFormat == "" {
+		outputFormat = ssomodels.SSHKeyOutputFormatFile
+	}
+	if outputFormat != ssomodels.SSHKeyOutputFormatFile && outputFormat != ssomodels.SSHKeyOutputFormatRaw {
+		return "", fmt.Errorf("invalid ssh key output format [%s], supported formats are: %s, %s", outputFormat, ssomodels.SSHKeyOutputFormatFile, ssomodels.SSHKeyOutputFormatRaw)
+	}
+
+	keyContent, err := s.shortLivedSSHKeyContent(getSSHKey.AllowCaching, format)
+	if err != nil {
+		return "", err
+	}
+
+	if outputFormat == ssomodels.SSHKeyOutputFormatRaw {
+		return keyContent, nil
+	}
+	return s.writeSshKeyFile(getSSHKey.Folder, format, keyContent)
+}
+
+// shortLivedSSHKeyContent resolves the SSH key content, using the keyring cache
+// when allowed and falling back to a fresh fetch from the SSO endpoint.
+//
+// When caching is enabled and the cached entry matches the requested format,
+// the cached key bytes are returned. Otherwise a new key is fetched and (if
+// caching is enabled) persisted to the cache with a server-agnostic short TTL.
+func (s *IdsecSIASSOService) shortLivedSSHKeyContent(allowCaching bool, format string) (string, error) {
+	if allowCaching {
+		cached, err := s.loadFromCache(sshKeyTokenType)
+		if err == nil && cached != nil {
+			if cachedFormat, ok := cached.Token[sshKeyTokenFormatField].(string); ok && cachedFormat == format {
+				if key, ok := cached.Token[sshKeyTokenContentField].(string); ok && key != "" {
+					return key, nil
+				}
+			}
+		}
+	}
+	response, err := s.ISPClient().Get(context.Background(), sshSsoKeyURL, map[string]string{"format": format})
 	if err != nil {
 		return "", err
 	}
@@ -501,7 +555,35 @@ func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGe
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to get short lived ssh sso key - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
-	folderPath := getSSHKey.Folder
+	resp, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	keyContent := string(resp)
+
+	if allowCaching {
+		now := time.Now()
+		cacheResult := &ssomodels.IdsecSIASSOAcquireTokenResponse{
+			Token: map[string]interface{}{
+				sshKeyTokenContentField: keyContent,
+				sshKeyTokenFormatField:  format,
+			},
+			Metadata: map[string]interface{}{
+				"created_at": now.Format(time.RFC3339),
+				"expires_at": now.Add(sshKeyCacheTTL).Format(time.RFC3339),
+			},
+		}
+		if err := s.saveToCache(cacheResult, sshKeyTokenType); err != nil {
+			s.Logger.Warning("Failed to cache short lived ssh key: %v", err)
+		}
+	}
+	return keyContent, nil
+}
+
+// writeSshKeyFile persists the SSH key content to disk under the requested
+// folder, with 0600 permissions so the OpenSSH client will accept it.
+func (s *IdsecSIASSOService) writeSshKeyFile(folder, format, keyContent string) (string, error) {
+	folderPath := folder
 	if folderPath == "" {
 		folderPath = DefaultSSHFolderPath
 	}
@@ -510,8 +592,7 @@ func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGe
 		return "", errors.New("folder parameter is required")
 	}
 	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
-		err := os.MkdirAll(folderPath, os.ModePerm)
-		if err != nil {
+		if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
 			return "", err
 		}
 	}
@@ -526,12 +607,7 @@ func (s *IdsecSIASSOService) ShortLivedSshKey(getSSHKey *ssomodels.IdsecSIASSOGe
 	}
 	baseName := fmt.Sprintf("sia_ssh_key_%s.%s", strings.Split(claims["unique_name"].(string), "@")[0], fileType)
 	fullPath := filepath.Join(folderPath, baseName)
-	resp, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", err
-	}
-	err = os.WriteFile(fullPath, resp, 0644)
-	if err != nil {
+	if err := os.WriteFile(fullPath, []byte(keyContent), 0600); err != nil {
 		return "", err
 	}
 	return fullPath, nil

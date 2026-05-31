@@ -1,3 +1,4 @@
+// Package models provides request and response model types for the SIA settings service.
 package models
 
 // IdsecSIASettingsFeatureName represents the available feature names for SIA settings configuration.
@@ -26,4 +27,5 @@ const (
 	IdsecSIASettingsFeatureNameRDPFileParameters                     = "RDP_FILE_PARAMETERS"
 	IdsecSIASettingsFeatureNameZSPList                               = "ZSP_LIST"
 	IdsecSIASettingsFeatureNameRDPFileSigning                        = "RDP_FILE_SIGNING"
+	IdsecSIASettingsFeatureNameHTTPSRelay                            = "HTTPS_RELAY"
 )

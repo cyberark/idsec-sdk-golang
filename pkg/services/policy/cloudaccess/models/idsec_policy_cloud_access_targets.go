@@ -1,8 +1,6 @@
 package models
 
-import (
-	"errors"
-)
+import "errors"
 
 // CloudAccessAzureWorkspaceType constants represent Azure workspace scopes supported by Cloud Access policies.
 const (
@@ -41,53 +39,13 @@ type IdsecPolicyCloudAccessTarget struct {
 	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The workspace name of the target (read-only)"`
 }
 
-// TODO: Re-enable these fields after deciding whether K8s clusters belong in
-// policy_cloud_access or in a separate K8s policy/resource.
-//
-// // IdsecPolicyCloudAccessK8sTargetFields captures the optional cluster-specific
-// // fields shared by AWS and Azure Cloud Access policy targets.
-// type IdsecPolicyCloudAccessK8sTargetFields struct {
-// 	Scope       string `json:"scope,omitempty" mapstructure:"scope,omitempty" flag:"scope" desc:"K8s target scope, for example cluster"`
-// 	ClusterID   string `json:"cluster_id,omitempty" mapstructure:"cluster_id,omitempty" flag:"cluster-id" desc:"K8s cluster identifier"`
-// 	NamespaceID string `json:"namespace_id,omitempty" mapstructure:"namespace_id,omitempty" flag:"namespace-id" desc:"K8s namespace identifier"`
-// 	FQDN        string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"K8s cluster endpoint"`
-// }
-//
-// func appendK8sTargetFields(result map[string]interface{}, fields IdsecPolicyCloudAccessK8sTargetFields) {
-// 	if fields.Scope != "" {
-// 		result["scope"] = fields.Scope
-// 	}
-// 	if fields.ClusterID != "" {
-// 		result["clusterId"] = fields.ClusterID
-// 	}
-// 	if fields.NamespaceID != "" {
-// 		result["namespaceId"] = fields.NamespaceID
-// 	}
-// 	if fields.FQDN != "" {
-// 		result["fqdn"] = fields.FQDN
-// 	}
-// }
-//
-// func deserializeK8sTargetFields(data map[string]interface{}, fields *IdsecPolicyCloudAccessK8sTargetFields) {
-// 	if scope, ok := data["scope"].(string); ok {
-// 		fields.Scope = scope
-// 	}
-// 	if clusterID, ok := data["cluster_id"].(string); ok {
-// 		fields.ClusterID = clusterID
-// 	}
-// 	if namespaceID, ok := data["namespace_id"].(string); ok {
-// 		fields.NamespaceID = namespaceID
-// 	}
-// 	if fqdn, ok := data["fqdn"].(string); ok {
-// 		fields.FQDN = fqdn
-// 	}
-// }
+// Cloud Console policy targets intentionally exclude K8s cluster fields (scope, clusterId, fqdn).
+// Those belong to the dedicated K8s policy models under pkg/services/policy/k8s.
 
 // IdsecPolicyCloudAccessAWSAccountTarget represents an AWS account target.
 // Fields: role_id (IAM role ARN), workspace_id (AWS account ID); role_name, workspace_name are read-only.
 type IdsecPolicyCloudAccessAWSAccountTarget struct {
 	IdsecPolicyCloudAccessTarget `mapstructure:",squash" desc:"AWS account target with IAM role ARN and account workspace ID"`
-	// IdsecPolicyCloudAccessK8sTargetFields `mapstructure:",squash"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessAWSAccountTarget to a map.
@@ -102,7 +60,6 @@ func (s *IdsecPolicyCloudAccessAWSAccountTarget) Serialize() (map[string]interfa
 	if s.WorkspaceName != "" {
 		result["workspaceName"] = s.WorkspaceName
 	}
-	// appendK8sTargetFields(result, s.IdsecPolicyCloudAccessK8sTargetFields)
 	return result, nil
 }
 
@@ -120,7 +77,6 @@ func (s *IdsecPolicyCloudAccessAWSAccountTarget) Deserialize(data map[string]int
 	if workspaceName, ok := data["workspace_name"].(string); ok {
 		s.WorkspaceName = workspaceName
 	}
-	// deserializeK8sTargetFields(data, &s.IdsecPolicyCloudAccessK8sTargetFields)
 	return nil
 }
 
@@ -167,7 +123,6 @@ type IdsecPolicyCloudAccessAzureTarget struct {
 	OrgID                        string `json:"org_id" validate:"required" mapstructure:"org_id" flag:"org-id" desc:"The Azure directory ID (UUID) - required for Azure targets"`
 	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk (Directory, Subscription, Resource Group, Resource, Management Group)" choices:"directory,subscription,resource_group,resource,management_group"`
 	RoleType                     int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure (read-only)"`
-	// IdsecPolicyCloudAccessK8sTargetFields `mapstructure:",squash"`
 }
 
 // Serialize serializes the IdsecPolicyCloudAccessAzureTarget to a map.
@@ -184,7 +139,6 @@ func (s *IdsecPolicyCloudAccessAzureTarget) Serialize() (map[string]interface{},
 	if s.WorkspaceName != "" {
 		result["workspaceName"] = s.WorkspaceName
 	}
-	// appendK8sTargetFields(result, s.IdsecPolicyCloudAccessK8sTargetFields)
 	return result, nil
 }
 
@@ -211,7 +165,6 @@ func (s *IdsecPolicyCloudAccessAzureTarget) Deserialize(data map[string]interfac
 	if roleType, ok := data["role_type"].(int); ok {
 		s.RoleType = roleType
 	}
-	// deserializeK8sTargetFields(data, &s.IdsecPolicyCloudAccessK8sTargetFields)
 	return nil
 }
 

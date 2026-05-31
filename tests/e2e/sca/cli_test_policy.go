@@ -16,6 +16,8 @@ import (
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
 	groupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess/models"
+	policyk8s "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/k8s"
+	policyk8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/k8s/models"
 	scacloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/models"
 	"github.com/cyberark/idsec-sdk-golang/tests/e2e/framework"
 )
@@ -63,7 +65,7 @@ func sanitizePolicyNameSegment(value string) string {
 	return strings.Trim(b.String(), "_")
 }
 
-func mustPolicyCloudAccessService(t *testing.T, ctx *framework.TestContext) *cloudaccess.IdsecPolicyCloudAccessService {
+func MustPolicyCloudAccessService(t *testing.T, ctx *framework.TestContext) *cloudaccess.IdsecPolicyCloudAccessService {
 	t.Helper()
 
 	policySvc, err := ctx.API.PolicyCloudaccess()
@@ -71,7 +73,7 @@ func mustPolicyCloudAccessService(t *testing.T, ctx *framework.TestContext) *clo
 	return policySvc
 }
 
-func mustPolicyGroupAccessService(t *testing.T, ctx *framework.TestContext) *groupaccess.IdsecPolicyGroupAccessService {
+func MustPolicyGroupAccessService(t *testing.T, ctx *framework.TestContext) *groupaccess.IdsecPolicyGroupAccessService {
 	t.Helper()
 
 	policySvc, err := ctx.API.PolicyGroupaccess()
@@ -79,11 +81,19 @@ func mustPolicyGroupAccessService(t *testing.T, ctx *framework.TestContext) *gro
 	return policySvc
 }
 
-func createCloudAccessPolicy(
+func MustPolicyK8sService(t *testing.T, ctx *framework.TestContext) *policyk8s.IdsecPolicyK8sService {
+	t.Helper()
+
+	policySvc, err := ctx.API.PolicyK8s()
+	require.NoError(t, err)
+	return policySvc
+}
+
+func CreateCloudAccessPolicy(
 	t *testing.T,
 	policySvc *cloudaccess.IdsecPolicyCloudAccessService,
-	cfg cloudAccessListTargetsConfig,
-	principal principalFields,
+	cfg CloudAccessListTargetsConfig,
+	principal PrincipalFields,
 	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
 	policyNamePrefix string,
 ) string {
@@ -93,63 +103,74 @@ func createCloudAccessPolicy(
 	createdPolicy, err := policySvc.CreatePolicy(buildCloudAccessPolicy(cfg, policyName, principal, target))
 	require.NoError(t, err)
 	require.NotNil(t, createdPolicy)
-	require.NotEmpty(t, createdPolicy.Metadata.PolicyID)
+	require.NotEmpty(t, createdPolicy.Metadata.PolicyID, "CreatePolicy should return a policy ID")
 	createdPolicyID := createdPolicy.Metadata.PolicyID
-	t.Logf("Policy created - ID: %s, Name: %s", createdPolicyID, policyName)
+	t.Log("Policy created successfully")
 	return createdPolicyID
 }
 
-func createCloudAccessPaginationPolicies(
+func CreateCloudAccessPaginationPolicies(
 	t *testing.T,
 	policySvc *cloudaccess.IdsecPolicyCloudAccessService,
-	cfg cloudAccessListTargetsConfig,
-	testCtx *k8sTestContext,
-	principal principalFields,
+	cfg CloudAccessListTargetsConfig,
+	testCtx *K8sTestContext,
+	principal PrincipalFields,
 ) []string {
 	t.Helper()
 
 	if len(testCtx.Targets) < 2 {
 		t.Logf("%s has %d configured target(s); using existing live eligible targets for pagination validation",
-			cfg.configBlockKey, len(testCtx.Targets))
+			cfg.ConfigBlockKey, len(testCtx.Targets))
 		return nil
 	}
 
 	createdPolicyIDs := make([]string, 0, 2)
 	for i, targetCfg := range testCtx.Targets[:2] {
 		target := buildCloudAccessEligibleTargetFromConfig(targetCfg)
-		policyID := createCloudAccessPolicy(
+		policyID := CreateCloudAccessPolicy(
 			t,
 			policySvc,
 			cfg,
 			principal,
 			target,
-			fmt.Sprintf("%s_%d", cfg.paginationPolicyNamePrefix, i+1),
+			fmt.Sprintf("%s_%d", cfg.PaginationPolicyNamePrefix, i+1),
 		)
 		createdPolicyIDs = append(createdPolicyIDs, policyID)
 	}
 	return createdPolicyIDs
 }
 
-func getCloudAccessPolicy(
+func GetCloudAccessPolicy(
 	t *testing.T,
 	policySvc *cloudaccess.IdsecPolicyCloudAccessService,
 	policyID string,
 ) *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy {
 	t.Helper()
 
-	fetchedPolicy, err := policySvc.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
-		PolicyID: policyID,
+	var fetchedPolicy *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy
+	waitTillPolicyActive(t, policyID, func() (string, error) {
+		var getErr error
+		fetchedPolicy, getErr = policySvc.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
+			PolicyID: policyID,
+		})
+		if getErr != nil {
+			return "", getErr
+		}
+		if fetchedPolicy == nil {
+			return "", fmt.Errorf("GetPolicy returned nil response")
+		}
+		return fetchedPolicy.Metadata.Status.Status, nil
 	})
-	require.NoError(t, err)
+
 	require.NotNil(t, fetchedPolicy)
 	requireFetchedPolicyActive(t, policyID, fetchedPolicy.Metadata)
 	return fetchedPolicy
 }
 
-func createGroupAccessPolicy(
+func CreateGroupAccessPolicy(
 	t *testing.T,
 	policySvc *groupaccess.IdsecPolicyGroupAccessService,
-	principal principalFields,
+	principal PrincipalFields,
 	target groupaccessmodels.IdsecPolicyGroupAccessTargetItem,
 	policyNamePrefix string,
 ) string {
@@ -166,17 +187,17 @@ func createGroupAccessPolicy(
 	))
 	require.NoError(t, err)
 	require.NotNil(t, createdPolicy)
-	require.NotEmpty(t, createdPolicy.Metadata.PolicyID)
+	require.NotEmpty(t, createdPolicy.Metadata.PolicyID, "CreatePolicy should return a policy ID")
 	createdPolicyID := createdPolicy.Metadata.PolicyID
-	t.Logf("Policy created - ID: %s, Name: %s", createdPolicyID, policyName)
+	t.Log("Policy created successfully")
 	return createdPolicyID
 }
 
-func createGroupAccessPaginationPolicies(
+func CreateGroupAccessPaginationPolicies(
 	t *testing.T,
 	policySvc *groupaccess.IdsecPolicyGroupAccessService,
-	testCtx *k8sTestContext,
-	principal principalFields,
+	testCtx *K8sTestContext,
+	principal PrincipalFields,
 ) []string {
 	t.Helper()
 
@@ -189,7 +210,7 @@ func createGroupAccessPaginationPolicies(
 	createdPolicyIDs := make([]string, 0, 2)
 	for i, targetCfg := range testCtx.Targets[:2] {
 		target := buildGroupAccessTargetFromConfig(targetCfg)
-		policyID := createGroupAccessPolicy(
+		policyID := CreateGroupAccessPolicy(
 			t,
 			policySvc,
 			principal,
@@ -201,11 +222,126 @@ func createGroupAccessPaginationPolicies(
 	return createdPolicyIDs
 }
 
-func getGroupAccessPolicy(
+func GetGroupAccessPolicy(
 	t *testing.T,
 	policySvc *groupaccess.IdsecPolicyGroupAccessService,
 	policyID string,
 ) *groupaccessmodels.IdsecPolicyGroupAccessPolicy {
+	t.Helper()
+
+	var fetchedPolicy *groupaccessmodels.IdsecPolicyGroupAccessPolicy
+	waitTillPolicyActive(t, policyID, func() (string, error) {
+		var getErr error
+		fetchedPolicy, getErr = policySvc.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
+			PolicyID: policyID,
+		})
+		if getErr != nil {
+			return "", getErr
+		}
+		if fetchedPolicy == nil {
+			return "", fmt.Errorf("GetPolicy returned nil response")
+		}
+		return fetchedPolicy.Metadata.Status.Status, nil
+	})
+
+	require.NotNil(t, fetchedPolicy)
+	requireFetchedPolicyActive(t, policyID, fetchedPolicy.Metadata)
+	return fetchedPolicy
+}
+
+func CreateK8sPolicy(
+	t *testing.T,
+	policySvc *policyk8s.IdsecPolicyK8sService,
+	cfg K8sListTargetsConfig,
+	principal PrincipalFields,
+	target K8sTargetConfig,
+	policyNamePrefix string,
+) string {
+	t.Helper()
+
+	policyName := buildPolicyName(policyNamePrefix, principal.Name)
+	createdPolicy, err := policySvc.CreatePolicy(buildK8sClusterPolicy(cfg, policyName, principal, target))
+	require.NoError(t, err)
+	require.NotNil(t, createdPolicy)
+	require.NotEmpty(t, createdPolicy.Metadata.PolicyID, "CreatePolicy should return a policy ID")
+	createdPolicyID := createdPolicy.Metadata.PolicyID
+	t.Log("Policy created successfully")
+	return createdPolicyID
+}
+
+func CreateK8sPaginationPolicies(
+	t *testing.T,
+	policySvc *policyk8s.IdsecPolicyK8sService,
+	cfg K8sListTargetsConfig,
+	testCtx *K8sTestContext,
+	principal PrincipalFields,
+) []string {
+	t.Helper()
+
+	if len(testCtx.Targets) < 2 {
+		t.Logf("%s has %d configured target(s); using existing live eligible clusters for pagination validation",
+			cfg.ConfigBlockKey, len(testCtx.Targets))
+		return nil
+	}
+
+	createdPolicyIDs := make([]string, 0, 2)
+	for i, targetCfg := range testCtx.Targets[:2] {
+		target := cfg.BuildTarget(targetCfg)
+		policyID := CreateK8sPolicy(
+			t,
+			policySvc,
+			cfg,
+			principal,
+			target,
+			fmt.Sprintf("%s_%d", cfg.PaginationPolicyNamePrefix, i+1),
+		)
+		createdPolicyIDs = append(createdPolicyIDs, policyID)
+	}
+	return createdPolicyIDs
+}
+
+func buildCloudAccessPolicy(
+	cfg CloudAccessListTargetsConfig,
+	policyName string,
+	principal PrincipalFields,
+	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
+) *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy {
+	return buildCloudAccessPolicyFromBodyTemplate(
+		cfg.CSP,
+		policyName,
+		principal.ID,
+		principal.Name,
+		principal.SourceDirName,
+		principal.SourceDirID,
+		target,
+	)
+}
+
+func buildK8sClusterPolicy(
+	cfg K8sListTargetsConfig,
+	policyName string,
+	principal PrincipalFields,
+	target K8sTargetConfig,
+) *policyk8smodels.IdsecPolicyK8sPolicy {
+	return buildK8sClusterPolicyFromBodyTemplate(
+		cfg.CSP,
+		policyName,
+		principal.ID,
+		principal.Name,
+		principal.SourceDirName,
+		principal.SourceDirID,
+		target.PolicyTarget,
+		target.Scope,
+		target.ClusterID,
+		target.FQDN,
+	)
+}
+
+func GetK8sPolicy(
+	t *testing.T,
+	policySvc *policyk8s.IdsecPolicyK8sService,
+	policyID string,
+) *policyk8smodels.IdsecPolicyK8sPolicy {
 	t.Helper()
 
 	fetchedPolicy, err := policySvc.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
@@ -217,96 +353,10 @@ func getGroupAccessPolicy(
 	return fetchedPolicy
 }
 
-func createK8sPolicy(
+func ValidateAzureK8sFetchedPolicy(
 	t *testing.T,
-	policySvc *cloudaccess.IdsecPolicyCloudAccessService,
-	cfg k8sListTargetsConfig,
-	principal principalFields,
-	target k8sTargetConfig,
-	policyNamePrefix string,
-) string {
-	t.Helper()
-
-	policyName := buildPolicyName(policyNamePrefix, principal.Name)
-	createdPolicy, err := policySvc.CreatePolicy(buildK8sClusterPolicy(cfg, policyName, principal, target))
-	require.NoError(t, err)
-	require.NotNil(t, createdPolicy)
-	require.NotEmpty(t, createdPolicy.Metadata.PolicyID)
-	createdPolicyID := createdPolicy.Metadata.PolicyID
-	t.Logf("Policy created - ID: %s, Name: %s", createdPolicyID, policyName)
-	return createdPolicyID
-}
-
-func createK8sPaginationPolicies(
-	t *testing.T,
-	policySvc *cloudaccess.IdsecPolicyCloudAccessService,
-	cfg k8sListTargetsConfig,
-	testCtx *k8sTestContext,
-	principal principalFields,
-) []string {
-	t.Helper()
-
-	if len(testCtx.Targets) < 2 {
-		t.Logf("%s has %d configured target(s); using existing live eligible clusters for pagination validation",
-			cfg.configBlockKey, len(testCtx.Targets))
-		return nil
-	}
-
-	createdPolicyIDs := make([]string, 0, 2)
-	for i, targetCfg := range testCtx.Targets[:2] {
-		target := cfg.buildTarget(targetCfg)
-		policyID := createK8sPolicy(
-			t,
-			policySvc,
-			cfg,
-			principal,
-			target,
-			fmt.Sprintf("%s_%d", cfg.paginationPolicyNamePrefix, i+1),
-		)
-		createdPolicyIDs = append(createdPolicyIDs, policyID)
-	}
-	return createdPolicyIDs
-}
-
-func buildCloudAccessPolicy(
-	cfg cloudAccessListTargetsConfig,
-	policyName string,
-	principal principalFields,
-	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
-) *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy {
-	return buildCloudAccessPolicyFromBodyTemplate(
-		cfg.csp,
-		policyName,
-		principal.ID,
-		principal.Name,
-		principal.SourceDirName,
-		principal.SourceDirID,
-		target,
-	)
-}
-
-func buildK8sClusterPolicy(
-	cfg k8sListTargetsConfig,
-	policyName string,
-	principal principalFields,
-	target k8sTargetConfig,
-) *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy {
-	return buildCloudAccessPolicyFromBodyTemplate(
-		cfg.csp,
-		policyName,
-		principal.ID,
-		principal.Name,
-		principal.SourceDirName,
-		principal.SourceDirID,
-		target.PolicyTarget,
-		withK8sClusterCloudAccessBuild(cfg.csp, target.PolicyTarget, target.Scope, target.ClusterID, target.FQDN),
-	)
-}
-
-func validateAzureK8sFetchedPolicy(
-	t *testing.T,
-	fetchedPolicy *policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy,
-	target k8sTargetConfig,
+	fetchedPolicy *policyk8smodels.IdsecPolicyK8sPolicy,
+	target K8sTargetConfig,
 ) {
 	t.Helper()
 
@@ -323,6 +373,9 @@ func validateAzureK8sFetchedPolicy(
 	require.Equal(t, target.PolicyTarget.OrganizationID, strings.TrimSpace(fetchedTarget.OrgID), "GetPolicy: org ID mismatch")
 	require.Equal(t, normalizeAzureWorkspaceType(target.PolicyTarget.WorkspaceType), strings.TrimSpace(fetchedTarget.WorkspaceType),
 		"GetPolicy: workspace type mismatch")
+	require.Equal(t, target.Scope, strings.TrimSpace(fetchedTarget.Scope), "GetPolicy: scope mismatch")
+	require.Equal(t, target.ClusterID, strings.TrimSpace(fetchedTarget.ClusterID), "GetPolicy: cluster ID mismatch")
+	require.Equal(t, target.FQDN, strings.TrimSpace(fetchedTarget.FQDN), "GetPolicy: fqdn mismatch")
 	t.Log("Policy validated via GetPolicy")
 }
 
@@ -338,7 +391,28 @@ func requireFetchedPolicyActive(
 	t.Log("Policy validated via GetPolicy")
 }
 
-func deletePolicyBestEffort(t *testing.T, policyID string, deleteFn func(*policycommonmodels.IdsecPolicyDeletePolicyRequest) error) {
+func waitTillPolicyActive(t *testing.T, policyID string, getStatus func() (string, error)) {
+	t.Helper()
+
+	lastStatus := ""
+	err := framework.WaitForCondition(90*time.Second, 5*time.Second, func() (bool, error) {
+		status, err := getStatus()
+		if err != nil {
+			t.Logf("Policy %s lookup failed while waiting for Active: %v", policyID, err)
+			return false, nil
+		}
+
+		lastStatus = strings.TrimSpace(status)
+		if lastStatus != "Active" {
+			t.Logf("Policy %s is not active yet (status=%q); waiting", policyID, lastStatus)
+			return false, nil
+		}
+		return true, nil
+	})
+	require.NoError(t, err, "policy %s did not become Active; last status=%q", policyID, lastStatus)
+}
+
+func DeletePolicyBestEffort(t *testing.T, policyID string, deleteFn func(*policycommonmodels.IdsecPolicyDeletePolicyRequest) error) {
 	t.Helper()
 
 	err := deleteFn(&policycommonmodels.IdsecPolicyDeletePolicyRequest{
@@ -347,7 +421,7 @@ func deletePolicyBestEffort(t *testing.T, policyID string, deleteFn func(*policy
 	if err != nil {
 		t.Logf("WARNING: policy delete failed (non-fatal): %v", err)
 	} else {
-		t.Logf("Policy deleted — ID: %s", policyID)
+		t.Log("Policy deleted successfully")
 	}
 }
 
@@ -508,66 +582,112 @@ func buildCloudAccessPolicyFromBodyTemplate(
 			},
 			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
 		},
-		Conditions: config.conditions,
-		Targets:    config.targets,
+		Conditions: policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
+			IdsecPolicyConditions: config.conditions,
+		},
+		Targets: config.targets,
 	}
 }
 
-func withK8sClusterCloudAccessBuild(
-	csp string,
+// buildK8sClusterPolicyFromBodyTemplate builds a policy-k8s payload (not a Cloud Console / cloudaccess policy).
+func buildK8sClusterPolicyFromBodyTemplate(
+	CSP string,
+	policyName string,
+	policyPrincipalID string,
+	policyPrincipalName string,
+	sourceDirectoryName string,
+	sourceDirectoryID string,
 	target *scacloudaccessmodels.IdsecSCAEligibleTarget,
 	scope string,
 	clusterID string,
 	fqdn string,
-) cloudAccessPolicyBuildOption {
-	return func(config *cloudAccessPolicyBuildConfig) {
-		config.policyTags = []string{}
-
-		if strings.EqualFold(strings.TrimSpace(csp), "AZURE") {
-			config.conditions = policycommonmodels.IdsecPolicyConditions{
-				AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-					DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
-					FromHour:      "",
-					ToHour:        "",
+) *policyk8smodels.IdsecPolicyK8sPolicy {
+	locationType := "AWS"
+	conditions := policycommonmodels.IdsecPolicyConditions{
+		AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
+			DaysOfTheWeek: []int{1, 2, 3, 4, 5, 6, 0},
+			FromHour:      "",
+			ToHour:        "",
+		},
+		MaxSessionDuration: 2,
+	}
+	targets := policyk8smodels.IdsecPolicyK8sTargets{
+		AwsAccountTargets: []policyk8smodels.IdsecPolicyK8sAWSAccountTarget{
+			{
+				IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+					RoleID:        target.RoleInfo.ID,
+					WorkspaceID:   target.WorkspaceID,
+					RoleName:      target.RoleInfo.Name,
+					WorkspaceName: target.WorkspaceName,
+					Scope:         scope,
+					ClusterID:     clusterID,
+					FQDN:          fqdn,
 				},
-				MaxSessionDuration: 1,
-			}
-			config.targets = policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
-				AzureTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAzureTarget{
-					{
-						IdsecPolicyCloudAccessTarget: policycloudaccessmodels.IdsecPolicyCloudAccessTarget{
-							RoleID:        target.RoleInfo.ID,
-							WorkspaceID:   target.WorkspaceID,
-							RoleName:      target.RoleInfo.Name,
-							WorkspaceName: target.WorkspaceName,
-						},
-						OrgID:         target.OrganizationID,
-						WorkspaceType: normalizeAzureWorkspaceType(target.WorkspaceType),
-					},
-				},
-			}
-			return
-		}
+			},
+		},
+	}
 
-		config.conditions = policycommonmodels.IdsecPolicyConditions{
+	if strings.EqualFold(strings.TrimSpace(CSP), "AZURE") {
+		locationType = "Azure"
+		conditions = policycommonmodels.IdsecPolicyConditions{
 			AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-				DaysOfTheWeek: []int{1, 2, 3, 4, 5, 6, 0},
+				DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
 				FromHour:      "",
 				ToHour:        "",
 			},
-			MaxSessionDuration: 2,
+			MaxSessionDuration: 1,
 		}
-		config.targets = policycloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleTarget{
-			AwsAccountTargets: []policycloudaccessmodels.IdsecPolicyCloudAccessAWSAccountTarget{
+		targets = policyk8smodels.IdsecPolicyK8sTargets{
+			AzureTargets: []policyk8smodels.IdsecPolicyK8sAzureTarget{
 				{
-					IdsecPolicyCloudAccessTarget: policycloudaccessmodels.IdsecPolicyCloudAccessTarget{
+					IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
 						RoleID:        target.RoleInfo.ID,
 						WorkspaceID:   target.WorkspaceID,
 						RoleName:      target.RoleInfo.Name,
 						WorkspaceName: target.WorkspaceName,
+						Scope:         scope,
+						ClusterID:     clusterID,
+						FQDN:          fqdn,
 					},
+					OrgID:         target.OrganizationID,
+					WorkspaceType: normalizeAzureWorkspaceType(target.WorkspaceType),
 				},
 			},
 		}
+	}
+
+	return &policyk8smodels.IdsecPolicyK8sPolicy{
+		IdsecPolicyCommonAccessPolicy: policycommonmodels.IdsecPolicyCommonAccessPolicy{
+			Metadata: policycommonmodels.IdsecPolicyMetadata{
+				Name:        policyName,
+				Description: "",
+				Status: policycommonmodels.IdsecPolicyStatus{
+					Status: policycommonmodels.StatusTypeValidating,
+				},
+				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{
+					FromTime: "",
+					ToTime:   "",
+				},
+				PolicyEntitlement: policycommonmodels.IdsecPolicyEntitlement{
+					TargetCategory: commonmodels.CategoryTypeClusters,
+					LocationType:   locationType,
+					PolicyType:     policycommonmodels.PolicyTypeRecurring,
+				},
+				PolicyTags: []string{},
+				TimeZone:   "Asia/Calcutta",
+			},
+			Principals: []policycommonmodels.IdsecPolicyPrincipal{
+				{
+					ID:                  policyPrincipalID,
+					Name:                policyPrincipalName,
+					SourceDirectoryName: sourceDirectoryName,
+					SourceDirectoryID:   sourceDirectoryID,
+					Type:                policycommonmodels.PrincipalTypeUser,
+				},
+			},
+			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
+		},
+		Conditions: conditions,
+		Targets:    targets,
 	}
 }

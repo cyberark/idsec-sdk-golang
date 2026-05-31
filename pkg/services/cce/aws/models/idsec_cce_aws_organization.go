@@ -34,9 +34,9 @@ type TfIdsecCCEAWSOrganization struct {
 // ⚠️  It exists only for compatibility with Terraform provider.
 // OPENAPI-CORRELATION: AwsProgrammaticCreateOrganizationInput
 type TfIdsecCCEAWSAddOrganization struct {
-	OrganizationRootID         string                            `json:"organizationRootId" mapstructure:"organization_root_id" validate:"required,pattern=^r-[0-9a-z]{4,32}$"`
+	OrganizationRootID         string                            `json:"organizationRootId" mapstructure:"organization_root_id" validate:"required,min=6,max=34,regexp=^r-[0-9a-z]+$"`
 	ManagementAccountID        string                            `json:"managementAccountId" mapstructure:"management_account_id" validate:"required,pattern=^\\d{12}$"`
-	OrganizationID             string                            `json:"organizationId" mapstructure:"organization_id" validate:"required,pattern=^o-[a-z0-9]{10,32}$"`
+	OrganizationID             string                            `json:"organizationId" mapstructure:"organization_id" validate:"required,min=12,max=34,regexp=^o-[a-z0-9]+$"`
 	Services                   []ccemodels.IdsecCCEServiceInput  `json:"services" mapstructure:"services" validate:"required"`
 	ServiceParameters          map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
 	OrganizationDisplayName    string                            `json:"organizationDisplayName,omitempty" mapstructure:"organization_display_name,omitempty"`

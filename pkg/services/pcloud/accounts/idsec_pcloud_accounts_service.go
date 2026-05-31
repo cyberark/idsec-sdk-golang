@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -326,11 +327,22 @@ func (s *IdsecPCloudAccountsService) ChangeCredentials(changeAccountCredentials 
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/SetNextPassword.htm
 func (s *IdsecPCloudAccountsService) SetNextCredentials(setAccountNextCredentials *accountsmodels.IdsecPCloudSetAccountNextCredentials) error {
 	s.Logger.Info("Setting account next credentials [%s]", setAccountNextCredentials.AccountID)
+	if setAccountNextCredentials.NewCredentialsFile != "" && setAccountNextCredentials.NewCredentials == "" {
+		secret, err := os.ReadFile(setAccountNextCredentials.NewCredentialsFile)
+		if err != nil {
+			return err
+		}
+		setAccountNextCredentials.NewCredentials = string(secret)
+	}
+	if setAccountNextCredentials.NewCredentials == "" {
+		return fmt.Errorf("new credentials are required")
+	}
 	setAccountNextCredentialsJSON, err := common.SerializeJSONCamel(setAccountNextCredentials)
 	if err != nil {
 		return err
 	}
 	delete(setAccountNextCredentialsJSON, "accountId")
+	delete(setAccountNextCredentialsJSON, "newCredentialsFile")
 	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(setAccountNextCredentialsURL, setAccountNextCredentials.AccountID), setAccountNextCredentialsJSON)
 	if err != nil {
 		return err
@@ -351,11 +363,22 @@ func (s *IdsecPCloudAccountsService) SetNextCredentials(setAccountNextCredential
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/ChangeCredentialsInVault.htm
 func (s *IdsecPCloudAccountsService) UpdateCredentialsInVault(updateAccountCredentialsInVault *accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault) error {
 	s.Logger.Info("Updating account credentials in vault [%s]", updateAccountCredentialsInVault.AccountID)
+	if updateAccountCredentialsInVault.NewCredentialsFile != "" && updateAccountCredentialsInVault.NewCredentials == "" {
+		secret, err := os.ReadFile(updateAccountCredentialsInVault.NewCredentialsFile)
+		if err != nil {
+			return err
+		}
+		updateAccountCredentialsInVault.NewCredentials = string(secret)
+	}
+	if updateAccountCredentialsInVault.NewCredentials == "" {
+		return fmt.Errorf("new credentials are required")
+	}
 	updateAccountCredentialsInVaultJSON, err := common.SerializeJSONCamel(updateAccountCredentialsInVault)
 	if err != nil {
 		return err
 	}
 	delete(updateAccountCredentialsInVaultJSON, "accountId")
+	delete(updateAccountCredentialsInVaultJSON, "newCredentialsFile")
 	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(updateAccountCredentialsInVaultURL, updateAccountCredentialsInVault.AccountID), updateAccountCredentialsInVaultJSON)
 	if err != nil {
 		return err
@@ -526,6 +549,13 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 			addAccount.Name = fmt.Sprintf("%s_%s", addAccount.Name, addAccount.Username)
 		}
 	}
+	if addAccount.SecretFile != "" && addAccount.Secret == "" {
+		secret, err := os.ReadFile(addAccount.SecretFile)
+		if err != nil {
+			return nil, err
+		}
+		addAccount.Secret = string(secret)
+	}
 	s.Logger.Info("Adding account [%s]", addAccount.Name)
 	addAccountJSON, err := common.SerializeJSONCamel(addAccount)
 	if err != nil {
@@ -601,11 +631,19 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/UpdateAccount%20v10.htm
 func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) (*accountsmodels.IdsecPCloudAccount, error) {
 	s.Logger.Info("Updating account [%s]", updateAccount.AccountID)
+	if updateAccount.SecretFile != "" && updateAccount.Secret == "" {
+		secret, err := os.ReadFile(updateAccount.SecretFile)
+		if err != nil {
+			return nil, err
+		}
+		updateAccount.Secret = string(secret)
+	}
 	updateAccountJSON, err := common.SerializeJSONCamel(updateAccount)
 	if err != nil {
 		return nil, err
 	}
 	delete(updateAccountJSON, "secret")
+	delete(updateAccountJSON, "secretFile")
 	delete(updateAccountJSON, "accountId")
 	delete(updateAccountJSON, "automaticManagementEnabled")
 	delete(updateAccountJSON, "manualManagementReason")
@@ -631,6 +669,9 @@ func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecP
 	}
 	var operations []map[string]interface{}
 	for key, val := range updateAccountJSON {
+		if key == "secretFile" {
+			continue
+		}
 		operation := map[string]interface{}{
 			"op":    "replace",
 			"path":  fmt.Sprintf("/%s", key),

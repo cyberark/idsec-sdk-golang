@@ -1,3 +1,4 @@
+// Package models provides request and response model types for the SIA settings service.
 package models
 
 // IdsecSIASettingsSetSettings represents the configuration for setting various SIA settings.
@@ -27,4 +28,5 @@ type IdsecSIASettingsSetSettings struct {
 	RdpFileParameters                     *IdsecSIASettingsRdpFileParameters                     `json:"rdp_file_parameters,omitempty" mapstructure:"rdp_file_parameters,omitempty" flag:"rdp-file-parameters" desc:"The settings for RDP file parameters."`
 	ZspList                               *IdsecSIASettingsZspList                               `json:"zsp_list,omitempty" mapstructure:"zsp_list,omitempty" flag:"zsp-list" desc:"The settings for ZSP List."`
 	RdpFileSigning                        *IdsecSIASettingsRdpFileSigning                        `json:"rdp_file_signing,omitempty" mapstructure:"rdp_file_signing,omitempty" flag:"rdp-file-signing" desc:"The settings for RDP file signing."`
+	HTTPSRelay                            *IdsecSIASettingsHTTPSRelay                            `json:"https_relay,omitempty" mapstructure:"https_relay,omitempty" flag:"https-relay" desc:"The settings for HTTPS Relay."`
 }

@@ -510,15 +510,15 @@ func (s *IdsecSIAAccessService) UninstallConnector(uninstallConnector *accessmod
 		uninstallConnector.RetryDelay,
 		uninstallConnector.WinRMProtocol,
 	)
-	if err != nil {
-		return err
+	if uninstallConnector.ForceDelete || err == nil {
+		return s.DeleteConnector(&accessmodels.IdsecSIADeleteConnector{
+			ConnectorID: uninstallConnector.ConnectorID,
+			ForceDelete: uninstallConnector.ForceDelete,
+			RetryCount:  uninstallConnector.RetryCount,
+			RetryDelay:  uninstallConnector.RetryDelay,
+		})
 	}
-	return s.DeleteConnector(&accessmodels.IdsecSIADeleteConnector{
-		ConnectorID: uninstallConnector.ConnectorID,
-		ForceDelete: uninstallConnector.ForceDelete,
-		RetryCount:  uninstallConnector.RetryCount,
-		RetryDelay:  uninstallConnector.RetryDelay,
-	})
+	return err
 }
 
 // DeleteConnector deletes the connector from the target machine.
@@ -644,7 +644,7 @@ func (s *IdsecSIAAccessService) UpdateConnectorMaintenanceMode(maintenanceConnec
 //	}
 //	for page := range pages {
 //	    for _, relay := range page.Items {
-//	        fmt.Printf("Relay: %s\n", relay.ID)
+//	        fmt.Printf("Relay: %s\n", relay.HTTPSRelayID)
 //	    }
 //	}
 func (s *IdsecSIAAccessService) ListRelays() (<-chan *IdsecSIAHTTPSRelayPage, error) {
@@ -675,6 +675,23 @@ func (s *IdsecSIAAccessService) ListRelays() (<-chan *IdsecSIAHTTPSRelayPage, er
 				return
 			}
 
+			// The /api/https-relays endpoint returns each relay's identifier under the
+			// key "id" (snake-cased identically). The SDK exposes it as "https_relay_id"
+			// to stay consistent with the other relay-related models and CLI flags, so
+			// rename the key on each item before decoding into the typed page.
+			if resultMap, ok := result.(map[string]interface{}); ok {
+				if items, ok := resultMap["items"].([]interface{}); ok {
+					for _, item := range items {
+						if itemMap, ok := item.(map[string]interface{}); ok {
+							if id, ok := itemMap["id"]; ok {
+								itemMap["https_relay_id"] = id
+								delete(itemMap, "id")
+							}
+						}
+					}
+				}
+			}
+
 			var page IdsecSIAHTTPSRelayPage
 			if err = mapstructure.Decode(result, &page); err != nil {
 				s.Logger.Error("Failed to decode HTTPS relay items: %v", err)
@@ -697,37 +714,37 @@ func (s *IdsecSIAAccessService) ListRelays() (<-chan *IdsecSIAHTTPSRelayPage, er
 
 // GetRelay retrieves a specific HTTPS relay by its ID by scanning the full list.
 func (s *IdsecSIAAccessService) GetRelay(getRelay *accessmodels.IdsecSIAGetHTTPSRelay) (*accessmodels.IdsecSIAHTTPSRelay, error) {
-	if getRelay.ID == "" {
+	if getRelay.HTTPSRelayID == "" {
 		return nil, fmt.Errorf("HTTPS relay ID is required")
 	}
-	s.Logger.Info("Retrieving HTTPS relay [%s]", getRelay.ID)
+	s.Logger.Info("Retrieving HTTPS relay [%s]", getRelay.HTTPSRelayID)
 	pages, err := s.ListRelays()
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve HTTPS relay: %w", err)
 	}
 	for page := range pages {
 		for _, relay := range page.Items {
-			if relay.ID == getRelay.ID {
+			if relay.HTTPSRelayID == getRelay.HTTPSRelayID {
 				return relay, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("HTTPS relay [%s] not found", getRelay.ID)
+	return nil, fmt.Errorf("HTTPS relay [%s] not found", getRelay.HTTPSRelayID)
 }
 
 // DeleteRelay deletes an existing HTTPS relay.
 func (s *IdsecSIAAccessService) DeleteRelay(deleteRelay *accessmodels.IdsecSIADeleteHTTPSRelay) error {
-	if deleteRelay.ID == "" {
+	if deleteRelay.HTTPSRelayID == "" {
 		return fmt.Errorf("HTTPS relay ID is required")
 	}
-	s.Logger.Info("Deleting HTTPS relay [%s]", deleteRelay.ID)
+	s.Logger.Info("Deleting HTTPS relay [%s]", deleteRelay.HTTPSRelayID)
 	var queryParams map[string]string
 	if deleteRelay.ForceDelete {
 		queryParams = map[string]string{"force_delete": "true"}
 	}
 	currentTryCount := 0
 	for {
-		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(httpsRelayURL, deleteRelay.ID), nil, queryParams)
+		response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(httpsRelayURL, deleteRelay.HTTPSRelayID), nil, queryParams)
 		if err != nil {
 			return err
 		}
@@ -749,11 +766,11 @@ func (s *IdsecSIAAccessService) DeleteRelay(deleteRelay *accessmodels.IdsecSIADe
 
 // UpgradeRelay initiates an upgrade process for an existing HTTPS relay.
 func (s *IdsecSIAAccessService) UpgradeRelay(upgradeRelay *accessmodels.IdsecSIAUpgradeHTTPSRelay) error {
-	if upgradeRelay.ID == "" {
+	if upgradeRelay.HTTPSRelayID == "" {
 		return fmt.Errorf("HTTPS relay ID is required")
 	}
-	s.Logger.Info("Upgrading HTTPS relay [%s]", upgradeRelay.ID)
-	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(httpsRelayUpgradeURL, upgradeRelay.ID), nil)
+	s.Logger.Info("Upgrading HTTPS relay [%s]", upgradeRelay.HTTPSRelayID)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(httpsRelayUpgradeURL, upgradeRelay.HTTPSRelayID), nil)
 	if err != nil {
 		return err
 	}
@@ -972,7 +989,7 @@ func (s *IdsecSIAAccessService) uninstallRelayOnMachine(
 func (s *IdsecSIAAccessService) UninstallRelay(uninstallRelay *accessmodels.IdsecSIAUninstallRelay) error {
 	s.Logger.Info(
 		"Uninstalling HTTPS relay [%s] from machine",
-		uninstallRelay.ID,
+		uninstallRelay.HTTPSRelayID,
 	)
 	err := s.uninstallRelayOnMachine(
 		uninstallRelay.HTTPSRelayOS,
@@ -985,15 +1002,15 @@ func (s *IdsecSIAAccessService) UninstallRelay(uninstallRelay *accessmodels.Idse
 		uninstallRelay.RetryDelay,
 		uninstallRelay.WinRMProtocol,
 	)
-	if err != nil {
-		return err
+	if uninstallRelay.ForceDelete || err == nil {
+		return s.DeleteRelay(&accessmodels.IdsecSIADeleteHTTPSRelay{
+			HTTPSRelayID: uninstallRelay.HTTPSRelayID,
+			ForceDelete:  uninstallRelay.ForceDelete,
+			RetryCount:   uninstallRelay.RetryCount,
+			RetryDelay:   uninstallRelay.RetryDelay,
+		})
 	}
-	return s.DeleteRelay(&accessmodels.IdsecSIADeleteHTTPSRelay{
-		ID:          uninstallRelay.ID,
-		ForceDelete: uninstallRelay.ForceDelete,
-		RetryCount:  uninstallRelay.RetryCount,
-		RetryDelay:  uninstallRelay.RetryDelay,
-	})
+	return err
 }
 
 // InstallRelay installs an HTTPS relay on the target machine.
@@ -1029,7 +1046,7 @@ func (s *IdsecSIAAccessService) InstallRelay(installRelay *accessmodels.IdsecSIA
 	if err != nil {
 		return nil, err
 	}
-	return s.GetRelay(&accessmodels.IdsecSIAGetHTTPSRelay{ID: relayID})
+	return s.GetRelay(&accessmodels.IdsecSIAGetHTTPSRelay{HTTPSRelayID: relayID})
 }
 
 // ServiceConfig returns the service configuration for the IdsecSIAAccessService.

@@ -35,6 +35,21 @@ func (a *IdsecServiceBaseActionDefinition) IsEnabled() bool {
 	return a.Enabled == nil || *a.Enabled
 }
 
+// Deprecation describes why an action is deprecated and what users should use instead.
+//
+// Deprecation is consumed by every Idsec surface that builds itself from a
+// service action definition (CLI, Terraform provider, generated docs, etc.),
+// so the same metadata produces consistent warnings and help/markdown output.
+type Deprecation struct {
+	Message     string `mapstructure:"message,omitempty" json:"message,omitempty" desc:"Human readable explanation of why the action is deprecated"`
+	Replacement string `mapstructure:"replacement,omitempty" json:"replacement,omitempty" desc:"Action or path users should migrate to"`
+}
+
+// IsZero reports whether the deprecation has no user-facing content.
+func (d *Deprecation) IsZero() bool {
+	return d == nil || (d.Message == "" && d.Replacement == "")
+}
+
 // IdsecServiceCLIActionDefinition is a struct that defines the structure of an action in the Idsec CLI.
 type IdsecServiceCLIActionDefinition struct {
 	IdsecServiceBaseActionDefinition `mapstructure:",squash"`
@@ -42,6 +57,7 @@ type IdsecServiceCLIActionDefinition struct {
 	Defaults                         map[string]map[string]interface{}  `mapstructure:"defaults,omitempty" json:"defaults,omitempty" desc:"Defaults for the action schemas parameters"`
 	AsyncActions                     []string                           `mapstructure:"async_actions,omitempty" json:"async_actions,omitempty" desc:"List of async actions as part of the schemas"`
 	Subactions                       []*IdsecServiceCLIActionDefinition `mapstructure:"subactions,omitempty" json:"subactions,omitempty" desc:"Subactions to this action"`
+	Deprecation                      *Deprecation                       `mapstructure:"deprecation,omitempty" json:"deprecation,omitempty" desc:"Deprecation metadata for the action tree node"`
 }
 
 // ActionType returns the type of action, which is CLI in this case.

@@ -6,6 +6,7 @@ type IdsecPCloudAddAccount struct {
 	IdsecPCloudAccountSecretManagement     `mapstructure:",squash"`
 	IdsecPCloudAccountRemoteMachinesAccess `mapstructure:",squash"`
 	Secret                                 string                 `json:"secret" mapstructure:"secret" desc:"The secret value." flag:"secret"`
+	SecretFile                             string                 `json:"secret_file" mapstructure:"secret_file" desc:"The path to the secret file." flag:"secret-file"`
 	Name                                   string                 `json:"name" mapstructure:"name,omitempty" desc:"Name of the account" flag:"name"`
 	SafeName                               string                 `json:"safe_name" mapstructure:"safe_name" desc:"The Safe where the account will be created" flag:"safe-name" validate:"required"`
 	PlatformID                             string                 `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"The platform assigned to this account" flag:"platform-id"`
