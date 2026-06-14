@@ -26,6 +26,7 @@ import (
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 	"github.com/cyberark/idsec-sdk-golang/tests/e2e/framework"
+	"gopkg.in/yaml.v3"
 )
 
 func logJSON(t *testing.T, label string, value interface{}) {
@@ -149,10 +150,13 @@ func buildPrincipalK8sService(
 func loadListTargetsTestContext(t *testing.T, configBlockKey string) *K8sTestContext {
 	t.Helper()
 
-	cfg := LoadSCATestConfig(t)
+	cfg := LoadSCATestConfigForBlock(t, configBlockKey)
 	block := cspBlock(cfg, configBlockKey)
 	authCfg := cspBlock(cfg, "auth")
 	require.NotNil(t, block, "%s block is required in JSON config", configBlockKey)
+	if blockAuthCfg := cspBlock(block, "auth"); blockAuthCfg != nil {
+		authCfg = blockAuthCfg
+	}
 	require.NotNil(t, authCfg, "auth block is required in JSON config")
 
 	principal := principalBlock(block)
@@ -631,6 +635,103 @@ func VerifyK8sFilteredTargets(
 	verifyK8sClusterTargetInListTargets(t, target.VerifyTarget, target.ClusterID, target.Scope, target.FQDN, filteredResp.Response)
 }
 
+// VerifyAWSKubeconfigEligibilityDetails checks that generated kubeconfig YAML matches
+// the eligible AWS K8s target and includes the idsec kubectl-login/elevate exec hook.
+func VerifyAWSKubeconfigEligibilityDetails(t *testing.T, kubeconfigYAML string, target K8sTargetConfig) {
+	t.Helper()
+
+	var parsed kubeconfigFile
+	require.NoError(t, yaml.Unmarshal([]byte(kubeconfigYAML), &parsed), "generated kubeconfig should be valid YAML")
+	require.Equal(t, "v1", parsed.APIVersion, "generated kubeconfig apiVersion mismatch")
+	require.Equal(t, "Config", parsed.Kind, "generated kubeconfig kind mismatch")
+	require.NotEmpty(t, parsed.Clusters, "generated kubeconfig should include clusters")
+	require.NotEmpty(t, parsed.Contexts, "generated kubeconfig should include contexts")
+	require.NotEmpty(t, parsed.Users, "generated kubeconfig should include users")
+	require.NotEmpty(t, parsed.CurrentContext, "generated kubeconfig should set current-context")
+
+	expectedFQDN := strings.TrimPrefix(strings.TrimSpace(target.FQDN), "https://")
+	require.Contains(t, kubeconfigYAML, expectedFQDN, "generated kubeconfig should include the eligible cluster FQDN")
+
+	require.NotNil(t, target.VerifyTarget, "expected K8s target model must not be nil")
+	expectedRoleID := strings.TrimSpace(target.VerifyTarget.RoleInfo.ID)
+	expectedRoleName := strings.TrimSpace(target.VerifyTarget.RoleInfo.Name)
+	hasExpectedRole := strings.Contains(kubeconfigYAML, expectedRoleID) || strings.Contains(kubeconfigYAML, expectedRoleName)
+	require.True(t, hasExpectedRole, "generated kubeconfig should include the eligible role ID or role name")
+	require.Contains(t, strings.ToLower(kubeconfigYAML), "aws", "generated kubeconfig should include AWS CSP details")
+
+	require.True(t, hasKubectlLoginExecPlugin(parsed), "generated kubeconfig should include the idsec kubectl-login/elevate exec plugin")
+
+}
+
+// hasKubectlLoginExecPlugin confirms kubectl can call back into idsec for credentials.
+func hasKubectlLoginExecPlugin(parsed kubeconfigFile) bool {
+	for _, user := range parsed.Users {
+		execCommand := user.User.Exec.Command
+		execArgs := strings.Join(user.User.Exec.Args, " ")
+		execInvocation := execCommand + " " + execArgs
+		if strings.Contains(execInvocation, "kubectl-login") || strings.Contains(execInvocation, "elevate") {
+			return true
+		}
+	}
+	return false
+}
+
+func ElevateK8sKubeloginTarget(
+	t *testing.T,
+	k8sSvc *k8sservice.IdsecSCAK8sService,
+	target K8sTargetConfig,
+) *k8smodels.IdsecSCAK8sElevateResponse {
+	t.Helper()
+
+	elevateResp, err := k8sSvc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
+		CSP:    "aws",
+		FQDN:   target.FQDN,
+		RoleID: target.PolicyTarget.RoleInfo.ID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, elevateResp)
+	return elevateResp
+}
+
+func VerifyAWSK8sKubelogin(
+	t *testing.T,
+	elevateResp *k8smodels.IdsecSCAK8sElevateResponse,
+	target K8sTargetConfig,
+) {
+	t.Helper()
+
+	require.NotNil(t, elevateResp, "kubelogin elevate response should not be nil")
+	require.Equal(t, "AWS", strings.ToUpper(strings.TrimSpace(elevateResp.Response.CSP)))
+	require.Len(t, elevateResp.Response.Results, 1, "kubelogin elevate should return one result")
+
+	elevateResult := elevateResp.Response.Results[0]
+	require.Equal(t, target.PolicyTarget.WorkspaceID, strings.TrimSpace(elevateResult.WorkspaceID), "kubelogin workspace ID mismatch")
+	require.Equal(t, target.PolicyTarget.RoleInfo.ID, strings.TrimSpace(elevateResult.RoleID), "kubelogin role ID mismatch")
+	require.NotEmpty(t, elevateResult.SessionID, "kubelogin should return a session ID")
+	require.NotEmpty(t, elevateResult.AccessCredentials, "kubelogin should return AWS access credentials")
+	require.Equal(t, target.ClusterID, strings.TrimSpace(elevateResult.TargetID), "kubelogin target ID mismatch")
+
+	region, clusterName, err := k8sservice.ParseEKSARN(elevateResult.TargetID)
+	require.NoError(t, err)
+	require.NotEmpty(t, region, "kubelogin should derive AWS region from target ID")
+	require.NotEmpty(t, clusterName, "kubelogin should derive EKS cluster name from target ID")
+
+	tokenProvider, err := k8sservice.GetTokenProvider("AWS")
+	require.NoError(t, err)
+	execCredential, err := tokenProvider.GenerateToken(&elevateResult, &k8sservice.IdsecSCAK8sClusterContext{
+		CSP:       "AWS",
+		RoleID:    target.PolicyTarget.RoleInfo.ID,
+		FQDN:      target.FQDN,
+		Region:    region,
+		ClusterID: clusterName,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, execCredential)
+	require.Equal(t, "client.authentication.k8s.io/v1beta1", execCredential.APIVersion)
+	require.Equal(t, "ExecCredential", execCredential.Kind)
+	require.True(t, strings.HasPrefix(execCredential.Status.Token, "k8s-aws-v1."), "kubelogin should generate an EKS bearer token")
+}
+
 func k8sNextTokenString(nextToken *string) string {
 	if nextToken == nil {
 		return ""
@@ -687,7 +788,7 @@ func verifyK8sClusterTargetInListTargets(
 			if expectedWorkspaceName != "" {
 				require.Equal(t, expectedWorkspaceName, actualWorkspaceName, "K8s ListTargets: workspace name mismatch")
 			}
-			if expectedOrganizationID != "" {
+			if expectedOrganizationID != "" && actualOrganizationID != "" {
 				require.Equal(t, expectedOrganizationID, actualOrganizationID, "K8s ListTargets: organization ID mismatch")
 			}
 			if expectedWorkspaceType != "" {

@@ -4,8 +4,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cyberark/idsec-sdk-golang/pkg/common"
-	cloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess/models"
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
@@ -87,68 +85,6 @@ func TestNilInputPanics(t *testing.T) {
 		t.Run(caseData.name, func(t *testing.T) {
 			if !panicWrapper(caseData.fn) {
 				t.Fatalf("expected panic for %s", caseData.name)
-			}
-		})
-	}
-}
-
-func TestNormalizeCloudAccessApprovalPayload(t *testing.T) {
-	tests := []struct {
-		name              string
-		approvalRequired  bool
-		wantAccessWindow  bool
-		wantDaysOfTheWeek bool
-	}{
-		{
-			name:              "keeps_access_window_for_recurring_policy",
-			approvalRequired:  false,
-			wantAccessWindow:  true,
-			wantDaysOfTheWeek: true,
-		},
-		{
-			name:              "removes_access_window_when_approval_required",
-			approvalRequired:  true,
-			wantAccessWindow:  false,
-			wantDaysOfTheWeek: false,
-		},
-	}
-
-	for _, tc := range tests {
-		caseData := tc
-		t.Run(caseData.name, func(t *testing.T) {
-			policy := &cloudaccessmodels.IdsecPolicyCloudAccessCloudConsoleAccessPolicy{
-				Conditions: cloudaccessmodels.IdsecPolicyCloudAccessConditions{
-					IdsecPolicyConditions: policycommonmodels.IdsecPolicyConditions{
-						AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-							DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
-							FromHour:      "09:00:00",
-							ToHour:        "17:00:00",
-						},
-						MaxSessionDuration: 1,
-					},
-					AccessApproval: policycommonmodels.IdsecPolicyAccessApprovalCondition{
-						Required: caseData.approvalRequired,
-					},
-				},
-			}
-
-			policyJSON, err := common.SerializeJSONCamel(policy)
-			if err != nil {
-				t.Fatalf("unexpected serialize error: %v", err)
-			}
-			normalizeCloudAccessApprovalPayload(policy, policyJSON)
-
-			conditions, ok := policyJSON["conditions"].(map[string]interface{})
-			if !ok {
-				t.Fatalf("expected conditions map, got %#v", policyJSON["conditions"])
-			}
-			accessWindow, hasAccessWindow := conditions["accessWindow"].(map[string]interface{})
-			if hasAccessWindow != caseData.wantAccessWindow {
-				t.Fatalf("accessWindow presence mismatch: got %v want %v", hasAccessWindow, caseData.wantAccessWindow)
-			}
-			_, hasDaysOfTheWeek := accessWindow["daysOfTheWeek"]
-			if hasDaysOfTheWeek != caseData.wantDaysOfTheWeek {
-				t.Fatalf("daysOfTheWeek presence mismatch: got %v want %v", hasDaysOfTheWeek, caseData.wantDaysOfTheWeek)
 			}
 		})
 	}

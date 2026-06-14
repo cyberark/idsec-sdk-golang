@@ -58,6 +58,14 @@ var DatabasesEnginesToFamily = map[string]string{
 	EngineTypeMongoSHVM:            FamilyTypeMongo,
 	EngineTypeMongoAWSDocDB:        FamilyTypeMongo,
 	EngineTypeMongoAtlasManaged:    FamilyTypeMongo,
+	// GCP Cloud SQL engines
+	EngineTypePostgresGCPCloudSQL: FamilyTypePostgres,
+	EngineTypeMySQLGCPCloudSQL:    FamilyTypeMySQL,
+	EngineTypeMSSQLGCPCloudSQL:    FamilyTypeMSSQL,
+	// GCP Compute Engine (GCE) VM engines
+	EngineTypePostgresGCPVM: FamilyTypePostgres,
+	EngineTypeMySQLGCPVM:    FamilyTypeMySQL,
+	EngineTypeMSSQLGCPVM:    FamilyTypeMSSQL,
 }
 
 // DatabaseFamiliesDefaultPorts is a map of database family types to their default ports.
@@ -129,6 +137,14 @@ var DatabaseEngineTypes = []string{
 	EngineTypeMongoSHVM,
 	EngineTypeMongoAWSDocDB,
 	EngineTypeMongoAtlasManaged,
+	// GCP Cloud SQL engines
+	EngineTypePostgresGCPCloudSQL,
+	EngineTypeMySQLGCPCloudSQL,
+	EngineTypeMSSQLGCPCloudSQL,
+	// GCP Compute Engine (GCE) VM engines
+	EngineTypePostgresGCPVM,
+	EngineTypeMySQLGCPVM,
+	EngineTypeMSSQLGCPVM,
 }
 
 // DatabaseFamilyTypes is a list of all possible database family types.
@@ -201,6 +217,14 @@ const (
 	EngineTypeMongoSHVM            string = "mongo-sh-vm"
 	EngineTypeMongoAWSDocDB        string = "mongo-aws-docdb"
 	EngineTypeMongoAtlasManaged    string = "mongo-atlas-managed"
+	// GCP Cloud SQL engines
+	EngineTypePostgresGCPCloudSQL string = "postgres-gcp-cloudsql"
+	EngineTypeMySQLGCPCloudSQL    string = "mysql-gcp-cloudsql"
+	EngineTypeMSSQLGCPCloudSQL    string = "mssql-gcp-cloudsql"
+	// GCP Compute Engine (GCE) VM engines
+	EngineTypePostgresGCPVM string = "postgres-gcp-vm"
+	EngineTypeMySQLGCPVM    string = "mysql-gcp-vm"
+	EngineTypeMSSQLGCPVM    string = "mssql-gcp-vm"
 )
 
 // Possible database family types.

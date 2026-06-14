@@ -302,7 +302,7 @@ func (s *IdsecPolicyBaseService) BasePolicyStatus(policyID string, policyName st
 	if err != nil {
 		return "", fmt.Errorf("failed to decode policy metadata for ID '%s' and name '%s': %w", policyID, policyName, err)
 	}
-	return metadata.Status.Status, nil
+	return metadata.GetStatusString(), nil
 }
 
 // BasePoliciesStats retrieves statistics about policies.
@@ -329,13 +329,14 @@ func (s *IdsecPolicyBaseService) BasePoliciesStats(filters *policycommonmodels.I
 			if err != nil {
 				continue
 			}
-			if _, ok = policiesStats.PoliciesCountPerStatus[metadata.Status.Status]; !ok {
-				policiesStats.PoliciesCountPerStatus[metadata.Status.Status] = 0
+			statusStr := metadata.GetStatusString()
+			if _, ok = policiesStats.PoliciesCountPerStatus[statusStr]; !ok {
+				policiesStats.PoliciesCountPerStatus[statusStr] = 0
 			}
 			if _, ok = policiesStats.PoliciesCountPerProvider[metadata.PolicyEntitlement.LocationType]; !ok {
 				policiesStats.PoliciesCountPerProvider[metadata.PolicyEntitlement.LocationType] = 0
 			}
-			policiesStats.PoliciesCountPerStatus[metadata.Status.Status]++
+			policiesStats.PoliciesCountPerStatus[statusStr]++
 			policiesStats.PoliciesCountPerProvider[metadata.PolicyEntitlement.LocationType]++
 		}
 	}
@@ -380,7 +381,7 @@ func (s *IdsecPolicyBaseService) BaseWaitPolicyActive(policyID string, schema *r
 				return nil
 			}
 
-			status := metadata.Status.Status
+			status := metadata.GetStatusString()
 			if status == policycommonmodels.StatusTypeActive {
 				return nil
 			}

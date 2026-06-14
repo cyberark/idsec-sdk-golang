@@ -7,7 +7,7 @@ description: Idsec SDK Homepage
 
 ![Idsec SDK Golang](./media/sdk.png){: style="height:80%;width:70%"}
 
-The official Golang SDK for CyberArk's Identity Security Platform Services.
+The official Golang SDK for Idira Identity Security Platform Services.
 
 ## Motivation
 
@@ -21,4 +21,4 @@ For managing infrastructure with Terraform, see the [Idsec Terraform Provider](h
 
 This project is licensed under Apache License 2.0 - see [License](license.md) for more details.
 
-Copyright (c) 2025 CyberArk Software Ltd. All rights reserved.
+Copyright (c) 2026 CyberArk Software Ltd. All rights reserved.

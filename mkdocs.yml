@@ -80,7 +80,7 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
-copyright: Copyright &copy; 2023 CyberArk
+copyright: Copyright &copy; 2026 CyberArk
 
 plugins:
   - search

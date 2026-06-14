@@ -47,5 +47,5 @@ type IdsecSecHubSecret struct {
 	LastScannedAt    string                      `json:"last_scanned_at,omitempty" mapstructure:"last_scanned_at,omitempty" desc:"The last date and time the secret was scanned by Secrets Hub, example: 2023-07-06T15:43:48.103000+00:00"`
 	StoreName        string                      `json:"store_name,omitempty" mapstructure:"store_name,omitempty" desc:"Name of the secret store"`
 	Onboarded        bool                        `json:"onboarded,omitempty" mapstructure:"onboarded,omitempty" desc:"Indicates whether the secret is onboarded to PAM."`
-	SyncedByCyberArk bool                        `json:"synced_by_cyberark" mapstructure:"synced_by_cyberark" desc:"Indicates whether the secret has been synced by CyberArk. If not set, the status is unknown."`
+	SyncedByCyberArk bool                        `json:"synced_by_cyberark" mapstructure:"synced_by_cyberark" desc:"Indicates whether the secret has been synced by Idira. If not set, the status is unknown."`
 }

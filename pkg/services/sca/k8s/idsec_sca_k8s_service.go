@@ -268,7 +268,7 @@ func (s *IdsecSCAK8sService) EvaluateEligibility(req *k8smodels.IdsecSCAK8sEvalu
 //
 // Parameters:
 //   - req: *IdsecSCAK8sElevateKubectlRequest with CSP, FQDN, and RoleID (all required).
-//     OrganizationID and NamespaceID are forwarded when set (Azure).
+//     OrganizationID and NamespaceID are forwarded when set.
 //
 // Returns *IdsecSCAK8sElevateResponse on success or an error when:
 //   - req is nil, CSP is empty, or required target fields are missing

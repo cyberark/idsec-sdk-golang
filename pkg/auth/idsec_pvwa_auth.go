@@ -1,13 +1,10 @@
 package auth
 
 import (
-	"encoding/base64"
 	"errors"
 	"time"
 
-	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth/pvwa"
-	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
@@ -16,11 +13,6 @@ import (
 const (
 	pvwaAuthName              = "pvwa"
 	pvwaAuthHumanReadableName = "Password Vault Web Access"
-)
-
-// DefaultTokenLifetime is the default token lifetime in seconds for PVWA.
-const (
-	PVWADefaultTokenLifetime = 3600
 )
 
 var (
@@ -42,19 +34,6 @@ func NewIdsecPVWAAuth(cacheAuthentication bool) IdsecAuth {
 	baseAuth := NewIdsecAuthBase(cacheAuthentication, "IdsecPVWAAuth", authInterface)
 	authenticator.IdsecAuthBase = baseAuth
 	return authInterface
-}
-
-func (a *IdsecPVWAAuth) constructMetadata(env commonmodels.AwsEnv, token string, cookieJar *cookiejar.Jar) (map[string]interface{}, error) {
-	marshaledCookies, err := common.MarshalCookies(cookieJar)
-	if err != nil {
-		a.Logger.Error("Failed to marshal cookies: %v", err)
-		return nil, err
-	}
-	metadata := map[string]interface{}{
-		"env":     env,
-		"cookies": base64.StdEncoding.EncodeToString(marshaledCookies),
-	}
-	return metadata, nil
 }
 
 func (a *IdsecPVWAAuth) performPVWAAuthentication(profile *models.IdsecProfile, authProfile *auth.IdsecAuthProfile, secret *auth.IdsecSecret, force bool) (*auth.IdsecToken, error) {
@@ -81,18 +60,13 @@ func (a *IdsecPVWAAuth) performPVWAAuthentication(profile *models.IdsecProfile, 
 		a.Logger.Error("Failed to authenticate to PVWA: %v", err)
 		return nil, err
 	}
-	metadata, err := a.constructMetadata(commonmodels.GetDeployEnv(), pvwaAuth.SessionToken(), pvwaAuth.Session().GetCookieJar())
-	if err != nil {
-		return nil, err
-	}
 	return &auth.IdsecToken{
 		Token:      pvwaAuth.SessionToken(),
 		Username:   authProfile.Username,
 		Endpoint:   pvwaAuth.PVWAURL(),
 		TokenType:  auth.Token,
 		AuthMethod: auth.PVWA,
-		ExpiresIn:  commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(PVWADefaultTokenLifetime) * time.Second)),
-		Metadata:   metadata,
+		ExpiresIn:  commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(pvwa.DefaultPVWASessionLifetimeSeconds) * time.Second)),
 	}, nil
 }
 

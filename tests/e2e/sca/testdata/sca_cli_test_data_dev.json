@@ -27,7 +27,7 @@
   },
   "k8s_aws_clusters": {
     "principal": {
-      "principal_id": "12a31475-d2bf-4be4-ad11-784808621c1c",
+      "principal_id": "d7f17672-4aa6-4649-b85b-1bb17dba8d86",
       "principal_name": "teste2euser@cyberark.cloud.613581",
       "source_directory_name": "CyberArk Cloud Directory",
       "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
@@ -35,28 +35,16 @@
     "targets": {
       "targets": [
         {
-          "roleId": "arn:aws:iam::134672441550:role/cusomt-role-ravish-cluster-viewonly",
-          "roleName": "cusomt-role-ravish-cluster-viewonly",
-          "workspaceId": "134672441550",
-          "workspaceName": "cusomt-role-ravish-cluster-viewonly",
-          "orgId": "",
-          "workspaceType": "account",
-          "scope": "cluster",
-          "clusterId": "arn:aws:eks:us-east-1:134672441550:cluster/test-ravish-cluster",
-          "namespaceId": "",
-          "fqdn": "https://934EDA9A7C57AAA7C9A341C21CD75844.gr7.us-east-1.eks.amazonaws.com"
-        },
-        {
-          "roleId": "arn:aws:iam::134672441550:role/k8s_sca_test_role",
-          "roleName": "k8s_sca_test_role",
-          "workspaceId": "134672441550",
-          "workspaceName": "COM-NP-Int H-CloudSec-CRC-Test-1302",
+          "roleId": "arn:aws:iam::103162528131:role/k8s_custom_role_3_donotdelete",
+          "roleName": "k8s_custom_role_3_donotdelete",
+          "workspaceId": "103162528131",
+          "workspaceName": "dev1",
           "orgId": "general",
           "workspaceType": "account",
           "scope": "cluster",
-          "clusterId": "arn:aws:eks:us-east-1:134672441550:cluster/test-ravish-cluster",
+          "clusterId": "arn:aws:eks:us-east-1:103162528131:cluster/automation-e2e-cluster-DoNotDelete",
           "namespaceId": "",
-          "fqdn": "https://934EDA9A7C57AAA7C9A341C21CD75844.gr7.us-east-1.eks.amazonaws.com"
+          "fqdn": "https://EB2B8A82887AECD2F4548D07D8586AEE.gr7.us-east-1.eks.amazonaws.com"
         }
       ]
     }

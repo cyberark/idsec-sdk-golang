@@ -27,12 +27,20 @@ const (
 //		return nil, fmt.Errorf("failed to resolve identity service URL: %w", err)
 //	}
 func ResolveIdentityServiceURL(ispAuth *auth.IdsecISPAuth, platformURL string) (string, error) {
+	// Read the token once under the authenticator's lock; the shared IdsecISPAuth may be
+	// refreshed concurrently by other goroutines.
+	var tokenStr string
+	if ispAuth != nil {
+		if token := ispAuth.GetToken(); token != nil {
+			tokenStr = token.Token
+		}
+	}
 	// Set the base URL to the identity service endpoint instead of platform to avoid issues with certain API calls that require the identity service URL
 	// This is also for API's which take long and cause timeout on the shell cloudfront side
-	if platformURL != "" && (os.Getenv(ForcePlatformURLEnvVar) == "true" || ispAuth.Token.Token == "") {
+	if platformURL != "" && (os.Getenv(ForcePlatformURLEnvVar) == "true" || tokenStr == "") {
 		return platformURL, nil
 	}
-	parsedToken, _, err := new(jwt.Parser).ParseUnverified(ispAuth.Token.Token, jwt.MapClaims{})
+	parsedToken, _, err := new(jwt.Parser).ParseUnverified(tokenStr, jwt.MapClaims{})
 	if err != nil {
 		return "", err
 	}

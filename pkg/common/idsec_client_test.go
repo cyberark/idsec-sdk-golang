@@ -1353,6 +1353,20 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			},
 		},
 		{
+			name:      "success_updates_raw_session_token_no_prefix",
+			token:     "pas-session-token-only",
+			tokenType: IdsecAuthorizationTokenTypeRaw,
+			validateFunc: func(t *testing.T, client *IdsecClient) {
+				if client.tokenType != IdsecAuthorizationTokenTypeRaw {
+					t.Errorf("Expected token type %q, got %q", IdsecAuthorizationTokenTypeRaw, client.tokenType)
+				}
+				expected := "pas-session-token-only"
+				if client.headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header %q, got %q", expected, client.headers["Authorization"])
+				}
+			},
+		},
+		{
 			name:      "success_handles_empty_token",
 			token:     "",
 			tokenType: "",

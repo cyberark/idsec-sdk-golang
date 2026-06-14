@@ -3,12 +3,12 @@ package validation
 
 import (
 	"fmt"
+	"github.com/go-playground/validator/v10"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/go-playground/validator/v10"
+	_ "time/tzdata"
 )
 
 var defaultValidator *validator.Validate
@@ -27,8 +27,10 @@ func init() {
 func DefaultValidator() *validator.Validate { return defaultValidator }
 
 // ValidateStruct validates s (and any nested structs) against its
-// `validate` struct tags. It returns nil if s is nil or valid, otherwise
-// a *Error.
+// `validate` struct tags. Zero-value fields that declare a `default:"..."`
+// tag are filled on an internal copy so validators see declared defaults
+// rather than empty values; the original struct is never mutated.
+// It returns nil if s is nil or valid, otherwise a *Error.
 func ValidateStruct(s interface{}) (err error) {
 	if s == nil {
 		return nil
@@ -38,7 +40,9 @@ func ValidateStruct(s interface{}) (err error) {
 			err = fmt.Errorf("validation: malformed validate tag in %T — %v", s, r)
 		}
 	}()
-	raw := defaultValidator.Struct(s)
+	target := shallowCopyPtr(s)
+	ApplyDefaults(target)
+	raw := defaultValidator.Struct(target)
 	if raw == nil {
 		return nil
 	}
@@ -116,6 +120,22 @@ func formatField(e validator.FieldError) string {
 }
 
 // --- regexp / pattern custom rule -------------------------------------
+
+// shallowCopyPtr returns a pointer to a shallow copy of the struct behind s.
+// If s is not a pointer to a struct, it is returned as-is.
+func shallowCopyPtr(s interface{}) interface{} {
+	v := reflect.ValueOf(s)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return s
+	}
+	elem := v.Elem()
+	if elem.Kind() != reflect.Struct {
+		return s
+	}
+	cp := reflect.New(elem.Type())
+	cp.Elem().Set(elem)
+	return cp.Interface()
+}
 
 // regexpCache memoises compiled regexes by pattern so each validation
 // call after the first hits a precompiled *regexp.Regexp. Patterns come

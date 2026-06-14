@@ -44,7 +44,7 @@ func main() {
 				Metadata: commonpolicymodels.IdsecPolicyMetadata{
 					Name:        "Example SCA Access Policy",
 					Description: "This is an example of a SCA access policy.",
-					Status: commonpolicymodels.IdsecPolicyStatus{
+					Status: &commonpolicymodels.IdsecPolicyStatus{
 						Status: commonpolicymodels.StatusTypeValidating,
 					},
 					PolicyEntitlement: commonpolicymodels.IdsecPolicyEntitlement{

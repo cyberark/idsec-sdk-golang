@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cyberark/idsec-sdk-golang/pkg/auth/pvwa"
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
@@ -581,8 +582,8 @@ func TestPVWADefaultTokenLifetime(t *testing.T) {
 		expectedValue int
 	}{
 		{
-			name:          "success_default_token_lifetime_is_3600",
-			expectedValue: 3600,
+			name:          "success_default_token_lifetime_is_1200_seconds",
+			expectedValue: 1200,
 		},
 	}
 
@@ -590,8 +591,8 @@ func TestPVWADefaultTokenLifetime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if PVWADefaultTokenLifetime != tt.expectedValue {
-				t.Errorf("Expected PVWADefaultTokenLifetime to be %d, got %d", tt.expectedValue, PVWADefaultTokenLifetime)
+			if pvwa.DefaultPVWASessionLifetimeSeconds != tt.expectedValue {
+				t.Errorf("Expected PVWADefaultTokenLifetime to be %d, got %d", tt.expectedValue, pvwa.DefaultPVWASessionLifetimeSeconds)
 			}
 		})
 	}

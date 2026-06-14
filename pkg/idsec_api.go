@@ -68,6 +68,8 @@ import (
 	roles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
 	users "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
 	webapps "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps"
+	pamshaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshaccounts"
+	pamshsafes "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshsafes"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	applications "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications"
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
@@ -413,6 +415,32 @@ func (api *IdsecAPI) IdentityWebapps() (*webapps.IdsecIdentityWebappsService, er
 	}
 	var baseService services.IdsecService = service
 	api.services[webapps.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) PamshAccounts() (*pamshaccounts.IdsecPamshAccountsService, error) {
+	if serviceIfs, ok := api.services[pamshaccounts.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*pamshaccounts.IdsecPamshAccountsService), nil
+	}
+	service, err := pamshaccounts.ServiceGenerator(api.loadServiceAuthenticators(pamshaccounts.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[pamshaccounts.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) PamshSafes() (*pamshsafes.IdsecPamshSafesService, error) {
+	if serviceIfs, ok := api.services[pamshsafes.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*pamshsafes.IdsecPamshSafesService), nil
+	}
+	service, err := pamshsafes.ServiceGenerator(api.loadServiceAuthenticators(pamshsafes.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[pamshsafes.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

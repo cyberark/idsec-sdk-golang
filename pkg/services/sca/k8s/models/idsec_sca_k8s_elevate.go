@@ -11,8 +11,8 @@ type IdsecSCAK8sElevateTarget struct {
 
 // IdsecSCAK8sElevateRequest is the POST body sent to api/access/elevate/clusters.
 //
-// OrganizationID is the Azure Entra Directory (tenant) ID; required for Azure
-// and omitted for AWS.
+// OrganizationID is the Azure Entra Directory (tenant) ID or AWS organization
+// ID; required for Azure and AWS organization targets.
 type IdsecSCAK8sElevateRequest struct {
 	CSP            string                     `json:"csp"`
 	Targets        []IdsecSCAK8sElevateTarget `json:"targets"`
@@ -72,13 +72,14 @@ type IdsecSCAK8sElevateResponse struct {
 // (IdsecSCAK8sElevateRequest) before calling the backend.
 //
 // Required for all CSPs: CSP, FQDN, RoleID.
-// Azure additionally uses OrganizationID (tenant) and optional NamespaceID.
+// Azure and AWS organization targets additionally use OrganizationID. Azure
+// also supports optional NamespaceID.
 //
 // AWS region and cluster name are derived from targetId in the Elevate API response.
 type IdsecSCAK8sElevateKubectlRequest struct {
 	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS | AZURE)"`
 	RoleID         string `json:"role_id,omitempty" mapstructure:"role_id,omitempty" flag:"role-id" desc:"Cloud role ID to elevate (AWS IAM role ARN or Azure role definition resource ID)"`
 	FQDN           string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"Cluster API endpoint FQDN (always used in kubeconfig)"`
-	OrganizationID string `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty" flag:"organization-id" desc:"Azure Entra Directory ID (tenant) — required for Azure"`
+	OrganizationID string `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty" flag:"organization-id" desc:"Azure Entra Directory ID (tenant) or AWS organization ID"`
 	NamespaceID    string `json:"namespace_id,omitempty" mapstructure:"namespace_id,omitempty" flag:"namespace-id" desc:"Optional Kubernetes namespace identifier (Azure)"`
 }

@@ -304,21 +304,31 @@ func FromISPAuth(
 	refreshConnectionCallback func(*common.IdsecClient) error,
 	retryStrategy common.IdsecClientRetryStrategy,
 ) (*IdsecISPServiceClient, error) {
+	if ispAuth == nil {
+		return nil, fmt.Errorf("ISP auth is nil")
+	}
+	// Read the token once under the authenticator's lock so a concurrent refresh
+	// cannot swap it out from under us mid-function (the shared IdsecISPAuth is used
+	// by many goroutines). The returned token is treated as immutable.
+	token := ispAuth.GetToken()
+	if token == nil {
+		return nil, fmt.Errorf("ISP auth token is not available")
+	}
 	var tenantEnv commonmodels.AwsEnv
 	var baseTenantURL string
-	if ispAuth.Token.Username != "" {
+	if token.Username != "" {
 		for _, domain := range commonmodels.AwsEnvList {
-			if strings.Contains(ispAuth.Token.Username, domain.RootDomain) && strings.Contains(ispAuth.Token.Username, "@") {
-				baseTenantURL = strings.Split(ispAuth.Token.Username, "@")[1]
+			if strings.Contains(token.Username, domain.RootDomain) && strings.Contains(token.Username, "@") {
+				baseTenantURL = strings.Split(token.Username, "@")[1]
 				tenantEnv = domain.AwsEnv
 				break
 			}
 		}
 	}
-	if tenantEnv == "" && ispAuth.Token.Metadata["env"] != "" {
-		if envStr, ok := ispAuth.Token.Metadata["env"].(string); ok {
+	if tenantEnv == "" && token.Metadata["env"] != "" {
+		if envStr, ok := token.Metadata["env"].(string); ok {
 			tenantEnv = commonmodels.AwsEnv(envStr)
-		} else if env, ok := ispAuth.Token.Metadata["env"].(commonmodels.AwsEnv); ok {
+		} else if env, ok := token.Metadata["env"].(commonmodels.AwsEnv); ok {
 			tenantEnv = env
 		}
 	}
@@ -329,7 +339,7 @@ func FromISPAuth(
 		tenantEnv = commonmodels.Prod
 	}
 	cookieJar, _ := cookiejar.New(nil)
-	if cookies, ok := ispAuth.Token.Metadata["cookies"]; ok {
+	if cookies, ok := token.Metadata["cookies"]; ok {
 		decoded, _ := base64.StdEncoding.DecodeString(cookies.(string))
 		err := common.UnmarshalCookies(decoded, cookieJar)
 		if err != nil {
@@ -341,7 +351,7 @@ func FromISPAuth(
 		"",
 		baseTenantURL,
 		tenantEnv,
-		ispAuth.Token.Token,
+		token.Token,
 		"Authorization",
 		separator,
 		basePath,
@@ -373,7 +383,12 @@ func FromISPAuth(
 //	    return fmt.Errorf("failed to refresh client: %w", err)
 //	}
 func RefreshClient(client *common.IdsecClient, ispAuth *auth.IdsecISPAuth) error {
-	token, err := ispAuth.LoadAuthentication(ispAuth.ActiveProfile, true)
+	if ispAuth == nil {
+		return fmt.Errorf("ISP auth is nil")
+	}
+	// Pass nil so LoadAuthentication resolves the active profile under its own lock,
+	// avoiding an unsynchronized read of ispAuth.ActiveProfile from this goroutine.
+	token, err := ispAuth.LoadAuthentication(nil, true)
 	if err != nil {
 		return err
 	}

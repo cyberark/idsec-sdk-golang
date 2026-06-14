@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -32,9 +33,9 @@ type IdsecSCAK8sProxyProvider interface {
 // The CSP string is matched case-insensitively.
 func GetProxyProvider(csp string) (IdsecSCAK8sProxyProvider, error) {
 	switch strings.ToUpper(strings.TrimSpace(csp)) {
-	case "AWS":
+	case commonmodels.WorkspaceTypeAWS:
 		return &AWSProxyProvider{}, nil
-	case "AZURE":
+	case commonmodels.WorkspaceTypeAzure:
 		return &AzureProxyProvider{}, nil
 	case "GCP":
 		return &GCPProxyProvider{}, nil

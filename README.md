@@ -185,15 +185,7 @@ Telemetry
 
 The Idsec SDK collects limited telemetry to support product reliability and improvement. Telemetry is used solely for operational insights such as feature usage trends, error diagnostics, and performance monitoring.
 
-## Telemetry Data Collected
-
-By default, the Idsec SDK attaches a telemetry header (`X-Cybr-Telemetry`) to API requests. The telemetry data is limited to non-content metadata and may include:
-
-- Execution environment context (e.g., Cloud Console identifier, region)
-- Command metadata (e.g., command name and execution outcome; no secrets or customer data)
-- Operating system type and version
-- SDK version
-- Interface type (CLI, SDK, Terraform)
+By default, outbound API requests from `IdsecClient` may include an `X-Cybr-Telemetry` header: a **Base64-encoded** bundle of **non-content** metadata (how it is collected and encoded is documented in **[docs/config/telemetry.md](docs/config/telemetry.md)**). That page lists every field for **full** and **limited** modes.
 
 Telemetry does not include credentials, secrets, payload content, or customer business data.
 
@@ -211,7 +203,7 @@ Alternatively, telemetry can be disabled by using the `--disable-telemetry` flag
 idsec exec --disable-telemetry
 ```
 
-When telemetry is disabled, only application metadata is collected.
+When telemetry is disabled, only application metadata is collected. See [docs/config/telemetry.md](docs/config/telemetry.md).
 
 ## License
 

@@ -66,7 +66,7 @@ func (s *IdsecPolicyK8sAWSAccountTarget) Deserialize(data map[string]interface{}
 type IdsecPolicyK8sAzureTarget struct {
 	IdsecPolicyK8sTarget `mapstructure:",squash"`
 	OrgID                string `json:"org_id" validate:"required" mapstructure:"org_id" flag:"org-id" desc:"The Azure directory ID (UUID) - required for Azure targets"`
-	WorkspaceType        string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk" choices:"directory,subscription,resource_group,resource,management_group"`
+	WorkspaceType        string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to Idira" choices:"directory,subscription,resource_group,resource,management_group"`
 	RoleType             int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure"`
 }
 

@@ -39,6 +39,24 @@ type K8sListTargetsConfig struct {
 	BuildTarget                func(map[string]interface{}) K8sTargetConfig
 }
 
+type kubeconfigFile struct {
+	APIVersion     string           `yaml:"apiVersion"`
+	Kind           string           `yaml:"kind"`
+	Clusters       []any            `yaml:"clusters"`
+	Contexts       []any            `yaml:"contexts"`
+	CurrentContext string           `yaml:"current-context"`
+	Users          []kubeconfigUser `yaml:"users"`
+}
+
+type kubeconfigUser struct {
+	User struct {
+		Exec struct {
+			Command string   `yaml:"command"`
+			Args    []string `yaml:"args"`
+		} `yaml:"exec"`
+	} `yaml:"user"`
+}
+
 type CloudAccessListTargetsConfig struct {
 	ConfigBlockKey             string
 	DisplayName                string

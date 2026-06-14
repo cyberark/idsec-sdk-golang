@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -30,9 +31,8 @@ type IdsecSCAK8sClusterContext struct {
 	// Always provided via the --fqdn CLI flag. Used as the cache key identifier.
 	FQDN string
 
-	// OrganizationID is the Azure Entra Directory (tenant) ID, passed via
-	// --organizationId. Empty for non-Azure CSPs. Used by AzureTokenProvider
-	// to scope the AKS-bound access token to the correct tenant.
+	// OrganizationID is the Azure Entra Directory (tenant) ID or AWS organization
+	// ID, passed via --organizationId.
 	OrganizationID string
 
 	// NamespaceID is the optional Kubernetes namespace, passed via --namespace-id.
@@ -42,7 +42,7 @@ type IdsecSCAK8sClusterContext struct {
 	// ElevateToken is the raw idsec session JWT used as the Bearer token for
 	// the SCA Elevate API call. AzureTokenProvider decodes it to extract the
 	// elevated user's identity for validation against the az login session.
-	// Empty for non-Azure CSPs (AWS does not use it).
+	// Empty for non-Azure CSPs.
 	ElevateToken string
 }
 
@@ -65,9 +65,9 @@ type IdsecSCAK8sTokenProvider interface {
 // The CSP string is matched case-insensitively.
 func GetTokenProvider(csp string) (IdsecSCAK8sTokenProvider, error) {
 	switch strings.ToUpper(strings.TrimSpace(csp)) {
-	case "AWS":
+	case commonmodels.WorkspaceTypeAWS:
 		return &AWSTokenProvider{}, nil
-	case "AZURE":
+	case commonmodels.WorkspaceTypeAzure:
 		return &AzureTokenProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported CSP for kubectl-login: %q", csp)

@@ -46,7 +46,7 @@ func main() {
 					Metadata: policycommomodels.IdsecPolicyMetadata{
 						Name:        "Example DB Access Policy",
 						Description: "This is an example of a DB access policy for Infrastructure.",
-						Status: policycommomodels.IdsecPolicyStatus{
+						Status: &policycommomodels.IdsecPolicyStatus{
 							Status: policycommomodels.StatusTypeActive,
 						},
 						PolicyEntitlement: policycommomodels.IdsecPolicyEntitlement{

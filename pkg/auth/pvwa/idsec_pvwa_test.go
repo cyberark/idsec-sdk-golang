@@ -1,6 +1,7 @@
 package pvwa
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -273,6 +274,19 @@ func TestAuthPVWA(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
+				var body struct {
+					Username          string `json:"username"`
+					Password          string `json:"password"`
+					ConcurrentSession bool   `json:"concurrentSession"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if body.Username != "admin" || body.Password != "pass" || !body.ConcurrentSession {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode("secret-token-123")
 			},
@@ -360,5 +374,38 @@ func TestAuthPVWA(t *testing.T) {
 				tt.validateFunc(t, p)
 			}
 		})
+	}
+}
+
+func TestApplyPVWASessionToClient(t *testing.T) {
+	t.Parallel()
+
+	config.DisableCertificateVerification()
+	defer config.EnableCertificateVerification()
+
+	const wantToken = "pas-session-token-only"
+	var gotAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := common.NewSimpleIdsecClient(srv.URL)
+	ApplyPVWASessionToClient(client, wantToken)
+
+	if client.GetToken() != wantToken {
+		t.Errorf("GetToken: want %q, got %q", wantToken, client.GetToken())
+	}
+	if client.GetTokenType() != common.IdsecAuthorizationTokenTypeRaw {
+		t.Errorf("GetTokenType: want %q, got %q", common.IdsecAuthorizationTokenTypeRaw, client.GetTokenType())
+	}
+
+	_, err := client.Get(context.Background(), "/", nil)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if gotAuth != wantToken {
+		t.Errorf("Authorization on wire: want %q (raw, no Bearer), got %q", wantToken, gotAuth)
 	}
 }

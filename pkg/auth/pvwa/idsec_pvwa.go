@@ -16,16 +16,37 @@ import (
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 )
 
+// DefaultPVWASessionLifetimeSeconds is the assumed PVWA REST session lifetime in seconds when
+// the Logon response does not include an expiry. It matches the documented default session
+// length for CyberArk PAM Self-Hosted PVWA REST APIs (20 minutes).
+const DefaultPVWASessionLifetimeSeconds = 20 * 60
+
 // getCacheKey generates a cache key for the given username.
 // The cache key format is "{username}_pvwa".
 func getCacheKey(username string) string {
 	return username + "_pvwa"
 }
 
+// ApplyPVWASessionToClient configures c for CyberArk PVWA REST: the session token from
+// Logon is sent as the full Authorization header value with no scheme prefix (not
+// "Bearer <token>"). It delegates to IdsecClient.UpdateToken with IdsecAuthorizationTokenTypeRaw.
+func ApplyPVWASessionToClient(c *common.IdsecClient, sessionToken string) {
+	c.UpdateToken(sessionToken, common.IdsecAuthorizationTokenTypeRaw)
+}
+
 // PVWAAuthAPIError represents an error response from the PVWA Auth API.
 type PVWAAuthAPIError struct {
 	ErrorCode    string `json:"ErrorCode"`
 	ErrorMessage string `json:"ErrorMessage"`
+}
+
+// pvwaLogonRequest is the JSON body for POST .../auth/{method}/Logon/.
+// ConcurrentSession must be true so the same API user can hold multiple active sessions
+// (CyberArk PVWA REST: concurrentSession in the logon payload).
+type pvwaLogonRequest struct {
+	Username          string `json:"username"`
+	Password          string `json:"password"`
+	ConcurrentSession bool   `json:"concurrentSession"`
 }
 
 // IdsecPVWA is a struct that represents a PVWA authentication session.
@@ -97,7 +118,7 @@ func (a *IdsecPVWA) loadCache(profile *models.IdsecProfile) bool {
 		if token != nil && token.Username == a.username {
 			a.sessionToken = token.Token
 			a.sessionExp = token.ExpiresIn
-			a.session.UpdateToken(a.sessionToken, "Bearer")
+			ApplyPVWASessionToClient(a.session, a.sessionToken)
 			a.loadedFromCache = true
 			return true
 		}
@@ -126,9 +147,10 @@ func (a *IdsecPVWA) saveCache(profile *models.IdsecProfile) error {
 func (a *IdsecPVWA) performPVWALogin() (string, error) {
 	logonPath := fmt.Sprintf("/PasswordVault/API/auth/%s/Logon/", a.loginMethod)
 
-	body := map[string]string{
-		"username": a.username,
-		"password": a.password,
+	body := pvwaLogonRequest{
+		Username:          a.username,
+		Password:          a.password,
+		ConcurrentSession: true,
 	}
 
 	response, err := a.session.Post(context.Background(), logonPath, body)
@@ -194,10 +216,10 @@ func (a *IdsecPVWA) AuthPVWA(profile *models.IdsecProfile, force bool) error {
 	}
 
 	a.sessionToken = token
-	a.session.UpdateToken(token, "Bearer")
+	ApplyPVWASessionToClient(a.session, token)
 
-	// Set default token lifetime if not provided
-	a.sessionExp = authcommon.CalculateExpirationTime(authcommon.DefaultTokenLifetimeSeconds)
+	// Set default session expiry when PVWA does not return a lifetime in the Logon response.
+	a.sessionExp = authcommon.CalculateExpirationTime(DefaultPVWASessionLifetimeSeconds)
 
 	if a.cacheAuthentication {
 		if err := a.saveCache(profile); err != nil {

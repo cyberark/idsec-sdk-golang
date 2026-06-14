@@ -209,9 +209,9 @@ func TestElevate_URLPath(t *testing.T) {
 	require.Equal(t, "/access/elevate/clusters", capturedPath)
 }
 
-// TestElevate_RequestBody_FQDN verifies the POST body when using the FQDN path
-// (as used by the kubeconfig).
-func TestElevate_RequestBody_FQDN(t *testing.T) {
+// TestElevate_RequestBody_AWS verifies the POST body when called with AWS
+// flags (organizationId + FQDN path, as used by the kubeconfig).
+func TestElevate_RequestBody_AWS(t *testing.T) {
 	var capturedBody []byte
 	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
 		{
@@ -229,12 +229,14 @@ func TestElevate_RequestBody_FQDN(t *testing.T) {
 
 	svc := setupK8sElevateService(client)
 	req := validFQDNReq
+	req.OrganizationID = "o-1234567890"
 	_, err := svc.Elevate(&req)
 	require.NoError(t, err)
 
 	var body map[string]interface{}
 	require.NoError(t, json.Unmarshal(capturedBody, &body))
 	require.Equal(t, "AWS", body["csp"])
+	require.Equal(t, "o-1234567890", body["organizationId"])
 
 	targets, ok := body["targets"].([]interface{})
 	require.True(t, ok)

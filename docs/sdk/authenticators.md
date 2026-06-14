@@ -5,7 +5,7 @@ description: Authenticators
 
 # Authenticators
 
-An authenticator provides the ability to authenticate to a CyberArk Identity Security Platform (ISP) resource. The authentication is based on authentication profiles, where the authentication profile defines the authentication method and its associated settings.
+An authenticator provides the ability to authenticate to an Idira Identity Security Platform (ISP) resource. The authentication is based on authentication profiles, where the authentication profile defines the authentication method and its associated settings.
 
 Here's an example of how to initialize and use an authenticator:
 
@@ -33,14 +33,14 @@ These are the different types of authenticator types and auth methods:
 
 Two authenticator types are supported, both derived from the IdsecAuth interface:
 
-- **IdsecISPAuth** – for CyberArk Identity Security Platform (ISP / cloud). Accepts the `Identity` (default) and `IdentityServiceUser` auth methods.
-- **IdsecPVWAAuth** – for self-hosted CyberArk **PVWA** (Password Vault Web Access). Accepts the `PVWA` auth method and authenticates via the PVWA REST API (`/PasswordVault/API/auth/{method}/Logon`). Use `auth.NewIdsecPVWAAuth(cacheAuthentication)`.
+- **IdsecISPAuth** – for Idira Identity Security Platform (ISP / cloud). Accepts the `Identity` (default) and `IdentityServiceUser` auth methods.
+- **IdsecPVWAAuth** – for self-hosted Idira **PVWA** (Password Vault Web Access). Accepts the `PVWA` auth method and authenticates via the PVWA REST API (`/PasswordVault/API/auth/{method}/Logon`). Use `auth.NewIdsecPVWAAuth(cacheAuthentication)`.
 
 ## Auth methods
 
 - <b>Identity</b> (`identity`) - Identity authentication to a tenant or to an application within the Identity tenant, used with the IdentityIdsecAuthMethodSettings class
 - <b>IdentityServiceUser</b> (`identity_service_user`) - Identity authentication with a service user, used with IdentityServiceUserIdsecAuthMethodSettings class
-- <b>PVWA</b> (`pvwa`) - PVWA username/password authentication for self-hosted CyberArk, used with PVWAIdsecAuthMethodSettings (PVWAURL, PVWALoginMethod: `cyberark`, `ldap`, or `windows`)
+- <b>PVWA</b> (`pvwa`) - PVWA username/password authentication for self-hosted instances, used with PVWAIdsecAuthMethodSettings (PVWAURL, PVWALoginMethod: `cyberark`, `ldap`, or `windows`)
 - <b>Direct</b> (`direct`) - Direct authentication to an endpoint, used with the DirectIdsecAuthMethodSettings class
 - <b>Default</b> (`default`) - Default authenticator auth method for the authenticator
 - <b>Other</b> (`other`) - For custom implementations

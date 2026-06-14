@@ -121,7 +121,7 @@ func (s *IdsecPolicyCloudAccessAWSOrganizationTarget) Deserialize(data map[strin
 type IdsecPolicyCloudAccessAzureTarget struct {
 	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
 	OrgID                        string `json:"org_id" validate:"required" mapstructure:"org_id" flag:"org-id" desc:"The Azure directory ID (UUID) - required for Azure targets"`
-	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to CyberArk (Directory, Subscription, Resource Group, Resource, Management Group)" choices:"directory,subscription,resource_group,resource,management_group"`
+	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Microsoft Entra ID workspace was onboarded to Idira (Directory, Subscription, Resource Group, Resource, Management Group)" choices:"directory,subscription,resource_group,resource,management_group"`
 	RoleType                     int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of the role in Azure (read-only)"`
 }
 
@@ -173,7 +173,7 @@ func (s *IdsecPolicyCloudAccessAzureTarget) Deserialize(data map[string]interfac
 type IdsecPolicyCloudAccessGCPTarget struct {
 	IdsecPolicyCloudAccessTarget `mapstructure:",squash"`
 	OrgID                        string `json:"org_id,omitempty" mapstructure:"org_id,omitempty" flag:"org-id" desc:"The Google Cloud organization ID"`
-	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Google Cloud organization was onboarded to CyberArk (Organization, Folder, or Project - case sensitive)" choices:"gcp_organization,folder,project"`
+	WorkspaceType                string `json:"workspace_type" validate:"required" mapstructure:"workspace_type" flag:"workspace-type" desc:"The level at which the Google Cloud organization was onboarded to Idira (Organization, Folder, or Project - case sensitive)" choices:"gcp_organization,folder,project"`
 	DomainName                   string `json:"domain_name,omitempty" mapstructure:"domain_name,omitempty" flag:"domain-name" desc:"The Google Workspace domain name (read-only)"`
 	RolePackage                  string `json:"role_package,omitempty" mapstructure:"role_package,omitempty" flag:"role-package" desc:"The role package of the target (read-only)"`
 	RoleType                     int    `json:"role_type,omitempty" mapstructure:"role_type,omitempty" flag:"role-type" desc:"The type of role in GCP: 0=PreDefined, 1=Custom, 2=Basic (read-only)"`

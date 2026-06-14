@@ -4,6 +4,7 @@ package sca
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -387,7 +388,7 @@ func requireFetchedPolicyActive(
 	t.Helper()
 	require.Equal(t, createdPolicyID, metadata.PolicyID, "GetPolicy: policy ID mismatch")
 	require.NotEmpty(t, metadata.Name, "GetPolicy: name should not be empty")
-	require.Equal(t, "Active", strings.TrimSpace(metadata.Status.Status), "GetPolicy: status should be Active")
+	require.Equal(t, "Active", strings.TrimSpace(metadata.GetStatusString()), "GetPolicy: status should be Active")
 	t.Log("Policy validated via GetPolicy")
 }
 
@@ -440,7 +441,7 @@ func buildAzureGroupAccessPolicyFromBodyTemplate(
 			Metadata: policycommonmodels.IdsecPolicyMetadata{
 				Name:        policyName,
 				Description: "",
-				Status: policycommonmodels.IdsecPolicyStatus{
+				Status: &policycommonmodels.IdsecPolicyStatus{
 					Status: policycommonmodels.StatusTypeValidating,
 				},
 				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{
@@ -556,7 +557,7 @@ func buildCloudAccessPolicyFromBodyTemplate(
 			Metadata: policycommonmodels.IdsecPolicyMetadata{
 				Name:        policyName,
 				Description: "",
-				Status: policycommonmodels.IdsecPolicyStatus{
+				Status: &policycommonmodels.IdsecPolicyStatus{
 					Status: policycommonmodels.StatusTypeValidating,
 				},
 				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{
@@ -582,11 +583,27 @@ func buildCloudAccessPolicyFromBodyTemplate(
 			},
 			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
 		},
-		Conditions: policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
-			IdsecPolicyConditions: config.conditions,
-		},
-		Targets: config.targets,
+		Conditions: buildCloudAccessConditions(config.conditions),
+		Targets:    config.targets,
 	}
+}
+
+func buildCloudAccessConditions(conditions policycommonmodels.IdsecPolicyConditions) policycloudaccessmodels.IdsecPolicyCloudAccessConditions {
+	cloudAccessConditions := policycloudaccessmodels.IdsecPolicyCloudAccessConditions{
+		IdsecPolicyConditions: conditions,
+	}
+
+	// Some generated CloudAccess models expose AccessWindow explicitly to keep
+	// CloudAccess-specific dual-control documentation while also embedding common
+	// conditions. Populate it when present so SCA E2E payloads remain correct
+	// without changing policy service models.
+	conditionsValue := reflect.ValueOf(&cloudAccessConditions).Elem()
+	accessWindowField := conditionsValue.FieldByName("AccessWindow")
+	if accessWindowField.IsValid() && accessWindowField.CanSet() && accessWindowField.Type() == reflect.TypeOf(conditions.AccessWindow) {
+		accessWindowField.Set(reflect.ValueOf(conditions.AccessWindow))
+	}
+
+	return cloudAccessConditions
 }
 
 // buildK8sClusterPolicyFromBodyTemplate builds a policy-k8s payload (not a Cloud Console / cloudaccess policy).
@@ -661,7 +678,7 @@ func buildK8sClusterPolicyFromBodyTemplate(
 			Metadata: policycommonmodels.IdsecPolicyMetadata{
 				Name:        policyName,
 				Description: "",
-				Status: policycommonmodels.IdsecPolicyStatus{
+				Status: &policycommonmodels.IdsecPolicyStatus{
 					Status: policycommonmodels.StatusTypeValidating,
 				},
 				TimeFrame: policycommonmodels.IdsecPolicyTimeFrame{

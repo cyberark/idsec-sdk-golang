@@ -39,6 +39,12 @@ const (
 	refreshRetryCount = 3
 )
 
+// IdsecAuthorizationTokenTypeRaw is the tokenType argument for UpdateToken that sets
+// the configured auth header to the token string only, with no scheme prefix (no
+// "Bearer " prefix). CyberArk PAS/PVWA REST expects the Logon session token as the
+// entire Authorization header value per product documentation.
+const IdsecAuthorizationTokenTypeRaw = "Raw"
+
 // cookieJSON represents the JSON serializable format of an HTTP cookie.
 //
 // This structure is used for marshaling and unmarshaling HTTP cookies
@@ -987,8 +993,8 @@ func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Respons
 //   - tokenType: The type of token ("Bearer", "Basic", "API-Key", etc.)
 //
 // The method will automatically set the Authorization header based on the token type:
-// - For "Basic" type: Decodes the token and sets "Authorization: Basic <credentials>"
-// - For other types: Sets the configured auth header with format "<tokenType> <token>"
+// - For IdsecAuthorizationTokenTypeRaw: sets the configured auth header to token only
+// - For other types: sets the configured auth header with format "<tokenType> <token>"
 //
 // Example:
 //
@@ -1000,12 +1006,20 @@ func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Respons
 //
 //	// API key
 //	client.UpdateToken("api-key-value", "API-Key")
+//
+//	// Raw session token (e.g. CyberArk PVWA REST)
+//	client.UpdateToken(sessionToken, IdsecAuthorizationTokenTypeRaw)
 func (ac *IdsecClient) UpdateToken(token string, tokenType string) {
 	ac.token = token
 	ac.tokenType = tokenType
-	if token != "" {
-		ac.headers[ac.authHeaderName] = fmt.Sprintf("%s %s", tokenType, token)
+	if token == "" {
+		return
 	}
+	if tokenType == IdsecAuthorizationTokenTypeRaw {
+		ac.headers[ac.authHeaderName] = token
+		return
+	}
+	ac.headers[ac.authHeaderName] = fmt.Sprintf("%s %s", tokenType, token)
 }
 
 // GetToken returns the current authentication token.

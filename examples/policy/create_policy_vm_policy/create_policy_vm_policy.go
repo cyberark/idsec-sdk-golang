@@ -45,7 +45,7 @@ func main() {
 					Metadata: policycommomodels.IdsecPolicyMetadata{
 						Name:        "Example VM Access Policy",
 						Description: "This is an example of a VM access policy for Infrastructure.",
-						Status: policycommomodels.IdsecPolicyStatus{
+						Status: &policycommomodels.IdsecPolicyStatus{
 							Status: policycommomodels.StatusTypeActive,
 						},
 						PolicyEntitlement: policycommomodels.IdsecPolicyEntitlement{
