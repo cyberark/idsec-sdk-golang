@@ -569,9 +569,9 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 	delete(addAccountJSON, "accessRestrictedToRemoteMachines")
 	delete(addAccountJSON, "idsecPcloudAccountRemoteMachinesAccess")
 	delete(addAccountJSON, "idsecPcloudAccountSecretManagement")
-	if addAccount.AutomaticManagementEnabled {
+	if addAccount.AutomaticManagementEnabled != nil {
 		addAccountJSON["secretManagement"] = map[string]interface{}{
-			"automaticManagementEnabled": addAccount.AutomaticManagementEnabled,
+			"automaticManagementEnabled": *addAccount.AutomaticManagementEnabled,
 		}
 		if addAccount.ManualManagementReason != "" {
 			addAccountJSON["secretManagement"].(map[string]interface{})["manualManagementReason"] = addAccount.ManualManagementReason
@@ -652,8 +652,8 @@ func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecP
 	delete(updateAccountJSON, "accessRestrictedToRemoteMachines")
 	delete(updateAccountJSON, "idsecPcloudAccountRemoteMachinesAccess")
 	delete(updateAccountJSON, "idsecPcloudAccountSecretManagement")
-	if updateAccount.AutomaticManagementEnabled {
-		updateAccountJSON["secretManagement/automaticManagementEnabled"] = updateAccount.AutomaticManagementEnabled
+	if updateAccount.AutomaticManagementEnabled != nil {
+		updateAccountJSON["secretManagement/automaticManagementEnabled"] = *updateAccount.AutomaticManagementEnabled
 		if updateAccount.ManualManagementReason != "" {
 			updateAccountJSON["secretManagement/manualManagementReason"] = updateAccount.ManualManagementReason
 		}

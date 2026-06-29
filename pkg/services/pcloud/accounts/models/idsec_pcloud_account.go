@@ -8,7 +8,7 @@ const (
 
 // IdsecPCloudAccountSecretManagement represents the secret management properties of an account.
 type IdsecPCloudAccountSecretManagement struct {
-	AutomaticManagementEnabled bool   `json:"automatic_management_enabled,omitempty" mapstructure:"automatic_management_enabled,omitempty" desc:"Whether the account secret is managed automatically" flag:"automatic-management-enabled"`
+	AutomaticManagementEnabled *bool  `json:"automatic_management_enabled,omitempty" mapstructure:"automatic_management_enabled,omitempty" desc:"Whether the account secret is managed automatically" flag:"automatic-management-enabled"`
 	ManualManagementReason     string `json:"manual_management_reason,omitempty" mapstructure:"manual_management_reason,omitempty" desc:"The reason for disabling automatic management" flag:"manual-management-reason"`
 	LastModifiedTime           int    `json:"last_modified_time,omitempty" mapstructure:"last_modified_time,omitempty" desc:"Last time the account was modified" flag:"last-modified-time"`
 }

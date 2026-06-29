@@ -9,6 +9,8 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
+	rolesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/models"
 	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
 
@@ -96,6 +98,8 @@ type IdsecPCloudSafeMembersPage = common.IdsecPage[safesmodels.IdsecPCloudSafeMe
 type IdsecPCloudSafesService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
+
+	RolesService *roles.IdsecIdentityRolesService
 }
 
 // NewIdsecPCloudSafesService creates a new instance of IdsecPCloudSafesService.
@@ -126,6 +130,10 @@ func NewIdsecPCloudSafesService(authenticators ...auth.IdsecAuth) (*IdsecPCloudS
 
 	pcloudSafesService.IdsecBaseService = baseService
 	pcloudSafesService.IdsecISPBaseService = ispBaseService
+	pcloudSafesService.RolesService, err = roles.NewIdsecIdentityRolesService(ispAuth)
+	if err != nil {
+		return nil, err
+	}
 	return pcloudSafesService, nil
 }
 
@@ -135,6 +143,41 @@ func (s *IdsecPCloudSafesService) refreshPCloudSafesAuth(client *common.IdsecCli
 		return err
 	}
 	return nil
+}
+
+// isIdentityRole reports whether the given member name resolves to a role in the identity
+// service. pCloud's backend reports identity roles under the generic "Group" member type,
+// so we use the identity directory query to distinguish true groups from roles.
+// Errors are intentionally swallowed and treated as a negative result: the type override
+// is best-effort enrichment and must never fail the surrounding safe-member call.
+func (s *IdsecPCloudSafesService) isIdentityRole(memberName string) bool {
+	if memberName == "" || s.RolesService == nil {
+		return false
+	}
+	role, err := s.RolesService.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: memberName})
+	if err != nil {
+		return false
+	}
+	return role != nil && role.RoleID != ""
+}
+
+// enrichMembersWithRoleType walks the given members and, in parallel, promotes the member
+// type of any pCloud-reported "Group" that is actually an identity role to "Role".
+func (s *IdsecPCloudSafesService) enrichMembersWithRoleType(members []*safesmodels.IdsecPCloudSafeMember) {
+	var wg sync.WaitGroup
+	for _, member := range members {
+		if member == nil || member.MemberType != safesmodels.Group {
+			continue
+		}
+		wg.Add(1)
+		go func(m *safesmodels.IdsecPCloudSafeMember) {
+			defer wg.Done()
+			if s.isIdentityRole(m.MemberName) {
+				m.MemberType = safesmodels.Role
+			}
+		}(member)
+	}
+	wg.Wait()
 }
 
 func (s *IdsecPCloudSafesService) listSafesWithFilters(
@@ -297,6 +340,7 @@ func (s *IdsecPCloudSafesService) listSafeMembersWithFilters(
 					}
 				}
 			}
+			s.enrichMembersWithRoleType(members)
 			results <- &IdsecPCloudSafeMembersPage{Items: members}
 			if nextLink, ok := resultMap["nextLink"].(string); ok {
 				nextQuery, _ := url.Parse(nextLink)
@@ -423,8 +467,17 @@ func (s *IdsecPCloudSafesService) Get(getSafe *safesmodels.IdsecPCloudGetSafe) (
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Member.htm
 func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPCloudGetSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {
 	s.Logger.Info("Retrieving safe member [%s] [%s]", getSafeMember.SafeID, getSafeMember.MemberName)
+
+	// Resolve whether the requested name is an identity role concurrently with the pCloud
+	// fetch so the override does not add a serial round-trip on the happy path.
+	isRoleChan := make(chan bool, 1)
+	go func() {
+		isRoleChan <- s.isIdentityRole(getSafeMember.MemberName)
+	}()
+
 	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(safeMemberURL, getSafeMember.SafeID, getSafeMember.MemberName), nil)
 	if err != nil {
+		<-isRoleChan
 		return nil, err
 	}
 	defer func(Body io.ReadCloser) {
@@ -434,10 +487,12 @@ func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPClo
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
+		<-isRoleChan
 		return nil, fmt.Errorf("failed to retrieve safe member - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	safeMemberJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
+		<-isRoleChan
 		return nil, err
 	}
 	safeMemberJSONMap := safeMemberJSON.(map[string]interface{})
@@ -447,6 +502,7 @@ func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPClo
 	var safeMember safesmodels.IdsecPCloudSafeMember
 	err = mapstructure.Decode(safeMemberJSON, &safeMember)
 	if err != nil {
+		<-isRoleChan
 		return nil, err
 	}
 	safeMember.PermissionSet = safesmodels.Custom
@@ -455,6 +511,9 @@ func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPClo
 			safeMember.PermissionSet = permissionSet
 			break
 		}
+	}
+	if isRole := <-isRoleChan; isRole && safeMember.MemberType == safesmodels.Group {
+		safeMember.MemberType = safesmodels.Role
 	}
 	return &safeMember, nil
 }

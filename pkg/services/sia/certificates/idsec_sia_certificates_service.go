@@ -159,16 +159,25 @@ func (s *IdsecSIACertificatesService) Create(addCertificate *certificatesmodels.
 
 // Update updates an existing SIA certificate.
 func (s *IdsecSIACertificatesService) Update(updateCertificate *certificatesmodels.IdsecSIACertificatesUpdateCertificate) (*certificatesmodels.IdsecSIACertificatesCertificate, error) {
-	s.Logger.Info("Adding new certificate")
+	s.Logger.Info("Updating certificate [%s]", updateCertificate.CertificateID)
 	certBody := ""
 	if updateCertificate.CertificateBody != "" {
 		certBody = updateCertificate.CertificateBody
 	} else if updateCertificate.File != "" {
-		fileContent, err := os.ReadFile(updateCertificate.File)
+		filePath := strings.TrimSuffix(common.ExpandFolder(updateCertificate.File), "/")
+		fileContent, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
 		certBody = string(fileContent)
+		fileName := path.Base(updateCertificate.File)
+		if updateCertificate.CertName == "" {
+			updateCertificate.CertName = fileName
+		}
+		if updateCertificate.CertDescription == "" {
+			updateCertificate.CertDescription = fmt.Sprintf("Certificate imported from file %s", fileName)
+		}
+		updateCertificate.Labels["fileName"] = fileName
 	}
 	var updateCertificateJSON map[string]interface{}
 	err := mapstructure.Decode(updateCertificate, &updateCertificateJSON)

@@ -3,7 +3,7 @@ package models
 // IdsecPCloudAddSafe represents the details required to add a safe.
 type IdsecPCloudAddSafe struct {
 	SafeName                  string `json:"safe_name,omitempty" mapstructure:"safe_name" desc:"The unique name of the Safe (Do not use the following characters: \\ / : * < > . | ? “% & +" flag:"safe-name" validate:"required"`
-	Description               string `json:"description,omitempty" mapstructure:"description,omitempty" desc:"Description of the Safe" flag:"description"`
+	Description               string `json:"description,omitempty" mapstructure:"description,omitempty" desc:"Description of the Safe" flag:"description" validate:"max=100"`
 	Location                  string `json:"location,omitempty" mapstructure:"location,omitempty" desc:"Location of the Safe in the Vault" flag:"location" default:"\\"`
 	NumberOfDaysRetention     *int   `json:"number_of_days_retention,omitempty" mapstructure:"number_of_days_retention,omitempty" desc:"The number of days that secrets versions are saved in the Safe" flag:"number-of-days-retention"`
 	NumberOfVersionsRetention *int   `json:"number_of_versions_retention,omitempty" mapstructure:"number_of_versions_retention,omitempty" desc:"The number of retained versions of every secret that is stored in the Safe" flag:"number-of-versions-retention"`
