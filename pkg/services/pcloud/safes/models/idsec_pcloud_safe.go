@@ -9,7 +9,7 @@ type IdsecPCloudSafeCreator struct {
 // IdsecPCloudSafe represents a safe with additional details.
 type IdsecPCloudSafe struct {
 	SafeName                  string                 `json:"safe_name,omitempty" mapstructure:"safe_name" desc:"The unique ID of the Safe used when calling Safe APIs" flag:"safe-name"`
-	Description               string                 `json:"description,omitempty" mapstructure:"description" desc:"The description of the Safe" flag:"description" validate:"max=100"`
+	Description               string                 `json:"description,omitempty" mapstructure:"description" desc:"The description of the Safe" flag:"description" maxlength:"100"`
 	Location                  string                 `json:"location,omitempty" mapstructure:"location" desc:"The location of the Safe in the Vault" flag:"location" default:"\\"`
 	NumberOfDaysRetention     int                    `json:"number_of_days_retention,omitempty" mapstructure:"number_of_days_retention" desc:"The number of days that secrets versions are saved in the Safe" flag:"number-of-days-retention" default:"7"`
 	NumberOfVersionsRetention int                    `json:"number_of_versions_retention,omitempty" mapstructure:"number_of_versions_retention" desc:"The number of retained versions of every secret that is stored in the Safe" flag:"number-of-versions-retention"`
