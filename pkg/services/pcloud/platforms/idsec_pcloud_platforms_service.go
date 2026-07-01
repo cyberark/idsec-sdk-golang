@@ -217,11 +217,12 @@ func (s *IdsecPCloudPlatformsService) Get(getPlatform *platformsmodels.IdsecPClo
 func (s *IdsecPCloudPlatformsService) Import(importPlatform *platformsmodels.IdsecPCloudImportPlatform) (*platformsmodels.IdsecPCloudPlatformDetails, error) {
 	s.Logger.Info("Importing platform from [%s]", importPlatform.PlatformZipPath)
 
-	if _, err := os.Stat(importPlatform.PlatformZipPath); os.IsNotExist(err) {
+	filePath := strings.TrimSuffix(common.ExpandFolder(importPlatform.PlatformZipPath), "/")
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("given path [%s] does not exist or is invalid", importPlatform.PlatformZipPath)
 	}
 
-	zipData, err := os.ReadFile(importPlatform.PlatformZipPath)
+	zipData, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read platform zip file: %v", err)
 	}

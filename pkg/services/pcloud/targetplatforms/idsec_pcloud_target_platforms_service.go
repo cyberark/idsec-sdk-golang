@@ -244,7 +244,14 @@ func (s *IdsecPCloudTargetPlatformsService) ListBy(targetPlatformsFilter *target
 // Gets a target platform by id.
 // https://docs.cyberark.com/privilege-cloud-shared-services/Latest/en/Content/SDK/rest-api-get-target-platforms.htm
 func (s *IdsecPCloudTargetPlatformsService) Get(getTargetPlatform *targetplatformsmodels.IdsecPCloudGetTargetPlatform) (*targetplatformsmodels.IdsecPCloudTargetPlatform, error) {
-	s.Logger.Info("Retrieving target platform [%d]", getTargetPlatform.TargetPlatformID)
+	platID := getTargetPlatform.ID
+	if platID == nil {
+		platID = getTargetPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return nil, fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Retrieving target platform [%d]", *platID)
 
 	platforms, err := s.List()
 	if err != nil {
@@ -252,12 +259,12 @@ func (s *IdsecPCloudTargetPlatformsService) Get(getTargetPlatform *targetplatfor
 	}
 
 	for _, platform := range platforms {
-		if platform.ID == getTargetPlatform.TargetPlatformID {
+		if platform.ID == *platID {
 			return platform, nil
 		}
 	}
 
-	return nil, fmt.Errorf("failed to get target platform with id %d", getTargetPlatform.TargetPlatformID)
+	return nil, fmt.Errorf("failed to get target platform with id %d", *platID)
 }
 
 // Activate activates a target platform by id.
@@ -265,9 +272,16 @@ func (s *IdsecPCloudTargetPlatformsService) Get(getTargetPlatform *targetplatfor
 // Activates a target platform by id.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/SDK/rest-api-activate-target-platform.htm
 func (s *IdsecPCloudTargetPlatformsService) Activate(activateTargetPlatform *targetplatformsmodels.IdsecPCloudActivateTargetPlatform) error {
-	s.Logger.Info("Activating target platform [%d]", activateTargetPlatform.TargetPlatformID)
+	platID := activateTargetPlatform.ID
+	if platID == nil {
+		platID = activateTargetPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Activating target platform [%d]", *platID)
 
-	response, err := s.postOperation()(context.Background(), fmt.Sprintf(activateTargetPlatformURL, activateTargetPlatform.TargetPlatformID), nil)
+	response, err := s.postOperation()(context.Background(), fmt.Sprintf(activateTargetPlatformURL, *platID), nil)
 	if err != nil {
 		return err
 	}
@@ -290,9 +304,16 @@ func (s *IdsecPCloudTargetPlatformsService) Activate(activateTargetPlatform *tar
 // Deactivates a target platform by id.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/SDK/rest-api-deactivate-target-platform.htm
 func (s *IdsecPCloudTargetPlatformsService) Deactivate(deactivateTargetPlatform *targetplatformsmodels.IdsecPCloudDeactivateTargetPlatform) error {
-	s.Logger.Info("Deactivating target platform [%d]", deactivateTargetPlatform.TargetPlatformID)
+	platID := deactivateTargetPlatform.ID
+	if platID == nil {
+		platID = deactivateTargetPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Deactivating target platform [%d]", *platID)
 
-	response, err := s.postOperation()(context.Background(), fmt.Sprintf(deactivateTargetPlatformURL, deactivateTargetPlatform.TargetPlatformID), nil)
+	response, err := s.postOperation()(context.Background(), fmt.Sprintf(deactivateTargetPlatformURL, *platID), nil)
 	if err != nil {
 		return err
 	}
@@ -315,7 +336,14 @@ func (s *IdsecPCloudTargetPlatformsService) Deactivate(deactivateTargetPlatform 
 // Duplicates a target platform by id.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/rest-api-duplicate-target-platforms.htm
 func (s *IdsecPCloudTargetPlatformsService) Duplicate(duplicateTargetPlatform *targetplatformsmodels.IdsecPCloudDuplicateTargetPlatform) (*targetplatformsmodels.IdsecPCloudDuplicatedTargetPlatformInfo, error) {
-	s.Logger.Info("Duplicating target platform [%d] to name [%s]", duplicateTargetPlatform.TargetPlatformID, duplicateTargetPlatform.Name)
+	platID := duplicateTargetPlatform.ID
+	if platID == nil {
+		platID = duplicateTargetPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return nil, fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Duplicating target platform [%d] to name [%s]", *platID, duplicateTargetPlatform.Name)
 
 	duplicateJSON, err := common.SerializeJSONCamel(duplicateTargetPlatform)
 	if err != nil {
@@ -323,7 +351,7 @@ func (s *IdsecPCloudTargetPlatformsService) Duplicate(duplicateTargetPlatform *t
 	}
 	delete(duplicateJSON, "targetPlatformId")
 
-	response, err := s.postOperation()(context.Background(), fmt.Sprintf(duplicateTargetPlatformURL, duplicateTargetPlatform.TargetPlatformID), duplicateJSON)
+	response, err := s.postOperation()(context.Background(), fmt.Sprintf(duplicateTargetPlatformURL, *platID), duplicateJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -356,9 +384,16 @@ func (s *IdsecPCloudTargetPlatformsService) Duplicate(duplicateTargetPlatform *t
 // Deletes a target platform by id.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/rest-api-delete-target-platform.htm
 func (s *IdsecPCloudTargetPlatformsService) Delete(deleteTargetPlatform *targetplatformsmodels.IdsecPCloudDeleteTargetPlatform) error {
-	s.Logger.Info("Deleting target platform [%d]", deleteTargetPlatform.TargetPlatformID)
+	platID := deleteTargetPlatform.ID
+	if platID == nil {
+		platID = deleteTargetPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Deleting target platform [%d]", *platID)
 
-	response, err := s.deleteOperation()(context.Background(), fmt.Sprintf(targetPlatformURL, deleteTargetPlatform.TargetPlatformID), nil, nil)
+	response, err := s.deleteOperation()(context.Background(), fmt.Sprintf(targetPlatformURL, *platID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -411,11 +446,12 @@ func (s *IdsecPCloudTargetPlatformsService) Stats() (*targetplatformsmodels.Idse
 func (s *IdsecPCloudTargetPlatformsService) Import(importPlatform *targetplatformsmodels.IdsecPCloudImportTargetPlatform) (*targetplatformsmodels.IdsecPCloudTargetPlatform, error) {
 	s.Logger.Info("Importing target platform from [%s]", importPlatform.PlatformZipPath)
 
-	if _, err := os.Stat(importPlatform.PlatformZipPath); os.IsNotExist(err) {
+	filePath := strings.TrimSuffix(common.ExpandFolder(importPlatform.PlatformZipPath), "/")
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("given path [%s] does not exist or is invalid", importPlatform.PlatformZipPath)
 	}
 
-	zipData, err := os.ReadFile(importPlatform.PlatformZipPath)
+	zipData, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read platform zip file: %v", err)
 	}
@@ -461,7 +497,6 @@ func (s *IdsecPCloudTargetPlatformsService) Import(importPlatform *targetplatfor
 	if len(platforms) == 0 {
 		return nil, fmt.Errorf("failed to find target platform after importing it")
 	}
-
 	return platforms[0], nil
 }
 
@@ -470,10 +505,16 @@ func (s *IdsecPCloudTargetPlatformsService) Import(importPlatform *targetplatfor
 // Exports a target platform zip data to a given folder by id.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/SDK/ExportPlatform.htm
 func (s *IdsecPCloudTargetPlatformsService) Export(exportPlatform *targetplatformsmodels.IdsecPCloudExportTargetPlatform) error {
-	s.Logger.Info("Exporting target platform [%d] to folder [%s]", exportPlatform.TargetPlatformID, exportPlatform.OutputFolder)
-
+	platID := exportPlatform.ID
+	if platID == nil {
+		platID = exportPlatform.TargetPlatformID
+	}
+	if platID == nil {
+		return fmt.Errorf("target platform id is required")
+	}
+	s.Logger.Info("Exporting target platform [%d] to folder [%s]", *platID, exportPlatform.OutputFolder)
 	targetPlatform, err := s.Get(&targetplatformsmodels.IdsecPCloudGetTargetPlatform{
-		TargetPlatformID: exportPlatform.TargetPlatformID,
+		ID: platID,
 	})
 	if err != nil {
 		return err
@@ -483,7 +524,7 @@ func (s *IdsecPCloudTargetPlatformsService) Export(exportPlatform *targetplatfor
 		return fmt.Errorf("failed to create output folder: %v", err)
 	}
 
-	response, err := s.postOperation()(context.Background(), fmt.Sprintf(exportTargetPlatformURL, exportPlatform.TargetPlatformID), nil)
+	response, err := s.postOperation()(context.Background(), fmt.Sprintf(exportTargetPlatformURL, *platID), nil)
 	if err != nil {
 		return err
 	}

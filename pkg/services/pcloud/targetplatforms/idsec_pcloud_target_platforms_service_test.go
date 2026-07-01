@@ -330,7 +330,7 @@ func TestGet(t *testing.T) {
 			}
 
 			result, err := service.Get(&targetplatformsmodels.IdsecPCloudGetTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
+				ID: &tt.targetPlatformID,
 			})
 
 			if tt.expectedError {
@@ -420,7 +420,7 @@ func TestActivate(t *testing.T) {
 			}
 
 			err := service.Activate(&targetplatformsmodels.IdsecPCloudActivateTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
+				ID: &tt.targetPlatformID,
 			})
 
 			if tt.expectedError {
@@ -506,7 +506,7 @@ func TestDeactivate(t *testing.T) {
 			}
 
 			err := service.Deactivate(&targetplatformsmodels.IdsecPCloudDeactivateTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
+				ID: &tt.targetPlatformID,
 			})
 
 			if tt.expectedError {
@@ -598,8 +598,8 @@ func TestDuplicate(t *testing.T) {
 			}
 
 			result, err := service.Duplicate(&targetplatformsmodels.IdsecPCloudDuplicateTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
-				Name:             tt.newName,
+				ID:   &tt.targetPlatformID,
+				Name: tt.newName,
 			})
 
 			if tt.expectedError {
@@ -689,7 +689,7 @@ func TestDelete(t *testing.T) {
 			}
 
 			err := service.Delete(&targetplatformsmodels.IdsecPCloudDeleteTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
+				ID: &tt.targetPlatformID,
 			})
 
 			if tt.expectedError {
@@ -986,8 +986,8 @@ func TestExport(t *testing.T) {
 
 			outputFolder := tt.setupFolder(t)
 			err := service.Export(&targetplatformsmodels.IdsecPCloudExportTargetPlatform{
-				TargetPlatformID: tt.targetPlatformID,
-				OutputFolder:     outputFolder,
+				ID:           &tt.targetPlatformID,
+				OutputFolder: outputFolder,
 			})
 
 			if tt.expectedError {
