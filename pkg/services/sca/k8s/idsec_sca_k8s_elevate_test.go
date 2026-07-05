@@ -420,7 +420,7 @@ func TestGetTokenProvider_AZURE(t *testing.T) {
 }
 
 func TestGetTokenProvider_Unsupported(t *testing.T) {
-	_, err := GetTokenProvider("GCP")
+	_, err := GetTokenProvider("ibm")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported")
 }

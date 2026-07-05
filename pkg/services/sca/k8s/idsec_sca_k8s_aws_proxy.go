@@ -10,16 +10,16 @@ import (
 // AWSProxyProvider implements IdsecSCAK8sProxyProvider for AWS EKS clusters
 // reached via the DPA proxy connection method.
 //
-// AWS proxy access uses the shared DPA SIA SSO short-lived client certificate
-// flow (the "DPA-K8S" service); no AWS-specific certificate material is required
+// AWS proxy access uses the shared DPA SSO acquire flow (DPA-K8S); no AWS-specific
+// certificate material is required
 // at this layer because the proxy itself terminates the cluster API connection.
 type AWSProxyProvider struct{}
 
 // CSP returns the AWS CSP identifier.
-func (p *AWSProxyProvider) CSP() string { return "AWS" }
+func (p *AWSProxyProvider) CSP() string { return k8smodels.CSPAWS }
 
 // GenerateExecCredential issues a kubectl ExecCredential containing the
-// short-lived client certificate/key pair fetched from DPA SIA SSO.
+// short-lived client certificate/key pair from DPA SSO acquire.
 //
 // The cluster context is currently unused for AWS proxy because the DPA
 // endpoint identifies the cluster from the request URL embedded in the
@@ -28,5 +28,5 @@ func (p *AWSProxyProvider) GenerateExecCredential(
 	s *IdsecSCAK8sService,
 	_ *IdsecSCAK8sClusterContext,
 ) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	return s.generateDPAProxyExecCredential()
+	return s.generateDPAProxyExecCredential("")
 }

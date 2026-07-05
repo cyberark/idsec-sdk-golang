@@ -121,6 +121,12 @@ const (
 		}
 	}`
 
+	RDPChannelsJSON = `{
+		"feature_conf": {
+			"gfx_channel_enabled": true
+		}
+	}`
+
 	SSHCommandAuditJSON = `{
 		"feature_conf": {
 			"is_command_parsing_for_audit_enabled": true,
@@ -1478,6 +1484,111 @@ func TestSetRDPRecording(t *testing.T) {
 			service.doPut = MockPutFunc(tt.mockResponse, tt.mockError)
 			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
 			_, err = service.SetRdpRecording(tt.setting)
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRDPChannels(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockResponse   *http.Response
+		mockError      error
+		expectedResult *settingsmodels.IdsecSIASettingsRdpChannels
+		expectedError  bool
+	}{
+		{
+			name:         "success_get_rdp_channels",
+			mockResponse: MockHTTPResponse(http.StatusOK, RDPChannelsJSON),
+			mockError:    nil,
+			expectedResult: &settingsmodels.IdsecSIASettingsRdpChannels{
+				GfxChannelEnabled: common.Ptr(true),
+			},
+			expectedError: false,
+		},
+		{
+			name:          "error_http_request_failed",
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			result, err := service.RdpChannels()
+
+			if tt.expectedError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
+				return
+			}
+
+			if !reflect.DeepEqual(result, tt.expectedResult) {
+				t.Errorf("Expected result %+v, got %+v", tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestSetRDPChannels(t *testing.T) {
+	tests := []struct {
+		name          string
+		setting       *settingsmodels.IdsecSIASettingsRdpChannels
+		mockResponse  *http.Response
+		mockError     error
+		expectedError bool
+	}{
+		{
+			name: "success_set_rdp_channels",
+			setting: &settingsmodels.IdsecSIASettingsRdpChannels{
+				GfxChannelEnabled: common.Ptr(true),
+			},
+			mockResponse:  MockHTTPResponse(http.StatusOK, RDPChannelsJSON),
+			mockError:     nil,
+			expectedError: false,
+		},
+		{
+			name:          "error_http_request_failed",
+			setting:       &settingsmodels.IdsecSIASettingsRdpChannels{},
+			mockResponse:  nil,
+			mockError:     errors.New("network error"),
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			service, err := NewIdsecSIASettingsService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecSIASettingsService: %v", err)
+			}
+			service.doPut = MockPutFunc(tt.mockResponse, tt.mockError)
+			service.doGet = MockGetFunc(tt.mockResponse, tt.mockError)
+			_, err = service.SetRdpChannels(tt.setting)
 			if tt.expectedError {
 				if err == nil {
 					t.Errorf("Expected error, got nil")

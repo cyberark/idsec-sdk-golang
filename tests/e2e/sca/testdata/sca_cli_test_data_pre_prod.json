@@ -1,14 +1,14 @@
 {
   "auth": {
     "method": "identity",
-    "username": "k8s_cli_automation_admin_user@cyberark.cloud.43204",
+    "username": "ambika@cyberark.cloud.50584",
     "secret": "",
-    "identity_url": "https://aog5018.id.integration-cyberark.cloud"
+    "identity_url": "https://atm5605.id.integration-cyberark.cloud"
   },
   "azure_cloudaccess": {
     "principal": {
-      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
-      "principal_name": "e2etestuser@cyberark.cloud.43204",
+      "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
+      "principal_name": "testevae2e@cyberark.cloud.50584",
       "principal_secret": "",
       "source_directory_name": "CyberArk Cloud Directory",
       "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
@@ -16,8 +16,10 @@
     "targets": {
       "targets": [
         {
-          "roleId": "d2562ede-74db-457e-a7b6-544e236ebb61",
+          "roleId": "1fe13547-53f6-408d-ac04-7f8eed167b38",
+          "roleName": "AI Reader",
           "workspaceId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceName": "CybrSCA",
           "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
           "workspaceType": "directory"
         }
@@ -26,8 +28,8 @@
   },
   "azure_groupaccess": {
     "principal": {
-      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
-      "principal_name": "e2etestuser@cyberark.cloud.43204",
+      "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
+      "principal_name": "testevae2e@cyberark.cloud.50584",
       "principal_secret": "",
       "source_directory_name": "CyberArk Cloud Directory",
       "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
@@ -44,18 +46,18 @@
   },
   "azure_cloudaccess_resource": {
     "principal": {
-      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
-      "principal_name": "e2etestuser@cyberark.cloud.43204",
+      "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
+      "principal_name": "testevae2e@cyberark.cloud.50584",
       "source_directory_name": "CyberArk Cloud Directory",
       "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
     },
     "targets": {
       "targets": [
         {
-          "roleId": "/subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72/providers/Microsoft.Authorization/roleDefinitions/4c6569b6-f23e-4295-9b90-bd4cc4ff3292",
-          "roleName": "DevCenter Owner",
-          "workspaceId": "subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72",
-          "workspaceName": "COM-NP-R&D-CloudSec-SCA-Dev",
+          "roleId": "/subscriptions/efab8013-8ce1-4dfc-8463-b4da57f85921/providers/Microsoft.Authorization/roleDefinitions/8b9beb50-e28c-4879-8472-24c9d328085f",
+          "roleName": "AI Model Scanner Operator",
+          "workspaceId": "subscriptions/efab8013-8ce1-4dfc-8463-b4da57f85921",
+          "workspaceName": "COM-NP-R&D-CloudSec-SCA-Test",
           "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
           "workspaceType": "subscription"
         }
@@ -63,32 +65,6 @@
     }
   },
   "aws_cloudaccess": {
-    "principal": {
-      "principal_id": "1ff35206-e1e7-4eee-8df2-df372d8152ac",
-      "principal_name": "e2etestuser@cyberark.cloud.43204",
-      "source_directory_name": "Idira Cloud Directory",
-      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
-    },
-    "targets": {
-      "targets": [
-        {
-          "roleId": "arn:aws:iam::058264471511:role/CloudopsReadOnlyRole",
-          "roleName": "CloudopsReadOnlyRole",
-          "workspaceId": "058264471511",
-          "workspaceName": "test-org-member-account",
-          "orgId": "311854560024",
-          "workspaceType": "account"
-        }
-      ]
-    }
-  },
-  "k8s_aws_clusters": {
-    "auth": {
-      "method": "identity",
-      "username": "ambika@cyberark.cloud.50584",
-      "secret": "",
-      "identity_url": "https://atm5605.id.integration-cyberark.cloud"
-    },
     "principal": {
       "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
       "principal_name": "testevae2e@cyberark.cloud.50584",
@@ -98,8 +74,28 @@
     "targets": {
       "targets": [
         {
-          "roleId": "arn:aws:iam::103162528131:role/k8s_custom_role_2_donotdelete",
-          "roleName": "k8s_custom_role_2_donotdelete",
+          "roleId": "arn:aws:iam::202533505344:role/WizAccess-Role",
+          "roleName": "WizAccess-Role",
+          "workspaceId": "202533505344",
+          "workspaceName": "COM-NP-IntL-RnD-CloudSecurity-SCA-Test01",
+          "orgId": "202533505344",
+          "workspaceType": "account"
+        }
+      ]
+    }
+  },
+  "k8s_aws_clusters": {
+    "principal": {
+      "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
+      "principal_name": "testevae2e@cyberark.cloud.50584",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "arn:aws:iam::103162528131:role/k8s_custom_role_1_donotdelete",
+          "roleName": "k8s_custom_role_1_donotdelete",
           "workspaceId": "103162528131",
           "workspaceName": "dev1",
           "orgId": "general",
@@ -108,6 +104,30 @@
           "clusterId": "arn:aws:eks:us-east-1:103162528131:cluster/automation-e2e-cluster-DoNotDelete",
           "namespaceId": "",
           "fqdn": "https://EB2B8A82887AECD2F4548D07D8586AEE.gr7.us-east-1.eks.amazonaws.com"
+        }
+      ]
+    }
+  },
+  "k8s_azure_clusters": {
+    "principal": {
+      "principal_id": "b443c5f4-5f7c-4398-888f-f701161e068e",
+      "principal_name": "testevae2e@cyberark.cloud.50584",
+      "source_directory_name": "CyberArk Cloud Directory",
+      "source_directory_id": "09B9A9B0-6CE8-465F-AB03-65766D33B05E"
+    },
+    "targets": {
+      "targets": [
+        {
+          "roleId": "/providers/Microsoft.Authorization/roleDefinitions/b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b",
+          "roleName": "Azure Kubernetes Service RBAC Cluster Admin",
+          "workspaceId": "/subscriptions/efab8013-8ce1-4dfc-8463-b4da57f85921/resourcegroups/rg-ravish-cluster-new/providers/Microsoft.ContainerService/managedClusters/ravish-cluster-new-aad-2",
+          "workspaceName": "ravish-cluster-new-aad-2",
+          "orgId": "c5a5de91-6a2f-467e-aefa-b3f62876ec6a",
+          "workspaceType": "subscription",
+          "scope": "cluster",
+          "clusterId": "/subscriptions/efab8013-8ce1-4dfc-8463-b4da57f85921/resourcegroups/rg-ravish-cluster-new/providers/Microsoft.ContainerService/managedClusters/ravish-cluster-new-aad-2",
+          "namespaceId": "",
+          "fqdn": "ravish-clu-rg-ravish-cluste-efab80-f32tfdrj.hcp.eastus.azmk8s.io"
         }
       ]
     }

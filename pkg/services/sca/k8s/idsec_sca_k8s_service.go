@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
-	sso "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso"
-	ssomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso/models"
+	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
 const (
@@ -33,24 +31,19 @@ const (
 	// (relative to https://<tenant>.dpa.<env>/api/). The CSP name (uppercase) is appended at call time:
 	// e.g. "k8s/kube-config/AWS".
 	generateKubeconfigDpaRelURL = "k8s/kube-config"
+
+	// acquireDpaSsoTokenURL is the path relative to the DPA /api/ base for short-lived client certificate issuance.
+	acquireDpaSsoTokenURL = "adb/sso/acquire" // #nosec G101
+
+	// dpaK8sProxyService is the service identifier sent in the DPA SSO acquire request body.
+	dpaK8sProxyService = "DPA-K8S"
 )
 
 // SupportedCSPs defines the cloud providers currently supported for kubeconfig generation.
-var SupportedCSPs = []string{"aws", "azure"}
-
-type scaK8sProxyCertificateProvider interface {
-	ShortLivedClientCertificate(getShortLivedClientCertificate *ssomodels.IdsecSIASSOGetShortLivedClientCertificate) error
+var SupportedCSPs = []string{
+	strings.ToLower(k8smodels.CSPAWS),
+	strings.ToLower(k8smodels.CSPAzure),
 }
-
-var (
-	newSCAProxyCertificateProvider = func(ispBaseService *services.IdsecISPBaseService) (scaK8sProxyCertificateProvider, error) {
-		return sso.NewIdsecSIASSOService(ispBaseService)
-	}
-	makeTempDir = os.MkdirTemp
-	removeAll   = os.RemoveAll
-	globFiles   = filepath.Glob
-	readFile    = os.ReadFile
-)
 
 // IdsecSCAK8sService provides SCA Kubernetes cluster discovery capabilities.
 //
@@ -66,14 +59,10 @@ type IdsecSCAK8sService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
 
-	// dpaISP is a secondary ISP base service bound to the "dpa" subdomain.
-	// It is used exclusively by the DPA generate-kubeconfig endpoint
-	// (https://<tenant>.dpa.<env>/api/k8s/kube-config/<CSP>).
+	// dpaISP is a secondary ISP base service bound to the "dpa" subdomain
+	// (https://<tenant>.dpa.<env>/api/). Used by both the generate-kubeconfig
+	// endpoint and the DPA SSO acquire endpoint (adb/sso/acquire).
 	dpaISP *services.IdsecISPBaseService
-
-	// dpaSSOISP is bound to the DPA host without the /api base path because
-	// the shared SIA SSO service posts to absolute /api/adb/sso routes.
-	dpaSSOISP *services.IdsecISPBaseService
 }
 
 // NewIdsecSCAK8sService creates a new SCA K8s service instance using provided authenticators.
@@ -107,15 +96,9 @@ func NewIdsecSCAK8sService(authenticators ...auth.IdsecAuth) (*IdsecSCAK8sServic
 		return nil, err
 	}
 
-	dpaSSOBaseService, err := services.NewIdsecISPBaseService(ispAuth, "dpa", ".", "", scak8sservice.refreshScaAuth)
-	if err != nil {
-		return nil, err
-	}
-
 	scak8sservice.IdsecBaseService = base
 	scak8sservice.IdsecISPBaseService = ispBaseService
 	scak8sservice.dpaISP = dpaISPBaseService
-	scak8sservice.dpaSSOISP = dpaSSOBaseService
 	return scak8sservice, nil
 }
 
@@ -125,31 +108,95 @@ func (s *IdsecSCAK8sService) refreshScaAuth(client *common.IdsecClient) error {
 }
 
 // ListTargets lists clusters eligible for SCA discovery via the eligibility API.
-// req requires CSP (aws/azure/gcp, any case); optional workspaceId, limit (1-50), nextToken.
+// req accepts optional CSP (aws/azure, any case); when omitted, AWS and AZURE are queried.
+// workspaceId, limit (1-50), and nextToken are optional.
 func (s *IdsecSCAK8sService) ListTargets(req *k8smodels.IdsecSCAk8sListClustersRequest) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
-	csp := strings.TrimSpace(req.CSP)
-	if csp == "" {
-		return nil, fmt.Errorf("csp cannot be empty")
-	}
-	supported := map[string]struct{}{
-		"aws":   {},
-		"azure": {},
-		"gcp":   {},
-	}
-	cspLower := strings.ToLower(csp)
-	if _, ok := supported[cspLower]; !ok {
-		return nil, fmt.Errorf("unsupported csp '%s'", csp)
-	}
-	cspUpper := strings.ToUpper(csp)
 	if req.Limit != 0 && (req.Limit < 1 || req.Limit > 50) {
 		return nil, fmt.Errorf("limit must be between 1 and 50, got %d", req.Limit)
+	}
+
+	csp := strings.TrimSpace(req.CSP)
+	cspLower := strings.ToLower(csp)
+	supported := map[string]struct{}{
+		strings.ToLower(k8smodels.CSPAWS):   {},
+		strings.ToLower(k8smodels.CSPAzure): {},
+	}
+	if cspLower != "" {
+		if _, ok := supported[cspLower]; !ok {
+			return nil, fmt.Errorf("unsupported csp '%s'", csp)
+		}
+	}
+	if req.All && cspLower != "" {
+		return nil, fmt.Errorf("choose either csp or all, not both")
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca k8s service not initialized")
 	}
+	if req.All || cspLower == "" {
+		return s.ListTargetsAllCSPs(req)
+	}
+	return s.listAllTargetsForCSP(req, strings.ToUpper(csp))
+}
+
+func (s *IdsecSCAK8sService) ListTargetsAllCSPs(req *k8smodels.IdsecSCAk8sListClustersRequest) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
+	combined := &k8smodels.IdsecSCAk8sListClustersResponse{}
+
+	for _, csp := range scamodels.ValidListTargetsCSPs {
+		resp, err := s.listAllTargetsForCSP(req, csp)
+		if err != nil {
+			if combined.Errors == nil {
+				combined.Errors = scamodels.IdsecSCAListTargetsErrors{}
+			}
+			combined.Errors[strings.ToLower(csp)] = "API call failed: " + err.Error()
+			s.Logger.Debug("list-targets for CSP [%s] failed: %v", csp, err)
+			continue
+		}
+		if combined.Responses == nil {
+			combined.Responses = map[string]k8smodels.IdsecSCAk8sListClustersResponse{}
+		}
+		combined.Responses[strings.ToLower(csp)] = *resp
+		combined.Total += resp.Total
+	}
+
+	return combined, nil
+}
+
+func (s *IdsecSCAK8sService) listAllTargetsForCSP(req *k8smodels.IdsecSCAk8sListClustersRequest, cspUpper string) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
+	all := &k8smodels.IdsecSCAk8sListClustersResponse{}
+	nextToken := req.NextToken
+	totalSet := false
+
+	for {
+		pageReq := *req
+		pageReq.NextToken = nextToken
+
+		resp, err := s.listTargetsForCSP(&pageReq, cspUpper)
+		if err != nil {
+			return nil, err
+		}
+		all.Response = append(all.Response, resp.Response...)
+		if !totalSet {
+			all.Total = resp.Total
+			totalSet = true
+		}
+
+		nextToken = ""
+		if resp.NextToken != nil {
+			nextToken = strings.TrimSpace(*resp.NextToken)
+		}
+		if nextToken == "" {
+			if all.Total == 0 {
+				all.Total = len(all.Response)
+			}
+			return all, nil
+		}
+	}
+}
+
+func (s *IdsecSCAK8sService) listTargetsForCSP(req *k8smodels.IdsecSCAk8sListClustersRequest, cspUpper string) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
 	s.Logger.Info("Listing SCA eligible k8s clusters for CSP [%s]", cspUpper)
 
 	params := make(map[string]string)
@@ -197,7 +244,7 @@ func (s *IdsecSCAK8sService) ListTargets(req *k8smodels.IdsecSCAk8sListClustersR
 // Parameters:
 //   - req: *IdsecSCAK8sEvaluateRequest with at least one target. Each target must
 //     provide either FQDN or Name.
-//   - csp: Cloud service provider (AWS, AZURE, GCP). Case-insensitive.
+//   - csp: Cloud service provider (AWS, AZURE). Case-insensitive.
 //
 // Returns *IdsecSCAK8sEvaluateResponse on success or an error when:
 //   - req is nil, csp is empty, or targets have neither FQDN nor Name
@@ -212,9 +259,8 @@ func (s *IdsecSCAK8sService) EvaluateEligibility(req *k8smodels.IdsecSCAK8sEvalu
 		return nil, fmt.Errorf("csp cannot be empty")
 	}
 	supported := map[string]struct{}{
-		"aws":   {},
-		"azure": {},
-		"gcp":   {},
+		strings.ToLower(k8smodels.CSPAWS):   {},
+		strings.ToLower(k8smodels.CSPAzure): {},
 	}
 	if _, ok := supported[strings.ToLower(csp)]; !ok {
 		return nil, fmt.Errorf("unsupported csp '%s'", csp)
@@ -333,7 +379,7 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 // connection method, dispatching to the CSP-specific proxy provider.
 //
 // Parameters:
-//   - csp: Cloud service provider (AWS, AZURE, GCP). Case-insensitive.
+//   - csp: Cloud service provider (AWS, AZURE). Case-insensitive.
 //   - ctx: Optional cluster context (CSP, FQDN, role identifiers, region, etc.)
 //     for providers that need cluster-specific inputs. May be nil for CSPs that
 //     do not need it (currently AWS).
@@ -356,64 +402,64 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 }
 
 // generateDPAProxyExecCredential issues a kubectl ExecCredential containing a
-// short-lived client certificate/key pair fetched via the DPA SIA SSO service
-// ("DPA-K8S"). This is the shared flow currently used by the AWS proxy provider;
-// other CSPs may reuse it as their DPA proxy implementations land.
-func (s *IdsecSCAK8sService) generateDPAProxyExecCredential() (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	proxyISP := s.dpaSSOISP
-	if proxyISP == nil {
-		proxyISP = s.IdsecISPBaseService
-	}
-	proxyCertProvider, err := newSCAProxyCertificateProvider(proxyISP)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize sca proxy certificate provider: %w", err)
+// short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
+// (DPA-K8S). Shared by AWS and Azure proxy providers.
+// jweExtensionValue is forwarded as jwe_extension_value when non-empty (Azure AKS token).
+func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(jweExtensionValue string) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	jweSet := strings.TrimSpace(jweExtensionValue) != ""
+	s.Logger.Debug("generateDPAProxyExecCredential: POST %s service=%s jwe_extension_value_set=%v",
+		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet)
+
+	if s.dpaISP == nil || s.dpaISP.ISPClient() == nil {
+		return nil, fmt.Errorf("proxy client certificate generation failed: dpa client not initialized")
 	}
 
-	tmpDir, err := makeTempDir("", "idsec-k8s-proxy-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	body := map[string]interface{}{
+		"token_type": "client_certificate",
+		"service":    dpaK8sProxyService,
 	}
-	defer func() { _ = removeAll(tmpDir) }()
+	if jweSet {
+		body["jwe_extension_value"] = jweExtensionValue
+	}
 
-	err = proxyCertProvider.ShortLivedClientCertificate(&ssomodels.IdsecSIASSOGetShortLivedClientCertificate{
-		Service:      "DPA-K8S",
-		OutputFormat: ssomodels.File,
-		Folder:       tmpDir,
-		AllowCaching: false,
-	})
+	response, err := s.dpaISP.ISPClient().Post(context.Background(), acquireDpaSsoTokenURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("proxy client certificate generation failed: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		if closeErr := Body.Close(); closeErr != nil {
+			s.Logger.Warning("Error closing DPA SSO response body")
+		}
+	}(response.Body)
+
+	if response.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("proxy client certificate generation failed: [%d] %s",
+			response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+
+	var result k8smodels.IdsecSCAK8sDpaSsoAcquireResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("proxy client certificate generation failed: decode error: %w", err)
+	}
+
+	certPEM := strings.TrimSpace(result.Token.ClientCertificate)
+	keyPEM := strings.TrimSpace(result.Token.PrivateKey)
+	if certPEM == "" || keyPEM == "" {
+		return nil, fmt.Errorf("proxy client certificate generation failed: response missing client_certificate or private_key")
+	}
+
+	expiresAt, err := parseDpaSsoExpiresAt(&result.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("proxy client certificate generation failed: %w", err)
 	}
 
-	certFiles, err := globFiles(filepath.Join(tmpDir, "*_client_cert.crt"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to locate proxy client certificate file: %w", err)
-	}
-	keyFiles, err := globFiles(filepath.Join(tmpDir, "*_client_key.pem"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to locate proxy client key file: %w", err)
-	}
-	if len(certFiles) == 0 || len(keyFiles) == 0 {
-		return nil, fmt.Errorf("proxy client certificate files not found after generation")
-	}
+	s.Logger.Info("generateDPAProxyExecCredential: cert=%d bytes key=%d bytes expires_at=%s — building ExecCredential",
+		len(certPEM), len(keyPEM), expiresAt.UTC().Format(time.RFC3339))
 
-	certData, err := readFile(certFiles[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to read proxy client certificate: %w", err)
-	}
-	keyData, err := readFile(keyFiles[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to read proxy client key: %w", err)
-	}
-
-	return &k8smodels.IdsecSCAK8sExecCredential{
-		APIVersion: "client.authentication.k8s.io/v1beta1",
-		Kind:       "ExecCredential",
-		Status: k8smodels.IdsecSCAK8sExecCredentialStatus{
-			ClientCertificateData: string(certData),
-			ClientKeyData:         string(keyData),
-		},
-	}, nil
+	// Bake the early-refresh buffer into status.expirationTimestamp here, the one
+	// place that knows the raw DPA expiry; downstream (kubectl cache, replay) treats
+	// the value as final and applies no further arithmetic.
+	return BuildProxyExecCredential(certPEM, keyPEM, expiresAt.Add(-proxyExecCredRefreshBuffer)), nil
 }
 
 // GenerateKubeconfig calls the DPA generate-kubeconfig endpoint:
@@ -433,7 +479,7 @@ func (s *IdsecSCAK8sService) GenerateKubeconfig(req *k8smodels.IdsecSCAK8sGenera
 // Parameters:
 //   - ctx: Context for cancellation; if cancelled, in-flight requests may still complete
 //     but no new requests will be started.
-//   - csps: List of CSP names (aws, azure, gcp) to generate kubeconfigs for.
+//   - csps: List of CSP names (aws, azure) to generate kubeconfigs for.
 //   - kubeconfigLocation: Optional custom file path (passed through to each request).
 //
 // Returns *IdsecSCAK8sGenerateKubeconfigParallelResponse with Succeeded and Failed slices.
@@ -604,7 +650,7 @@ func (s *IdsecSCAK8sService) generateKubeconfigViaDpa(req *k8smodels.IdsecSCAK8s
 }
 
 func dpaGenerateKubeconfigCSPSegment(csp string) string {
-	if csp == "azure" {
+	if csp == strings.ToLower(k8smodels.CSPAzure) {
 		return "azure_resource"
 	}
 	return strings.ToUpper(csp)
@@ -647,12 +693,12 @@ func (s *IdsecSCAK8sService) parseGenerateKubeconfigBody(bodyBytes []byte, csp s
 // validateSupportedCSP returns an error if csp is not one of the supported lowercase CSP names.
 func validateSupportedCSP(csp string) error {
 	supported := map[string]struct{}{
-		"aws":   {},
-		"azure": {},
-		"gcp":   {},
+		strings.ToLower(k8smodels.CSPAWS):   {},
+		strings.ToLower(k8smodels.CSPAzure): {},
 	}
 	if _, ok := supported[csp]; !ok {
-		return fmt.Errorf("unsupported csp '%s'; must be one of: aws, azure, gcp", csp)
+		return fmt.Errorf("unsupported csp '%s'; must be one of: %s, %s",
+			csp, strings.ToLower(k8smodels.CSPAWS), strings.ToLower(k8smodels.CSPAzure))
 	}
 	return nil
 }

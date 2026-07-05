@@ -23,6 +23,12 @@ const (
 	// EKS does not honour longer durations.
 	eksPresignDuration = 15 * time.Minute
 
+	// eksExecCredRefreshBuffer is the early-refresh window subtracted from the
+	// presigned URL expiry before stamping status.expirationTimestamp. It mirrors
+	// the proxy refresh buffer so kubectl/client-go and the unified ExecCredential
+	// cache rotate slightly before the credential actually expires server-side.
+	eksExecCredRefreshBuffer = 60 * time.Second
+
 	// eksTokenPrefix is prepended to the base64url-encoded presigned URL.
 	eksTokenPrefix = "k8s-aws-v1."
 
@@ -38,7 +44,7 @@ const (
 type AWSTokenProvider struct{}
 
 // CSP returns the AWS CSP identifier.
-func (p *AWSTokenProvider) CSP() string { return "AWS" }
+func (p *AWSTokenProvider) CSP() string { return k8smodels.CSPAWS }
 
 // ElevateTTL returns the Elevate credential cache duration for AWS (1 hour).
 func (p *AWSTokenProvider) ElevateTTL() time.Duration { return awsElevateTTL }
@@ -50,8 +56,10 @@ func (p *AWSTokenProvider) ElevateTTL() time.Duration { return awsElevateTTL }
 // via a Build-phase middleware so they are included in the SigV4 signature,
 // which EKS requires.
 //
-// No ExpirationTimestamp is set in the returned ExecCredential: kubectl will
-// re-invoke the plugin on 401 Unauthorized from the cluster API server.
+// status.expirationTimestamp is stamped at presignedAt + eksPresignDuration −
+// eksExecCredRefreshBuffer (UTC, RFC3339). This lets client-go and the unified
+// ExecCredential cache replay the same token until the early-refresh window,
+// after which a fresh kubectl invocation will trigger regeneration.
 func (p *AWSTokenProvider) GenerateToken(
 	result *k8smodels.IdsecSCAK8sElevateResult,
 	ctx *IdsecSCAK8sClusterContext,
@@ -84,6 +92,9 @@ func (p *AWSTokenProvider) GenerateToken(
 	presignClient := sts.NewPresignClient(stsClient)
 
 	clusterID := ctx.ClusterID
+	// Capture the presign issuance time BEFORE the call so the stamped
+	// expirationTimestamp is conservative if the call itself takes a few hundred ms.
+	presignedAt := time.Now()
 	presignedReq, err := presignClient.PresignGetCallerIdentity(
 		context.Background(),
 		&sts.GetCallerIdentityInput{},
@@ -108,11 +119,17 @@ func (p *AWSTokenProvider) GenerateToken(
 	// EKS token format: k8s-aws-v1.<base64url-no-padding of the presigned URL>
 	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(presignedReq.URL))
 
+	// Bake the early-refresh buffer in once, here, mirroring the proxy generator. The
+	// kubectl cache and unified ExecCredential cache treat status.expirationTimestamp
+	// as final and apply no further arithmetic.
+	expiresAt := presignedAt.Add(eksPresignDuration).Add(-eksExecCredRefreshBuffer).UTC()
+
 	return &k8smodels.IdsecSCAK8sExecCredential{
 		APIVersion: eksExecCredAPIVersion,
 		Kind:       "ExecCredential",
 		Status: k8smodels.IdsecSCAK8sExecCredentialStatus{
-			Token: token,
+			Token:               token,
+			ExpirationTimestamp: expiresAt.Format(time.RFC3339),
 		},
 	}, nil
 }

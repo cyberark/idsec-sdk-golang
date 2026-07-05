@@ -20,7 +20,7 @@ import (
 
 const (
 	// eligibilityURLFmt is the endpoint for listing eligible cloudaccess targets.
-	// The CSP (AWS | AZURE | GCP) is a path parameter.
+	// The CSP (AWS | AZURE) is a path parameter.
 	eligibilityURLFmt = "/api/access/%s/eligibility"
 
 	// elevateRelURL is the endpoint for obtaining short-lived cloud credentials.
@@ -36,7 +36,7 @@ const (
 // IdsecSCACloudAccessService provides SCA cloudaccess eligibility operations.
 //
 // It is an independent service that hits GET /api/access/{csp}/eligibility
-// and supports AWS, AZURE and GCP as valid CSP values.
+// and supports AWS and AZURE as valid CSP values.
 //
 // Initialization requires a valid "isp" authenticator. Token refresh is delegated
 // to refreshAuth.
@@ -88,12 +88,12 @@ func (s *IdsecSCACloudAccessService) refreshAuth(client *common.IdsecClient) err
 // Supports optional filtering by WorkspaceID and pagination via Limit and NextToken.
 //
 // Parameters:
-//   - req: *IdsecSCAListTargetsRequest containing CSP (required), WorkspaceID, Limit
+//   - req: *IdsecSCAListTargetsRequest containing CSP, WorkspaceID, Limit
 //     and NextToken (optional); must be non-nil.
 //
 // Returns *IdsecSCAListTargetsResponse with Response, Total and NextToken on success, or error when:
 //   - req is nil
-//   - CSP is empty or not one of AWS / AZURE / GCP
+//   - CSP is not one of AWS / AZURE
 //   - the service is not initialized
 //   - the network call fails
 //   - the response status is not 200
@@ -108,17 +108,78 @@ func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
-	if req.CSP == "" {
-		return nil, fmt.Errorf("csp cannot be empty")
+	supported := map[string]struct{}{"AWS": {}, "AZURE": {}}
+	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
+	if cspUpper != "" {
+		if _, ok := supported[cspUpper]; !ok {
+			return nil, fmt.Errorf("unsupported csp '%s': supported values are AWS, AZURE", req.CSP)
+		}
 	}
-	supported := map[string]struct{}{"AWS": {}, "AZURE": {}, "GCP": {}}
-	cspUpper := strings.ToUpper(req.CSP)
-	if _, ok := supported[cspUpper]; !ok {
-		return nil, fmt.Errorf("unsupported csp '%s': supported values are AWS, AZURE, GCP", req.CSP)
+	if req.All && cspUpper != "" {
+		return nil, fmt.Errorf("choose either csp or all, not both")
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca cloudaccess service not initialized")
 	}
+	if req.All || cspUpper == "" {
+		return s.ListTargetsAllCSPs(req)
+	}
+	return s.listAllTargetsForCSP(req, cspUpper)
+}
+
+func (s *IdsecSCACloudAccessService) ListTargetsAllCSPs(req *scamodels.IdsecSCAListTargetsRequest) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) {
+	combined := &cloudaccessmodels.IdsecSCAListTargetsResponse{}
+
+	for _, csp := range scamodels.ValidListTargetsCSPs {
+		resp, err := s.listAllTargetsForCSP(req, csp)
+		if err != nil {
+			if combined.Errors == nil {
+				combined.Errors = scamodels.IdsecSCAListTargetsErrors{}
+			}
+			combined.Errors[strings.ToLower(csp)] = "API call failed: " + err.Error()
+			s.Logger.Debug("list-targets for CSP [%s] failed: %v", csp, err)
+			continue
+		}
+		if combined.Responses == nil {
+			combined.Responses = map[string]cloudaccessmodels.IdsecSCAListTargetsResponse{}
+		}
+		combined.Responses[strings.ToLower(csp)] = *resp
+		combined.Total += resp.Total
+	}
+
+	return combined, nil
+}
+
+func (s *IdsecSCACloudAccessService) listAllTargetsForCSP(req *scamodels.IdsecSCAListTargetsRequest, cspUpper string) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) {
+	all := &cloudaccessmodels.IdsecSCAListTargetsResponse{}
+	nextToken := req.NextToken
+	totalSet := false
+
+	for {
+		pageReq := *req
+		pageReq.NextToken = nextToken
+
+		resp, err := s.listTargetsForCSP(&pageReq, cspUpper)
+		if err != nil {
+			return nil, err
+		}
+		all.Response = append(all.Response, resp.Response...)
+		if !totalSet {
+			all.Total = resp.Total
+			totalSet = true
+		}
+
+		nextToken = strings.TrimSpace(resp.NextToken)
+		if nextToken == "" {
+			if all.Total == 0 {
+				all.Total = len(all.Response)
+			}
+			return all, nil
+		}
+	}
+}
+
+func (s *IdsecSCACloudAccessService) listTargetsForCSP(req *scamodels.IdsecSCAListTargetsRequest, cspUpper string) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) {
 	params := map[string]string{}
 	if req.WorkspaceID != "" {
 		params["workspaceId"] = req.WorkspaceID

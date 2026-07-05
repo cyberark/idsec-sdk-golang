@@ -30,11 +30,11 @@ const (
 // AzureTokenProvider: AKS token via local az session; validates az identity vs idsec Elevate JWT (claim match only).
 type AzureTokenProvider struct{}
 
-func (p *AzureTokenProvider) CSP() string { return "AZURE" }
+func (p *AzureTokenProvider) CSP() string { return k8smodels.CSPAzure }
 
 func (p *AzureTokenProvider) ElevateTTL() time.Duration { return azureElevateTTL }
 
-// GenerateToken returns an AKS ExecCredential after EnsureAzureCLISession (az + idsec/az identity match).
+// GenerateToken returns an AKS ExecCredential after EnsureAzureCLISession (diagnostics gated by ctx.Diagnostics).
 func (p *AzureTokenProvider) GenerateToken(
 	result *k8smodels.IdsecSCAK8sElevateResult,
 	ctx *IdsecSCAK8sClusterContext,
@@ -47,33 +47,40 @@ func (p *AzureTokenProvider) GenerateToken(
 	}
 
 	subscriptionID := AzureSubscriptionFromTargetID(result.TargetID)
-	accessToken, err := EnsureAzureCLISession(ctx.OrganizationID, ctx.ElevateToken, subscriptionID)
+	accessToken, err := EnsureAzureCLISession(ctx.OrganizationID, ctx.ElevateToken, subscriptionID, ctx.Diagnostics)
 	if err != nil {
 		return nil, err
 	}
 	return BuildAzureExecCredential(accessToken), nil
 }
 
-// EnsureAzureCLISession obtains an AKS token via az; may run az login / account set. When elevateToken is set, validates az user vs idsec JWT.
-func EnsureAzureCLISession(organizationID, elevateToken, subscriptionID string) (string, error) {
+// EnsureAzureCLISession obtains an AKS token via az; may run az login / account set.
+// When elevateToken is set, validates az user vs idsec JWT. diagnostics gates stderr logs.
+func EnsureAzureCLISession(organizationID, elevateToken, subscriptionID string, diagnostics bool) (string, error) {
 	subscriptionID = strings.TrimSpace(subscriptionID)
 
 	accessToken, err := acquireAKSToken(organizationID)
 	if err != nil && subscriptionID != "" && azureCLIErrNeedsSubscription(err) {
 		if setErr := runAzAccountSet(subscriptionID); setErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: az account set --subscription %s: %v\n", subscriptionID, setErr)
+			if diagnostics {
+				KubectlLoginLog(KubectlLoginLogLevelInfo, "az account set --subscription %s: %v", subscriptionID, setErr)
+			}
 		} else {
 			accessToken, err = acquireAKSToken(organizationID)
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "No usable az login session found. Running 'az login'...\n")
+		if diagnostics {
+			KubectlLoginLog(KubectlLoginLogLevelInfo, "No usable az login session found. Running 'az login'...")
+		}
 		if loginErr := runAzLogin(); loginErr != nil {
 			return "", fmt.Errorf("az login failed: %w", loginErr)
 		}
 		if subscriptionID != "" {
 			if setErr := runAzAccountSet(subscriptionID); setErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: az account set --subscription %s: %v\n", subscriptionID, setErr)
+				if diagnostics {
+					KubectlLoginLog(KubectlLoginLogLevelInfo, "az account set --subscription %s: %v", subscriptionID, setErr)
+				}
 			}
 		}
 		accessToken, err = acquireAKSToken(organizationID)

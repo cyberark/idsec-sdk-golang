@@ -3,7 +3,6 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -43,12 +42,15 @@ func AzureSubscriptionFromTargetID(targetID string) string {
 // ExtractAzurePrincipalOID on the AKS access token already in hand, which
 // avoids a second `az` subprocess just to mint a management-scoped token.
 //
+// diagnostics controls kubectl-login stderr logs; when false, polling is silent.
+//
 // Poll schedule: immediate, then 1s,1s,1s, then every 3s until 60s budget
 // is exhausted.
 func WaitForAzureRolePropagation(
 	organizationID string,
 	elevateResult *k8smodels.IdsecSCAK8sElevateResult,
 	principalOID string,
+	diagnostics bool,
 ) error {
 	if elevateResult == nil {
 		return fmt.Errorf("elevate result is required for role propagation check")
@@ -74,10 +76,12 @@ func WaitForAzureRolePropagation(
 	ctx, cancel := context.WithTimeout(context.Background(), rolePropagationTimeout)
 	defer cancel()
 
-	fmt.Fprintf(os.Stderr,
-		"[kubectl-login] waiting for Azure role propagation (role=%s scope=%s; budget %s)\n",
-		roleDefGUID, scope, rolePropagationTimeout,
-	)
+	if diagnostics {
+		KubectlLoginLog(KubectlLoginLogLevelInfo,
+			"waiting for Azure role propagation (role=%s scope=%s; budget %s)",
+			roleDefGUID, scope, rolePropagationTimeout,
+		)
+	}
 
 	client, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, cred, nil)
 	if err != nil {
@@ -91,10 +95,12 @@ func WaitForAzureRolePropagation(
 			return fmt.Errorf("list role assignments (attempt %d): %w", attempt, listErr)
 		}
 		if found {
-			fmt.Fprintf(os.Stderr,
-				"[kubectl-login] Azure role propagation confirmed (attempt %d)\n",
-				attempt,
-			)
+			if diagnostics {
+				KubectlLoginLog(KubectlLoginLogLevelInfo,
+					"Azure role propagation confirmed (attempt %d)",
+					attempt,
+				)
+			}
 			return nil
 		}
 
@@ -106,10 +112,12 @@ func WaitForAzureRolePropagation(
 			break
 		}
 
-		fmt.Fprintf(os.Stderr,
-			"[kubectl-login] role not visible in ARM yet (attempt %d), retrying in %s...\n",
-			attempt, wait,
-		)
+		if diagnostics {
+			KubectlLoginLog(KubectlLoginLogLevelDebug,
+				"role not visible in ARM yet (attempt %d), retrying in %s...",
+				attempt, wait,
+			)
+		}
 
 		select {
 		case <-ctx.Done():

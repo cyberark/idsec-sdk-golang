@@ -48,4 +48,6 @@ var ActionToSchemaMap = map[string]interface{}{
 	"set-rdp-file-signing":                           &settingsmodels.IdsecSIASettingsRdpFileSigning{},
 	"https-relay":                                    nil,
 	"set-https-relay":                                &settingsmodels.IdsecSIASettingsHTTPSRelay{},
+	"rdp-channels":                                   nil,
+	"set-rdp-channels":                               &settingsmodels.IdsecSIASettingsRdpChannels{},
 }

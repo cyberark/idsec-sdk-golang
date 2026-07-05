@@ -41,7 +41,7 @@ type TfIdsecCCEAWSAddOrganization struct {
 	ServiceParameters          map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
 	OrganizationDisplayName    string                            `json:"organizationDisplayName,omitempty" mapstructure:"organization_display_name,omitempty"`
 	ScanOrganizationRoleArn    string                            `json:"scanOrganizationRoleArn" mapstructure:"scan_organization_role_arn" validate:"required,pattern=arn:aws:iam::\\d{12}:role/.+"`
-	CrossAccountRoleExternalID string                            `json:"crossAccountRoleExternalId" mapstructure:"cross_account_role_external_id" validate:"required,pattern=cyberark-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"`
+	CrossAccountRoleExternalID string                            `json:"crossAccountRoleExternalId" mapstructure:"cross_account_role_external_id" validate:"required,pattern=^(cyberark0x7CIdira0x7CCCE)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"`
 	DeploymentRegion           string                            `json:"deploymentRegion,omitempty" mapstructure:"region,omitempty"`
 }
 

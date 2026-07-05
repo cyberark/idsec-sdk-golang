@@ -12,10 +12,10 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
+	pcloudinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/internal"
 
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -86,7 +86,130 @@ func (s *IdsecPCloudAccountsService) refreshPCloudAccountsAuth(client *common.Id
 	return nil
 }
 
+// normalizeAccountItemMap maps API account JSON fields to IdsecPCloudAccount mapstructure keys.
+func normalizeAccountItemMap(accountMap map[string]interface{}) error {
+	if accountID, ok := accountMap["id"]; ok {
+		accountMap["account_id"] = accountID
+	}
+	if userName, ok := accountMap["user_name"]; ok {
+		accountMap["username"] = userName
+	}
+	if secretManagement, ok := accountMap["secret_management"]; ok {
+		secretManagementMap, ok := secretManagement.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid secret_management format")
+		}
+		if manualManagementReason, ok := secretManagementMap["manual_management_reason"]; ok {
+			accountMap["manual_management_reason"] = manualManagementReason
+		}
+		if automaticManagementEnabled, ok := secretManagementMap["automatic_management_enabled"]; ok {
+			accountMap["automatic_management_enabled"] = automaticManagementEnabled
+		}
+		if lastModifiedTime, ok := secretManagementMap["last_modified_time"]; ok {
+			accountMap["last_modified_time"] = lastModifiedTime
+		}
+	}
+	if remoteMachinesAccess, ok := accountMap["remote_machines_access"]; ok {
+		remoteMachinesAccessMap, ok := remoteMachinesAccess.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid remote_machines_access format")
+		}
+		if accessRestrictedToRemoteMachines, ok := remoteMachinesAccessMap["access_restricted_to_remote_machines"]; ok {
+			accountMap["access_restricted_to_remote_machines"] = accessRestrictedToRemoteMachines
+		}
+		if remoteMachines, ok := remoteMachinesAccessMap["remote_machines"]; ok {
+			remoteMachinesString, ok := remoteMachines.(string)
+			if !ok {
+				return fmt.Errorf("invalid remote_machines format")
+			}
+			accountMap["remote_machines"] = strings.Split(remoteMachinesString, ";")
+		}
+	}
+	return nil
+}
+
+func decodeAccountsFromListJSON(accountsJSON []interface{}) ([]*accountsmodels.IdsecPCloudAccount, error) {
+	for i, account := range accountsJSON {
+		if accountMap, ok := account.(map[string]interface{}); ok {
+			if err := normalizeAccountItemMap(accountMap); err != nil {
+				return nil, err
+			}
+			accountsJSON[i] = accountMap
+		}
+	}
+	var accounts []*accountsmodels.IdsecPCloudAccount
+	if err := mapstructure.Decode(accountsJSON, &accounts); err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
+func accountsListPageFromResultMap(resultMap map[string]interface{}) (accounts []*accountsmodels.IdsecPCloudAccount, nextQuery map[string]string, err error) {
+	var accountsJSON []interface{}
+	if value, ok := resultMap["value"]; ok {
+		accountsJSON, ok = value.([]interface{})
+		if !ok {
+			return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
+		}
+	} else {
+		return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
+	}
+	accounts, err = decodeAccountsFromListJSON(accountsJSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	if nextLink, ok := pcloudinternal.NextLinkFromResultMap(resultMap); ok {
+		nextQuery, err := pcloudinternal.QueryFromNextLink(nextLink)
+		if err != nil {
+			return nil, nil, err
+		}
+		return accounts, nextQuery, nil
+	}
+	return accounts, nil, nil
+}
+
+// fetchAccountsListPage performs a single list-accounts HTTP request and decodes one OData page.
+// A nil nextQuery means there are no further pages.
+func (s *IdsecPCloudAccountsService) fetchAccountsListPage(ctx context.Context, query map[string]string) (accounts []*accountsmodels.IdsecPCloudAccount, nextQuery map[string]string, err error) {
+	response, err := s.ISPClient().Get(ctx, accountsURL, query)
+	if err != nil {
+		s.Logger.Error("Failed to list accounts: %v", err)
+		return nil, nil, err
+	}
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}()
+	if response.StatusCode != http.StatusOK {
+		body := common.SerializeResponseToJSON(response.Body)
+		s.Logger.Error("Failed to list accounts - [%d] - [%s]", response.StatusCode, body)
+		return nil, nil, fmt.Errorf("list accounts: HTTP %d: %s", response.StatusCode, body)
+	}
+	result, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		s.Logger.Error("Failed to decode response: %v", err)
+		return nil, nil, err
+	}
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		s.Logger.Error("Failed to list accounts, unexpected result")
+		return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
+	}
+	accounts, nextQuery, err = accountsListPageFromResultMap(resultMap)
+	if err != nil {
+		if strings.Contains(err.Error(), "unexpected result") {
+			s.Logger.Error("Failed to list accounts, unexpected result")
+		} else {
+			s.Logger.Error("Failed to validate accounts: %v", err)
+		}
+		return nil, nil, err
+	}
+	return accounts, nextQuery, nil
+}
+
 func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
+	ctx context.Context,
 	search string,
 	searchType string,
 	sort string,
@@ -117,90 +240,42 @@ func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
 	go func() {
 		defer close(results)
 		for {
-			response, err := s.ISPClient().Get(context.Background(), accountsURL, query)
+			items, nextQuery, err := s.fetchAccountsListPage(ctx, query)
 			if err != nil {
-				s.Logger.Error("Failed to list accounts: %v", err)
-				return
-			}
-			defer func(Body io.ReadCloser) {
-				err := Body.Close()
-				if err != nil {
-					common.GlobalLogger.Warning("Error closing response body")
+				select {
+				case results <- &IdsecPCloudAccountsPage{Err: err}:
+				case <-ctx.Done():
 				}
-			}(response.Body)
-			if response.StatusCode != http.StatusOK {
-				s.Logger.Error("Failed to list accounts - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 				return
 			}
-			result, err := common.DeserializeJSONSnake(response.Body)
-			if err != nil {
-				s.Logger.Error("Failed to decode response: %v", err)
+			select {
+			case results <- &IdsecPCloudAccountsPage{Items: items}:
+			case <-ctx.Done():
 				return
 			}
-			resultMap := result.(map[string]interface{})
-			var accountsJSON []interface{}
-			if value, ok := resultMap["value"]; ok {
-				accountsJSON = value.([]interface{})
-			} else {
-				s.Logger.Error("Failed to list accounts, unexpected result")
+			if nextQuery == nil {
 				return
 			}
-			for i, account := range accountsJSON {
-				if accountMap, ok := account.(map[string]interface{}); ok {
-					if accountID, ok := accountMap["id"]; ok {
-						accountsJSON[i].(map[string]interface{})["account_id"] = accountID
-					}
-					if userName, ok := accountMap["user_name"]; ok {
-						accountsJSON[i].(map[string]interface{})["username"] = userName
-					}
-					if secretManagement, ok := accountMap["secret_management"]; ok {
-						if manualManagementReason, ok := secretManagement.(map[string]interface{})["manual_management_reason"]; ok {
-							accountsJSON[i].(map[string]interface{})["manual_management_reason"] = manualManagementReason
-						}
-						if automaticManagementEnabled, ok := secretManagement.(map[string]interface{})["automatic_management_enabled"]; ok {
-							accountsJSON[i].(map[string]interface{})["automatic_management_enabled"] = automaticManagementEnabled
-						}
-						if lastModifiedTime, ok := secretManagement.(map[string]interface{})["last_modified_time"]; ok {
-							accountsJSON[i].(map[string]interface{})["last_modified_time"] = lastModifiedTime
-						}
-					}
-					if remoteMachinesAccess, ok := accountMap["remote_machines_access"]; ok {
-						if accessRestrictedToRemoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["access_restricted_to_remote_machines"]; ok {
-							accountsJSON[i].(map[string]interface{})["access_restricted_to_remote_machines"] = accessRestrictedToRemoteMachines
-						}
-						if remoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["remote_machines"]; ok {
-							accountsJSON[i].(map[string]interface{})["remote_machines"] = strings.Split(remoteMachines.(string), ";")
-						}
-					}
-				}
-			}
-			var accounts []*accountsmodels.IdsecPCloudAccount
-			if err := mapstructure.Decode(accountsJSON, &accounts); err != nil {
-				s.Logger.Error("Failed to validate accounts: %v", err)
-				return
-			}
-			results <- &IdsecPCloudAccountsPage{Items: accounts}
-			if nextLink, ok := resultMap["nextLink"].(string); ok {
-				nextQuery, _ := url.Parse(nextLink)
-				queryValues := nextQuery.Query()
-				query = make(map[string]string)
-				for key, values := range queryValues {
-					if len(values) > 0 {
-						query[key] = values[0]
-					}
-				}
-			} else {
-				break
-			}
+			query = nextQuery
 		}
 	}()
 	return results, nil
 }
 
 // List retrieves a list of IdsecPCloudAccount pages.
+// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
 func (s *IdsecPCloudAccountsService) List() (<-chan *IdsecPCloudAccountsPage, error) {
+	return s.ListContext(context.Background())
+}
+
+// ListContext is like List but accepts a context.Context. Callers that stop iterating the
+// returned channel early must cancel the context to release the producer goroutine and any
+// in-flight request.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
+func (s *IdsecPCloudAccountsService) ListContext(ctx context.Context) (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.listAccountsWithFilters(
+		ctx,
 		"",
 		"",
 		"",
@@ -211,9 +286,19 @@ func (s *IdsecPCloudAccountsService) List() (<-chan *IdsecPCloudAccountsPage, er
 }
 
 // ListBy retrieves a list of IdsecPCloudAccount pages with filters.
+// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
 func (s *IdsecPCloudAccountsService) ListBy(accountsFilters *accountsmodels.IdsecPCloudAccountsFilter) (<-chan *IdsecPCloudAccountsPage, error) {
+	return s.ListByContext(context.Background(), accountsFilters)
+}
+
+// ListByContext is like ListBy but accepts a context.Context. Callers that stop iterating the
+// returned channel early must cancel the context to release the producer goroutine and any
+// in-flight request.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
+func (s *IdsecPCloudAccountsService) ListByContext(ctx context.Context, accountsFilters *accountsmodels.IdsecPCloudAccountsFilter) (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.listAccountsWithFilters(
+		ctx,
 		accountsFilters.Search,
 		accountsFilters.SearchType,
 		accountsFilters.Sort,
@@ -420,31 +505,12 @@ func (s *IdsecPCloudAccountsService) parseAccountResponse(responseBody io.ReadCl
 	if err != nil {
 		return nil, err
 	}
-	accountJSONMap := accountJSON.(map[string]interface{})
-	if accountID, ok := accountJSONMap["id"]; ok {
-		accountJSONMap["account_id"] = accountID
+	accountJSONMap, ok := accountJSON.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid account response format")
 	}
-	if userName, ok := accountJSONMap["user_name"]; ok {
-		accountJSONMap["username"] = userName
-	}
-	if secretManagement, ok := accountJSONMap["secret_management"]; ok {
-		if manualManagementReason, ok := secretManagement.(map[string]interface{})["manual_management_reason"]; ok {
-			accountJSONMap["manual_management_reason"] = manualManagementReason
-		}
-		if automaticManagementEnabled, ok := secretManagement.(map[string]interface{})["automatic_management_enabled"]; ok {
-			accountJSONMap["automatic_management_enabled"] = automaticManagementEnabled
-		}
-		if lastModifiedTime, ok := secretManagement.(map[string]interface{})["last_modified_time"]; ok {
-			accountJSONMap["last_modified_time"] = lastModifiedTime
-		}
-	}
-	if remoteMachinesAccess, ok := accountJSONMap["remote_machines_access"]; ok {
-		if accessRestrictedToRemoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["access_restricted_to_remote_machines"]; ok {
-			accountJSONMap["access_restricted_to_remote_machines"] = accessRestrictedToRemoteMachines
-		}
-		if remoteMachines, ok := remoteMachinesAccess.(map[string]interface{})["remote_machines"]; ok {
-			accountJSONMap["remote_machines"] = strings.Split(remoteMachines.(string), ";")
-		}
+	if err := normalizeAccountItemMap(accountJSONMap); err != nil {
+		return nil, err
 	}
 	var account accountsmodels.IdsecPCloudAccount
 	err = mapstructure.Decode(accountJSONMap, &account)

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -44,6 +43,15 @@ type IdsecSCAK8sClusterContext struct {
 	// elevated user's identity for validation against the az login session.
 	// Empty for non-Azure CSPs.
 	ElevateToken string
+
+	// JWEExtensionValue is an optional opaque value forwarded as
+	// jwe_extension_value in the DPA SSO acquire request (DPA-K8S).
+	// For Azure proxy this carries the raw AKS access token acquired via az CLI;
+	// it is empty for AWS proxy and all direct flows.
+	JWEExtensionValue string
+
+	// Diagnostics enables kubectl-login stderr diagnostics from token providers.
+	Diagnostics bool
 }
 
 // IdsecSCAK8sTokenProvider is the interface each CSP token generator must satisfy.
@@ -65,9 +73,9 @@ type IdsecSCAK8sTokenProvider interface {
 // The CSP string is matched case-insensitively.
 func GetTokenProvider(csp string) (IdsecSCAK8sTokenProvider, error) {
 	switch strings.ToUpper(strings.TrimSpace(csp)) {
-	case commonmodels.WorkspaceTypeAWS:
+	case k8smodels.CSPAWS:
 		return &AWSTokenProvider{}, nil
-	case commonmodels.WorkspaceTypeAzure:
+	case k8smodels.CSPAzure:
 		return &AzureTokenProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported CSP for kubectl-login: %q", csp)

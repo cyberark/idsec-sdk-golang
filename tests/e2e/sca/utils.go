@@ -150,13 +150,10 @@ func buildPrincipalK8sService(
 func loadListTargetsTestContext(t *testing.T, configBlockKey string) *K8sTestContext {
 	t.Helper()
 
-	cfg := LoadSCATestConfigForBlock(t, configBlockKey)
+	cfg := LoadSCATestConfig(t)
 	block := cspBlock(cfg, configBlockKey)
 	authCfg := cspBlock(cfg, "auth")
 	require.NotNil(t, block, "%s block is required in JSON config", configBlockKey)
-	if blockAuthCfg := cspBlock(block, "auth"); blockAuthCfg != nil {
-		authCfg = blockAuthCfg
-	}
 	require.NotNil(t, authCfg, "auth block is required in JSON config")
 
 	principal := principalBlock(block)

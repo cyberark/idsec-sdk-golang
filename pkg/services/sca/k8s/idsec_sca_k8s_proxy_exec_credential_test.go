@@ -1,25 +1,25 @@
 package k8s
 
 import (
-	"fmt"
-	"strings"
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	ssomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso/models"
+	scainternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal"
 )
 
-type mockProxyCertificateProvider struct {
-	req *ssomodels.IdsecSIASSOGetShortLivedClientCertificate
-	err error
-}
-
-func (m *mockProxyCertificateProvider) ShortLivedClientCertificate(req *ssomodels.IdsecSIASSOGetShortLivedClientCertificate) error {
-	m.req = req
-	return m.err
-}
+const mockDpaSsoAcquireResponse = `{
+  "token": {
+    "client_certificate": "-----BEGIN CERTIFICATE-----\nCERT\n-----END CERTIFICATE-----\n",
+    "private_key": "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n"
+  },
+  "metadata": {
+    "expires_at": "2030-06-01T12:00:00.000000"
+  }
+}`
 
 func TestGenerateProxyExecCredential_UninitializedService(t *testing.T) {
 	svc := &IdsecSCAK8sService{}
@@ -37,120 +37,127 @@ func TestGenerateProxyExecCredential_UnsupportedCSP(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported CSP for kubectl-login proxy flow")
 }
 
-func TestGenerateProxyExecCredential_AzureStub(t *testing.T) {
+func TestGenerateProxyExecCredential_AzureMissingJWE(t *testing.T) {
 	svc := setupK8sElevateService(&isp.IdsecISPServiceClient{})
 	cred, err := svc.GenerateProxyExecCredential("AZURE", &IdsecSCAK8sClusterContext{CSP: "AZURE"})
 	require.Error(t, err)
 	require.Nil(t, cred)
-	require.Contains(t, err.Error(), "azure aks proxy credential generation is not yet implemented")
-}
-
-func TestGenerateProxyExecCredential_GCPStub(t *testing.T) {
-	svc := setupK8sElevateService(&isp.IdsecISPServiceClient{})
-	cred, err := svc.GenerateProxyExecCredential("gcp", nil)
-	require.Error(t, err)
-	require.Nil(t, cred)
-	require.Contains(t, err.Error(), "gcp gke proxy credential generation is not yet implemented")
+	require.Contains(t, err.Error(), "JWEExtensionValue")
 }
 
 func TestGenerateProxyExecCredential_Success(t *testing.T) {
-	svc := setupK8sElevateService(&isp.IdsecISPServiceClient{})
-	provider := &mockProxyCertificateProvider{}
-	proxyBase := &services.IdsecISPBaseService{}
-	svc.dpaSSOISP = proxyBase
-	var providerBase *services.IdsecISPBaseService
-	certPath := "/tmp/idsec-k8s-proxy-test/user_client_cert.crt"
-	keyPath := "/tmp/idsec-k8s-proxy-test/user_client_key.pem"
-	tempDirPath := "/tmp/idsec-k8s-proxy-test"
-	var removedPath string
-
-	origProviderFactory := newSCAProxyCertificateProvider
-	origMakeTempDir := makeTempDir
-	origRemoveAll := removeAll
-	origGlobFiles := globFiles
-	origReadFile := readFile
-	t.Cleanup(func() {
-		newSCAProxyCertificateProvider = origProviderFactory
-		makeTempDir = origMakeTempDir
-		removeAll = origRemoveAll
-		globFiles = origGlobFiles
-		readFile = origReadFile
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return r.Method == http.MethodPost },
+			StatusCode:   http.StatusCreated,
+			ResponseBody: mockDpaSsoAcquireResponse,
+		},
 	})
+	defer cleanup()
 
-	newSCAProxyCertificateProvider = func(base *services.IdsecISPBaseService) (scaK8sProxyCertificateProvider, error) {
-		providerBase = base
-		return provider, nil
-	}
-	makeTempDir = func(_, _ string) (string, error) { return tempDirPath, nil }
-	removeAll = func(path string) error {
-		removedPath = path
-		return nil
-	}
-	globFiles = func(pattern string) ([]string, error) {
-		switch {
-		case strings.HasSuffix(pattern, "*_client_cert.crt"):
-			return []string{certPath}, nil
-		case strings.HasSuffix(pattern, "*_client_key.pem"):
-			return []string{keyPath}, nil
-		default:
-			return nil, nil
-		}
-	}
-	readFile = func(path string) ([]byte, error) {
-		switch path {
-		case certPath:
-			return []byte("CERT_DATA"), nil
-		case keyPath:
-			return []byte("KEY_DATA"), nil
-		default:
-			return nil, fmt.Errorf("unexpected read path: %s", path)
-		}
-	}
+	svc := setupK8sElevateService(client)
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
 
 	cred, err := svc.GenerateProxyExecCredential("AWS", &IdsecSCAK8sClusterContext{CSP: "AWS"})
 	require.NoError(t, err)
 	require.NotNil(t, cred)
 	require.Equal(t, "client.authentication.k8s.io/v1beta1", cred.APIVersion)
 	require.Equal(t, "ExecCredential", cred.Kind)
-	require.Equal(t, "CERT_DATA", cred.Status.ClientCertificateData)
-	require.Equal(t, "KEY_DATA", cred.Status.ClientKeyData)
-
-	require.NotNil(t, provider.req)
-	require.Same(t, proxyBase, providerBase)
-	require.Equal(t, "DPA-K8S", provider.req.Service)
-	require.Equal(t, ssomodels.File, provider.req.OutputFormat)
-	require.Equal(t, tempDirPath, provider.req.Folder)
-	require.False(t, provider.req.AllowCaching)
-	require.Equal(t, tempDirPath, removedPath)
+	require.Contains(t, cred.Status.ClientCertificateData, "CERT")
+	require.Contains(t, cred.Status.ClientKeyData, "KEY")
+	require.NotEmpty(t, cred.Status.ExpirationTimestamp)
 }
 
-func TestGenerateProxyExecCredential_MissingCertificateFiles(t *testing.T) {
-	svc := setupK8sElevateService(&isp.IdsecISPServiceClient{})
-	provider := &mockProxyCertificateProvider{}
-
-	origProviderFactory := newSCAProxyCertificateProvider
-	origMakeTempDir := makeTempDir
-	origRemoveAll := removeAll
-	origGlobFiles := globFiles
-	origReadFile := readFile
-	t.Cleanup(func() {
-		newSCAProxyCertificateProvider = origProviderFactory
-		makeTempDir = origMakeTempDir
-		removeAll = origRemoveAll
-		globFiles = origGlobFiles
-		readFile = origReadFile
+func TestGenerateProxyExecCredential_MissingExpiresAt(t *testing.T) {
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{"token":{"client_certificate":"CERT","private_key":"KEY"},"metadata":{}}`,
+		},
 	})
+	defer cleanup()
 
-	newSCAProxyCertificateProvider = func(_ *services.IdsecISPBaseService) (scaK8sProxyCertificateProvider, error) {
-		return provider, nil
-	}
-	makeTempDir = func(_, _ string) (string, error) { return "/tmp/idsec-k8s-proxy-missing", nil }
-	removeAll = func(string) error { return nil }
-	globFiles = func(_ string) ([]string, error) { return []string{}, nil }
-	readFile = func(string) ([]byte, error) { return nil, nil }
+	svc := setupK8sElevateService(client)
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
 
 	cred, err := svc.GenerateProxyExecCredential("AWS", nil)
 	require.Error(t, err)
 	require.Nil(t, cred)
-	require.Contains(t, err.Error(), "files not found")
+	require.Contains(t, err.Error(), "expires_at")
+}
+
+func TestGenerateProxyExecCredential_MissingCertificateInResponse(t *testing.T) {
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{"token": {}}`,
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
+
+	cred, err := svc.GenerateProxyExecCredential("AWS", nil)
+	require.Error(t, err)
+	require.Nil(t, cred)
+	require.Contains(t, err.Error(), "proxy client certificate generation failed")
+}
+
+func TestGenerateProxyExecCredential_WithJWE(t *testing.T) {
+	var capturedBody map[string]interface{}
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return r.Method == http.MethodPost },
+			StatusCode:   http.StatusCreated,
+			ResponseBody: mockDpaSsoAcquireResponse,
+			OnRequest: func(r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
+
+	ctx := &IdsecSCAK8sClusterContext{CSP: "AZURE", JWEExtensionValue: "aks-jwt-token"}
+	// Directly test the inner function with a JWE value
+	cred, err := svc.generateDPAProxyExecCredential("aks-jwt-token")
+	require.NoError(t, err)
+	require.NotNil(t, cred)
+	require.Equal(t, "aks-jwt-token", capturedBody["jwe_extension_value"])
+	_ = ctx
+}
+
+func TestGenerateProxyExecCredential_Non201Status(t *testing.T) {
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusBadRequest,
+			ResponseBody: `{"error":"bad request"}`,
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
+
+	cred, err := svc.generateDPAProxyExecCredential("")
+	require.Error(t, err)
+	require.Nil(t, cred)
+	require.Contains(t, err.Error(), "proxy client certificate generation failed")
+	require.Contains(t, err.Error(), "400")
 }

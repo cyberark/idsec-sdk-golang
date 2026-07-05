@@ -29,4 +29,5 @@ type IdsecSIASettingsSetSettings struct {
 	ZspList                               *IdsecSIASettingsZspList                               `json:"zsp_list,omitempty" mapstructure:"zsp_list,omitempty" flag:"zsp-list" desc:"The settings for ZSP List."`
 	RdpFileSigning                        *IdsecSIASettingsRdpFileSigning                        `json:"rdp_file_signing,omitempty" mapstructure:"rdp_file_signing,omitempty" flag:"rdp-file-signing" desc:"The settings for RDP file signing."`
 	HTTPSRelay                            *IdsecSIASettingsHTTPSRelay                            `json:"https_relay,omitempty" mapstructure:"https_relay,omitempty" flag:"https-relay" desc:"The settings for HTTPS Relay."`
+	RdpChannels                           *IdsecSIASettingsRdpChannels                           `json:"rdp_channels,omitempty" mapstructure:"rdp_channels,omitempty" flag:"rdp-channels" desc:"The settings for RDP channels."`
 }

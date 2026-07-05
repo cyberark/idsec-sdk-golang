@@ -45,20 +45,6 @@ func LoadSCATestConfig(t *testing.T) map[string]interface{} {
 	return cfg
 }
 
-func LoadSCATestConfigForBlock(t *testing.T, configBlockKey string) map[string]interface{} {
-	t.Helper()
-
-	cfg := LoadSCATestConfig(t)
-	if block, ok := cfg[configBlockKey].(map[string]interface{}); ok {
-		if auth, ok := block["auth"].(map[string]interface{}); ok {
-			setEnv("IDSEC_E2E_ISP_USERNAME", strVal(auth, "username"))
-			setEnv("IDSEC_E2E_ISP_AUTH_METHOD", strVal(auth, "method"))
-			setEnv("IDSEC_E2E_ISP_IDENTITY_URL", strVal(auth, "identity_url"))
-		}
-	}
-	return cfg
-}
-
 func skipUnlessSupportedSCAEnv(t *testing.T) {
 	t.Helper()
 

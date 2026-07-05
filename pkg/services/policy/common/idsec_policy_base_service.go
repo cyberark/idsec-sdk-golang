@@ -350,15 +350,22 @@ func (s *IdsecPolicyBaseService) BasePoliciesStats(filters *policycommonmodels.I
 //   - schema: Pointer to a reflect.Type describing the policy structure for deserialization.
 //   - maxRetries: Maximum number of retries before giving up.
 //   - delaySeconds: Delay between retries in seconds.
+//   - allowTransientError: When true, Error status is treated as retryable (e.g. during updates where
+//     the policy may pass through Error transiently before reaching Active). When false, Error causes
+//     an immediate non-retryable failure (correct for create operations where Error is terminal).
+//   - maxErrorStreak: Only used when allowTransientError is true. Maximum number of consecutive Error
+//     polls before giving up. Once this many consecutive Error polls are seen without the status
+//     changing, the policy is considered permanently stuck. Pass 0 to retry indefinitely up to maxRetries.
 //
 // Returns an error if the policy enters an error state or retries are exhausted.
-func (s *IdsecPolicyBaseService) BaseWaitPolicyActive(policyID string, schema *reflect.Type, maxRetries int, delaySeconds int) error { //nolint:revive
+func (s *IdsecPolicyBaseService) BaseWaitPolicyActive(policyID string, schema *reflect.Type, maxRetries int, delaySeconds int, allowTransientError bool, maxErrorStreak int) error { //nolint:revive
 	if maxRetries < 0 {
 		s.logger.Error("Policy [%s] is not active after [%d] retries, might indicate an issue, moving on regardless", policyID, maxRetries)
 		return fmt.Errorf("policy [%s] is not active after [%d] retries", policyID, maxRetries)
 	}
 
 	var nonRetryableErr error
+	errorStreakCount := 0
 	tries := maxRetries + 1
 
 	err := common.RetryCall(
@@ -387,10 +394,20 @@ func (s *IdsecPolicyBaseService) BaseWaitPolicyActive(policyID string, schema *r
 			}
 
 			if status == policycommonmodels.StatusTypeError {
-				nonRetryableErr = fmt.Errorf("policy [%s] is in error state: %s", policyID, status)
-				return nil
+				if !allowTransientError {
+					nonRetryableErr = fmt.Errorf("policy [%s] is in error state: %s", policyID, status)
+					return nil
+				}
+				errorStreakCount++
+				if maxErrorStreak > 0 && errorStreakCount >= maxErrorStreak {
+					nonRetryableErr = fmt.Errorf("policy [%s] stuck in error state after %d consecutive retries", policyID, errorStreakCount)
+					return nil
+				}
+				return fmt.Errorf("policy [%s] is in error state, retrying [%d/%d]: %s", policyID, errorStreakCount, maxErrorStreak, status)
 			}
 
+			// Status is not Error — reset the error streak
+			errorStreakCount = 0
 			return fmt.Errorf("policy [%s] is not active yet: current status [%s]", policyID, status)
 		},
 		tries,
@@ -424,8 +441,8 @@ func (s *IdsecPolicyBaseService) BaseCreatePolicyAndWait(createPolicy map[string
 	if err != nil {
 		return nil, err
 	}
-	if err = s.BaseWaitPolicyActive(resp.PolicyID, schema, maxRetries, delaySeconds); err != nil {
-		return nil, err
+	if err = s.BaseWaitPolicyActive(resp.PolicyID, schema, maxRetries, delaySeconds, false, 0); err != nil {
+		return resp, err
 	}
 	return resp, nil
 }

@@ -65,6 +65,12 @@ func (s *IdsecPolicyGroupAccessService) CreatePolicy(createPolicy *groupaccessmo
 	respType := reflect.TypeOf(groupaccessmodels.IdsecPolicyGroupAccessPolicy{})
 	policyResp, err := s.baseService.BaseCreatePolicyAndWait(policyJSON, &respType, policyStatusActiveRetryCount, delayTimeInSeconds)
 	if err != nil {
+		if policyResp != nil && policyResp.PolicyID != "" {
+			s.Logger.Warning("Policy [%s] failed activation, fetching full policy for state persistence", policyResp.PolicyID)
+			if partialPolicy, fetchErr := s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{PolicyID: policyResp.PolicyID}); fetchErr == nil {
+				return nil, common.NewPartialStateError(err, partialPolicy)
+			}
+		}
 		return nil, err
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
@@ -100,8 +106,8 @@ func (s *IdsecPolicyGroupAccessService) UpdatePolicy(updatePolicy *groupaccessmo
 		return nil, err
 	}
 	respType := reflect.TypeOf(groupaccessmodels.IdsecPolicyGroupAccessPolicy{})
-	if err = s.baseService.BaseWaitPolicyActive(updatePolicy.Metadata.PolicyID, &respType, policyStatusActiveRetryCount, delayTimeInSeconds); err != nil {
-		return nil, err
+	if err = s.baseService.BaseWaitPolicyActive(updatePolicy.Metadata.PolicyID, &respType, policyStatusActiveRetryCount, delayTimeInSeconds, true, 10); err != nil {
+		return nil, common.NewPartialStateError(err, updatePolicy)
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
 		PolicyID: updatePolicy.Metadata.PolicyID,

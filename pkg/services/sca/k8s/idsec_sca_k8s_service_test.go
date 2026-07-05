@@ -2,13 +2,18 @@ package k8s
 
 import (
 	"encoding/json"
+	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	scainternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -24,6 +29,18 @@ func getMockService(t *testing.T) *IdsecSCAK8sService {
 	})
 	require.NoError(t, mockSvcErr)
 	return mockSvc
+}
+
+func setupK8sListTargetsService(client *isp.IdsecISPServiceClient) *IdsecSCAK8sService {
+	ispBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(ispBase, client)
+
+	return &IdsecSCAK8sService{
+		IdsecBaseService: &services.IdsecBaseService{
+			Logger: common.GlobalLogger,
+		},
+		IdsecISPBaseService: ispBase,
+	}
 }
 
 func TestSupportedCSPsForKubeconfigGeneration(t *testing.T) {
@@ -90,21 +107,21 @@ func TestListTargets_NilRequest(t *testing.T) {
 }
 
 func TestListTargets_EmptyCSP(t *testing.T) {
-	svc := getMockService(t)
+	svc := &IdsecSCAK8sService{}
 	req := &k8smodels.IdsecSCAk8sListClustersRequest{CSP: ""}
 	got, err := svc.ListTargets(req)
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "csp cannot be empty")
+	require.Contains(t, err.Error(), "not initialized")
 }
 
 func TestListTargets_EmptyCSP_WhitespaceOnly(t *testing.T) {
-	svc := getMockService(t)
+	svc := &IdsecSCAK8sService{}
 	req := &k8smodels.IdsecSCAk8sListClustersRequest{CSP: "   "}
 	got, err := svc.ListTargets(req)
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "csp cannot be empty")
+	require.Contains(t, err.Error(), "not initialized")
 }
 
 func TestListTargets_UnsupportedCSP(t *testing.T) {
@@ -114,6 +131,15 @@ func TestListTargets_UnsupportedCSP(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, got)
 	require.Contains(t, err.Error(), "unsupported csp")
+}
+
+func TestListTargets_CSPAndAll(t *testing.T) {
+	svc := getMockService(t)
+	req := &k8smodels.IdsecSCAk8sListClustersRequest{CSP: "aws", All: true}
+	got, err := svc.ListTargets(req)
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "choose either csp or all")
 }
 
 func TestListTargets_InvalidLimit_TooLow(t *testing.T) {
@@ -182,6 +208,202 @@ func TestListTargetsResponse_EmptyResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Response, 0)
 	require.Equal(t, 0, result.Total)
+}
+
+func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
+	var capturedPaths []string
+	var capturedQueries []string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/access/AWS/eligibility/clusters" && r.URL.Query().Get("nextToken") == ""
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "account"}],
+				"total": 2,
+				"nextToken": "aws-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/access/AWS/eligibility/clusters" && r.URL.Query().Get("nextToken") == "aws-page-2"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-002", "workspaceName": "AWS Account 2", "workspaceType": "account"}],
+				"total": 2
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/access/AZURE/eligibility/clusters" && r.URL.Query().Get("nextToken") == ""
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "subscription"}],
+				"total": 2,
+				"nextToken": "azure-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/access/AZURE/eligibility/clusters" && r.URL.Query().Get("nextToken") == "azure-page-2"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "azure-002", "workspaceName": "Azure Subscription 2", "workspaceType": "subscription"}],
+				"total": 2
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sListTargetsService(client)
+	resp, err := svc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{All: true})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 4, resp.Total)
+	require.Empty(t, resp.Response)
+	require.Len(t, resp.Responses, 2)
+	require.Len(t, resp.Responses["aws"].Response, 2)
+	require.Equal(t, 2, resp.Responses["aws"].Total)
+	require.Len(t, resp.Responses["azure"].Response, 2)
+	require.Equal(t, 2, resp.Responses["azure"].Total)
+	require.Nil(t, resp.NextToken)
+	require.Empty(t, resp.Errors)
+	require.ElementsMatch(t, []string{"/access/AWS/eligibility/clusters", "/access/AWS/eligibility/clusters", "/access/AZURE/eligibility/clusters", "/access/AZURE/eligibility/clusters"}, capturedPaths)
+	require.Contains(t, capturedQueries, "nextToken=aws-page-2")
+	require.Contains(t, capturedQueries, "nextToken=azure-page-2")
+
+	output, err := json.Marshal(resp)
+	require.NoError(t, err)
+	require.Contains(t, string(output), `"aws"`)
+	require.Contains(t, string(output), `"azure"`)
+	require.NotContains(t, string(output), `"responses"`)
+	require.NotContains(t, string(output), `"response":null`)
+}
+
+func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T) {
+	tests := []struct {
+		name                string
+		awsStatus           int
+		awsResponseBody     string
+		azureStatus         int
+		azureResponseBody   string
+		expectedWorkspaceID string
+		expectedErrorCSP    string
+		expectedSuccessCSP  string
+	}{
+		{
+			name:            "aws_fails_azure_succeeds",
+			awsStatus:       http.StatusInternalServerError,
+			awsResponseBody: `{"message": "aws unavailable"}`,
+			azureStatus:     http.StatusOK,
+			azureResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "subscription"}],
+				"total": 1
+			}`,
+			expectedWorkspaceID: "azure-001",
+			expectedErrorCSP:    "aws",
+			expectedSuccessCSP:  "azure",
+		},
+		{
+			name:      "azure_fails_aws_succeeds",
+			awsStatus: http.StatusOK,
+			awsResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "account"}],
+				"total": 1
+			}`,
+			azureStatus:         http.StatusInternalServerError,
+			azureResponseBody:   `{"message": "azure unavailable"}`,
+			expectedWorkspaceID: "aws-001",
+			expectedErrorCSP:    "azure",
+			expectedSuccessCSP:  "aws",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == "/access/AWS/eligibility/clusters" },
+					StatusCode:   tt.awsStatus,
+					ResponseBody: tt.awsResponseBody,
+				},
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == "/access/AZURE/eligibility/clusters" },
+					StatusCode:   tt.azureStatus,
+					ResponseBody: tt.azureResponseBody,
+				},
+			})
+			defer cleanup()
+
+			svc := setupK8sListTargetsService(client)
+			resp, err := svc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{})
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.Equal(t, 1, resp.Total)
+			require.Empty(t, resp.Response)
+			require.Len(t, resp.Responses, 1)
+			require.Len(t, resp.Responses[tt.expectedSuccessCSP].Response, 1)
+			require.Equal(t, tt.expectedWorkspaceID, resp.Responses[tt.expectedSuccessCSP].Response[0].WorkspaceID)
+			require.Len(t, resp.Errors, 1)
+			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "API call failed: ")
+			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "500")
+
+			output, err := json.Marshal(resp)
+			require.NoError(t, err)
+			require.Contains(t, string(output), `"`+tt.expectedSuccessCSP+`"`)
+			require.Contains(t, string(output), `"`+tt.expectedErrorCSP+`"`)
+			require.NotContains(t, string(output), `"responses"`)
+			require.NotContains(t, string(output), `"errors"`)
+		})
+	}
+}
+
+func TestListTargets_EmptyCSP_AllCSPsFailReturnsErrorsInResponse(t *testing.T) {
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusInternalServerError,
+			ResponseBody: `{"message": "unavailable"}`,
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sListTargetsService(client)
+	resp, err := svc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Empty(t, resp.Response)
+	require.Empty(t, resp.Responses)
+	require.Equal(t, 0, resp.Total)
+	require.Len(t, resp.Errors, 2)
+	require.Contains(t, resp.Errors["aws"], "API call failed: ")
+	require.Contains(t, resp.Errors["aws"], "500")
+	require.Contains(t, resp.Errors["azure"], "API call failed: ")
+	require.Contains(t, resp.Errors["azure"], "500")
 }
 
 // --- Positive test: response with multiple items decodes correctly ---

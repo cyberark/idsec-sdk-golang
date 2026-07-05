@@ -28,4 +28,5 @@ const (
 	IdsecSIASettingsFeatureNameZSPList                               = "ZSP_LIST"
 	IdsecSIASettingsFeatureNameRDPFileSigning                        = "RDP_FILE_SIGNING"
 	IdsecSIASettingsFeatureNameHTTPSRelay                            = "HTTPS_RELAY"
+	IdsecSIASettingsFeatureNameRDPChannels                           = "RDP_CHANNELS"
 )

@@ -4,7 +4,7 @@ import "strings"
 
 // IdsecSCAK8sGenerateKubeconfigRequest is the CLI schema for generate-kubeconfig (cobra flags / action wiring).
 type IdsecSCAK8sGenerateKubeconfigRequest struct {
-	CSP                string `json:"csp,omitempty" mapstructure:"csp,omitempty" flag:"csp" desc:"Cloud provider filter (aws | azure | gcp). Omit (with --all true) to generate for all CSPs."`
+	CSP                string `json:"csp,omitempty" mapstructure:"csp,omitempty" flag:"csp" desc:"Cloud provider filter (aws | azure). Omit (with --all true) to generate for all CSPs."`
 	All                string `json:"all,omitempty" mapstructure:"all,omitempty" flag:"all" default:"true" desc:"Generate kubeconfig for all CSPs: only \"true\" or \"false\" (default: true). Use --all true, --all false, or bare --all for true. A valid --csp still limits the response to that CSP."`
 	KubeconfigLocation string `json:"kubeconfig_location,omitempty" mapstructure:"kubeconfig_location,omitempty" flag:"kubeconfig-location" desc:"Custom file path to write the kubeconfig. Overrides default ~/.kube/idsec-cli/<csp>.yaml"`
 }
@@ -15,7 +15,7 @@ type IdsecSCAK8sGenerateKubeconfigResponse map[string]string
 // IdsecSCAK8sKubeconfigOutcome represents the result of a single CSP's kubeconfig
 // generation within a parallel execution batch.
 type IdsecSCAK8sKubeconfigOutcome struct {
-	// CSP is the cloud provider for this outcome (lowercase: aws, azure, gcp).
+	// CSP is the cloud provider for this outcome (lowercase: aws, azure).
 	CSP string `json:"csp"`
 
 	// Kubeconfig contains the generated YAML on success; empty on failure.

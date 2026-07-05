@@ -48,10 +48,10 @@ func TestListTargets_validation_table(t *testing.T) {
 		{name: "unsupported_csp_ibm", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "ibm"}},
 		{name: "unsupported_csp_oracle", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "oracle"}},
 		{name: "unsupported_csp_mixed_case", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "Ibm"}},
+		{name: "csp_and_all", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", All: true}},
 		// All supported CSPs still fail here because the service is uninitialized (no HTTP client).
 		{name: "uninitialized_aws", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"}},
 		{name: "uninitialized_azure", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"}},
-		{name: "uninitialized_gcp", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "GCP"}},
 		{name: "uninitialized_aws_with_workspace_id", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", WorkspaceID: "ws-123"}},
 		{name: "uninitialized_aws_with_limit", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", Limit: 10}},
 		{name: "uninitialized_azure_with_next_token", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE", NextToken: "tok123"}},
@@ -63,6 +63,15 @@ func TestListTargets_validation_table(t *testing.T) {
 			require.Error(t, err, "expected error for case %q, got nil (resp=%v)", tt.name, resp)
 		})
 	}
+}
+
+func TestListTargets_CSPAndAll(t *testing.T) {
+	svc := &IdsecSCACloudAccessService{}
+	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", All: true})
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.Contains(t, err.Error(), "choose either csp or all")
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +165,202 @@ func TestListTargets_EmptyResponse(t *testing.T) {
 	require.Empty(t, resp.Response)
 }
 
+func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
+	var capturedPaths []string
+	var capturedQueries []string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/api/access/AWS/eligibility" && r.URL.Query().Get("nextToken") == ""
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "ACCOUNT"}],
+				"total": 2,
+				"nextToken": "aws-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/api/access/AWS/eligibility" && r.URL.Query().Get("nextToken") == "aws-page-2"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-002", "workspaceName": "AWS Account 2", "workspaceType": "ACCOUNT"}],
+				"total": 2
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/api/access/AZURE/eligibility" && r.URL.Query().Get("nextToken") == ""
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "SUBSCRIPTION"}],
+				"total": 2,
+				"nextToken": "azure-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/api/access/AZURE/eligibility" && r.URL.Query().Get("nextToken") == "azure-page-2"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "azure-002", "workspaceName": "Azure Subscription 2", "workspaceType": "SUBSCRIPTION"}],
+				"total": 2
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{All: true})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 4, resp.Total)
+	require.Empty(t, resp.Response)
+	require.Len(t, resp.Responses, 2)
+	require.Len(t, resp.Responses["aws"].Response, 2)
+	require.Equal(t, 2, resp.Responses["aws"].Total)
+	require.Len(t, resp.Responses["azure"].Response, 2)
+	require.Equal(t, 2, resp.Responses["azure"].Total)
+	require.Empty(t, resp.NextToken)
+	require.Empty(t, resp.Errors)
+	require.ElementsMatch(t, []string{"/api/access/AWS/eligibility", "/api/access/AWS/eligibility", "/api/access/AZURE/eligibility", "/api/access/AZURE/eligibility"}, capturedPaths)
+	require.Contains(t, capturedQueries, "nextToken=aws-page-2")
+	require.Contains(t, capturedQueries, "nextToken=azure-page-2")
+
+	output, err := json.Marshal(resp)
+	require.NoError(t, err)
+	require.Contains(t, string(output), `"aws"`)
+	require.Contains(t, string(output), `"azure"`)
+	require.NotContains(t, string(output), `"responses"`)
+	require.NotContains(t, string(output), `"response":null`)
+}
+
+func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T) {
+	tests := []struct {
+		name                string
+		awsStatus           int
+		awsResponseBody     string
+		azureStatus         int
+		azureResponseBody   string
+		expectedWorkspaceID string
+		expectedErrorCSP    string
+		expectedSuccessCSP  string
+	}{
+		{
+			name:            "aws_fails_azure_succeeds",
+			awsStatus:       http.StatusInternalServerError,
+			awsResponseBody: `{"message": "aws unavailable"}`,
+			azureStatus:     http.StatusOK,
+			azureResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "SUBSCRIPTION"}],
+				"total": 1
+			}`,
+			expectedWorkspaceID: "azure-001",
+			expectedErrorCSP:    "aws",
+			expectedSuccessCSP:  "azure",
+		},
+		{
+			name:      "azure_fails_aws_succeeds",
+			awsStatus: http.StatusOK,
+			awsResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "ACCOUNT"}],
+				"total": 1
+			}`,
+			azureStatus:         http.StatusInternalServerError,
+			azureResponseBody:   `{"message": "azure unavailable"}`,
+			expectedWorkspaceID: "aws-001",
+			expectedErrorCSP:    "azure",
+			expectedSuccessCSP:  "aws",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == "/api/access/AWS/eligibility" },
+					StatusCode:   tt.awsStatus,
+					ResponseBody: tt.awsResponseBody,
+				},
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == "/api/access/AZURE/eligibility" },
+					StatusCode:   tt.azureStatus,
+					ResponseBody: tt.azureResponseBody,
+				},
+			})
+			defer cleanup()
+
+			svc := setupCloudAccessService(client)
+			resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{})
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.Equal(t, 1, resp.Total)
+			require.Empty(t, resp.Response)
+			require.Len(t, resp.Responses, 1)
+			require.Len(t, resp.Responses[tt.expectedSuccessCSP].Response, 1)
+			require.Equal(t, tt.expectedWorkspaceID, resp.Responses[tt.expectedSuccessCSP].Response[0].WorkspaceID)
+			require.Len(t, resp.Errors, 1)
+			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "API call failed: ")
+			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "500")
+
+			output, err := json.Marshal(resp)
+			require.NoError(t, err)
+			require.Contains(t, string(output), `"`+tt.expectedSuccessCSP+`"`)
+			require.Contains(t, string(output), `"`+tt.expectedErrorCSP+`"`)
+			require.NotContains(t, string(output), `"responses"`)
+			require.NotContains(t, string(output), `"errors"`)
+		})
+	}
+}
+
+func TestListTargets_EmptyCSP_AllCSPsFailReturnsErrorsInResponse(t *testing.T) {
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusInternalServerError,
+			ResponseBody: `{"message": "unavailable"}`,
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Empty(t, resp.Response)
+	require.Empty(t, resp.Responses)
+	require.Equal(t, 0, resp.Total)
+	require.Len(t, resp.Errors, 2)
+	require.Contains(t, resp.Errors["aws"], "API call failed: ")
+	require.Contains(t, resp.Errors["aws"], "500")
+	require.Contains(t, resp.Errors["azure"], "API call failed: ")
+	require.Contains(t, resp.Errors["azure"], "500")
+}
+
 // ---------------------------------------------------------------------------
 // Mock HTTP server tests — URL path verification
 // ---------------------------------------------------------------------------
@@ -171,8 +376,6 @@ func TestListTargets_URLPath(t *testing.T) {
 		{inputCSP: "aws", expectedPath: "/api/access/AWS/eligibility"},
 		{inputCSP: "AZURE", expectedPath: "/api/access/AZURE/eligibility"},
 		{inputCSP: "azure", expectedPath: "/api/access/AZURE/eligibility"},
-		{inputCSP: "GCP", expectedPath: "/api/access/GCP/eligibility"},
-		{inputCSP: "gcp", expectedPath: "/api/access/GCP/eligibility"},
 	}
 
 	for _, tt := range tests {
@@ -231,18 +434,24 @@ func TestListTargets_WorkspaceID(t *testing.T) {
 }
 
 // TestListTargets_Pagination verifies limit and nextToken are forwarded as query params
-// and that the response nextToken is read correctly.
+// and that single-CSP list-targets follows response nextToken values.
 func TestListTargets_Pagination(t *testing.T) {
-	responseJSON := `{"response": [], "total": 50, "nextToken": "next-page-token"}`
-
-	var capturedQuery string
+	var capturedQueries []string
 	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
 		{
-			Matcher:      func(r *http.Request) bool { return true },
+			Matcher:      func(r *http.Request) bool { return r.URL.Query().Get("nextToken") == "prev-token" },
 			StatusCode:   http.StatusOK,
-			ResponseBody: responseJSON,
+			ResponseBody: `{"response": [], "total": 50, "nextToken": "next-page-token"}`,
 			OnRequest: func(r *http.Request) {
-				capturedQuery = r.URL.RawQuery
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher:      func(r *http.Request) bool { return r.URL.Query().Get("nextToken") == "next-page-token" },
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"response": [], "total": 50}`,
+			OnRequest: func(r *http.Request) {
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
 			},
 		},
 	})
@@ -250,16 +459,20 @@ func TestListTargets_Pagination(t *testing.T) {
 
 	svc := setupCloudAccessService(client)
 	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{
-		CSP:       "GCP",
+		CSP:       "AWS",
 		Limit:     10,
 		NextToken: "prev-token",
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, "next-page-token", resp.NextToken)
-	require.Contains(t, capturedQuery, "limit=10")
-	require.Contains(t, capturedQuery, "nextToken=prev-token")
+	require.Equal(t, 50, resp.Total)
+	require.Empty(t, resp.NextToken)
+	require.Len(t, capturedQueries, 2)
+	require.Contains(t, capturedQueries[0], "limit=10")
+	require.Contains(t, capturedQueries[0], "nextToken=prev-token")
+	require.Contains(t, capturedQueries[1], "limit=10")
+	require.Contains(t, capturedQueries[1], "nextToken=next-page-token")
 }
 
 // TestListTargets_WorkspaceID_NotSentWhenEmpty verifies workspaceId is omitted
@@ -369,7 +582,7 @@ func TestListTargets_UnsupportedCSP_ErrorMessage(t *testing.T) {
 	}
 }
 
-// TestListTargets_AllSupportedCSPs_HitCorrectPath verifies AWS, AZURE and GCP each
+// TestListTargets_AllSupportedCSPs_HitCorrectPath verifies AWS and AZURE each
 // produce a distinct and correct URL path when the service is initialized.
 func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 	tests := []struct {
@@ -378,7 +591,6 @@ func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 	}{
 		{"AWS", "/api/access/AWS/eligibility"},
 		{"AZURE", "/api/access/AZURE/eligibility"},
-		{"GCP", "/api/access/GCP/eligibility"},
 	}
 
 	for _, tt := range tests {

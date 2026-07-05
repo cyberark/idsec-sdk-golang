@@ -4,11 +4,9 @@
 package k8s
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
-	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -19,8 +17,8 @@ import (
 // GenerateExecCredential produces a kubectl ExecCredential for the proxy
 // connection method using whatever CSP-specific certificate/secret flow the
 // provider needs. The shared *IdsecSCAK8sService is passed in so providers can
-// reuse package-internal helpers (e.g. the DPA SIA SSO short-lived certificate
-// flow) without duplicating wiring.
+// reuse package-internal helpers (e.g. DPA SSO acquire via generateDPAProxyExecCredential)
+// without duplicating wiring.
 type IdsecSCAK8sProxyProvider interface {
 	CSP() string
 	GenerateExecCredential(
@@ -33,43 +31,36 @@ type IdsecSCAK8sProxyProvider interface {
 // The CSP string is matched case-insensitively.
 func GetProxyProvider(csp string) (IdsecSCAK8sProxyProvider, error) {
 	switch strings.ToUpper(strings.TrimSpace(csp)) {
-	case commonmodels.WorkspaceTypeAWS:
+	case k8smodels.CSPAWS:
 		return &AWSProxyProvider{}, nil
-	case commonmodels.WorkspaceTypeAzure:
+	case k8smodels.CSPAzure:
 		return &AzureProxyProvider{}, nil
-	case "GCP":
-		return &GCPProxyProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported CSP for kubectl-login proxy flow: %q", csp)
 	}
 }
 
-// AzureProxyProvider is a forward-compatibility stub for Azure AKS proxy
-// connections. Full implementation will be added in a future release.
+// AzureProxyProvider implements IdsecSCAK8sProxyProvider for Azure AKS clusters
+// reached via the DPA proxy connection method.
+//
+// The AKS access token acquired by the CLI (via az CLI) must be placed in
+// ctx.JWEExtensionValue before calling GenerateExecCredential. It is forwarded
+// as jwe_extension_value in the DPA SSO acquire request so the DPA backend can
+// validate the caller's Azure identity.
 type AzureProxyProvider struct{}
 
 // CSP returns the Azure CSP identifier.
-func (p *AzureProxyProvider) CSP() string { return "AZURE" }
+func (p *AzureProxyProvider) CSP() string { return k8smodels.CSPAzure }
 
-// GenerateExecCredential is not yet implemented for Azure AKS proxy connections.
+// GenerateExecCredential issues a kubectl ExecCredential containing the
+// short-lived client certificate/key pair from DPA SSO acquire using the
+// AKS access token supplied in ctx.JWEExtensionValue.
 func (p *AzureProxyProvider) GenerateExecCredential(
-	_ *IdsecSCAK8sService,
-	_ *IdsecSCAK8sClusterContext,
+	s *IdsecSCAK8sService,
+	ctx *IdsecSCAK8sClusterContext,
 ) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	return nil, errors.New("azure aks proxy credential generation is not yet implemented; it will be added in a future release")
-}
-
-// GCPProxyProvider is a forward-compatibility stub for GCP GKE proxy
-// connections. Full implementation will be added in a future release.
-type GCPProxyProvider struct{}
-
-// CSP returns the GCP CSP identifier.
-func (p *GCPProxyProvider) CSP() string { return "GCP" }
-
-// GenerateExecCredential is not yet implemented for GCP GKE proxy connections.
-func (p *GCPProxyProvider) GenerateExecCredential(
-	_ *IdsecSCAK8sService,
-	_ *IdsecSCAK8sClusterContext,
-) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	return nil, errors.New("gcp gke proxy credential generation is not yet implemented; it will be added in a future release")
+	if ctx == nil || strings.TrimSpace(ctx.JWEExtensionValue) == "" {
+		return nil, fmt.Errorf("azure aks proxy: JWEExtensionValue (AKS access token) is required but was not set in the cluster context")
+	}
+	return s.generateDPAProxyExecCredential(ctx.JWEExtensionValue)
 }

@@ -923,6 +923,40 @@ func (s *IdsecSIASettingsService) SetHttpsRelay(httpsRelay *settingsmodels.Idsec
 	return s.HttpsRelay()
 }
 
+// RdpChannels retrieves the RDP Channels settings.
+//
+// Returns the current RDP Channels settings or an error if retrieval fails.
+func (s *IdsecSIASettingsService) RdpChannels() (*settingsmodels.IdsecSIASettingsRdpChannels, error) {
+	settingJSON, err := s.setting(settingsmodels.IdsecSIASettingsFeatureNameRDPChannels)
+	if err != nil {
+		return nil, err
+	}
+	var rdpChannels settingsmodels.IdsecSIASettingsRdpChannels
+	err = mapstructure.Decode(settingJSON, &rdpChannels)
+	if err != nil {
+		return nil, err
+	}
+	return &rdpChannels, nil
+}
+
+// SetRdpChannels sets the RDP Channels settings.
+//
+// Parameters:
+//   - rdpChannels: The settings to apply for RDP Channels.
+//
+// Returns an error if the operation fails.
+func (s *IdsecSIASettingsService) SetRdpChannels(rdpChannels *settingsmodels.IdsecSIASettingsRdpChannels) (*settingsmodels.IdsecSIASettingsRdpChannels, error) {
+	settingJSON, err := common.SerializeJSONCamel(rdpChannels)
+	if err != nil {
+		return nil, err
+	}
+	err = s.setSetting(settingsmodels.IdsecSIASettingsFeatureNameRDPChannels, settingJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.RdpChannels()
+}
+
 // ServiceConfig returns the service configuration for the IdsecSIASettingsService.
 func (s *IdsecSIASettingsService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig

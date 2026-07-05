@@ -16,20 +16,26 @@ const (
 
 // IdsecSIAHTTPSRelay represents an HTTPS relay in the connector management service.
 type IdsecSIAHTTPSRelay struct {
-	HTTPSRelayID             string                        `json:"https_relay_id" mapstructure:"https_relay_id" flag:"https-relay-id" desc:"The ID of the HTTPS relay." min_length:"2"`
-	HostIP                   string                        `json:"host_ip,omitempty" mapstructure:"host_ip,omitempty" flag:"host-ip" desc:"The IP address of the host machine."`
-	HostName                 string                        `json:"host_name,omitempty" mapstructure:"host_name,omitempty" flag:"host-name" desc:"The host name of the relay."`
-	Version                  string                        `json:"version,omitempty" mapstructure:"version,omitempty" flag:"version" desc:"The HTTPS relay version."`
-	ActiveSessionsCount      int                           `json:"active_sessions_count" mapstructure:"active_sessions_count" flag:"active-sessions-count" desc:"The number of currently active sessions." ge:"0"`
-	StatusCode               IdsecSIAHTTPSRelayStatusCodes `json:"status_code" mapstructure:"status_code" flag:"status-code" desc:"Numeric status: 0=INACTIVE, 1=ACTIVE, 2=INACTIVE+BLOCKED."`
-	Status                   string                        `json:"status,omitempty" mapstructure:"status,omitempty" flag:"status" desc:"The human-readable status of the HTTPS relay." default:"INACTIVE"`
-	OS                       string                        `json:"os,omitempty" mapstructure:"os,omitempty" flag:"os" desc:"The operating system of the HTTPS relay host."`
-	ProxySettings            string                        `json:"proxy_settings,omitempty" mapstructure:"proxy_settings,omitempty" flag:"proxy-settings" desc:"The HTTP proxy details, if configured."`
-	IsLatestVersion          bool                          `json:"is_latest_version" mapstructure:"is_latest_version" flag:"is-latest-version" desc:"Whether the HTTPS relay is on the latest version." default:"true"`
-	VersionToUpgrade         string                        `json:"version_to_upgrade,omitempty" mapstructure:"version_to_upgrade,omitempty" flag:"version-to-upgrade" desc:"The version to upgrade to, if the HTTPS relay is not on the latest version."`
-	IsUpgradable             bool                          `json:"is_upgradable" mapstructure:"is_upgradable" flag:"is-upgradable" desc:"Whether the HTTPS relay can be upgraded."`
-	LastJobStatus            string                        `json:"last_job_status,omitempty" mapstructure:"last_job_status,omitempty" flag:"last-job-status" desc:"The status of the last executed job."`
-	LastJobErrorCode         string                        `json:"last_job_error_code,omitempty" mapstructure:"last_job_error_code,omitempty" flag:"last-job-error-code" desc:"The error code of the last executed job."`
-	LastJobStatusDescription string                        `json:"last_job_status_description,omitempty" mapstructure:"last_job_status_description,omitempty" flag:"last-job-status-description" desc:"The description of the last executed job."`
-	LastJobInfoUpdateDate    string                        `json:"last_job_info_update_date,omitempty" mapstructure:"last_job_info_update_date,omitempty" flag:"last-job-info-update-date" desc:"The timestamp of the last job status update."`
+	HTTPSRelayID                     string                        `json:"https_relay_id" mapstructure:"https_relay_id" flag:"https-relay-id" desc:"The ID of the HTTPS relay." min_length:"2"`
+	HostIP                           string                        `json:"host_ip,omitempty" mapstructure:"host_ip,omitempty" flag:"host-ip" desc:"The IP address of the host machine."`
+	HostName                         string                        `json:"host_name,omitempty" mapstructure:"host_name,omitempty" flag:"host-name" desc:"The host name of the relay."`
+	Version                          string                        `json:"version,omitempty" mapstructure:"version,omitempty" flag:"version" desc:"The HTTPS relay version."`
+	ActiveSessionsCount              int                           `json:"active_sessions_count" mapstructure:"active_sessions_count" flag:"active-sessions-count" desc:"The number of currently active sessions." ge:"0"`
+	StatusCode                       IdsecSIAHTTPSRelayStatusCodes `json:"status_code" mapstructure:"status_code" flag:"status-code" desc:"Numeric status: 0=INACTIVE, 1=ACTIVE, 2=INACTIVE+BLOCKED."`
+	Status                           string                        `json:"status,omitempty" mapstructure:"status,omitempty" flag:"status" desc:"The human-readable status of the HTTPS relay." default:"INACTIVE"`
+	OS                               string                        `json:"os,omitempty" mapstructure:"os,omitempty" flag:"os" desc:"The operating system of the HTTPS relay host."`
+	ProxySettings                    string                        `json:"proxy_settings,omitempty" mapstructure:"proxy_settings,omitempty" flag:"proxy-settings" desc:"The HTTP proxy details, if configured."`
+	IsLatestVersion                  bool                          `json:"is_latest_version" mapstructure:"is_latest_version" flag:"is-latest-version" desc:"Whether the HTTPS relay is on the latest version." default:"true"`
+	VersionToUpgrade                 string                        `json:"version_to_upgrade,omitempty" mapstructure:"version_to_upgrade,omitempty" flag:"version-to-upgrade" desc:"The version to upgrade to, if the HTTPS relay is not on the latest version."`
+	IsUpgradable                     bool                          `json:"is_upgradable" mapstructure:"is_upgradable" flag:"is-upgradable" desc:"Whether the HTTPS relay can be upgraded."`
+	LastJobStatus                    string                        `json:"last_job_status,omitempty" mapstructure:"last_job_status,omitempty" flag:"last-job-status" desc:"The status of the last executed job."`
+	LastJobErrorCode                 string                        `json:"last_job_error_code,omitempty" mapstructure:"last_job_error_code,omitempty" flag:"last-job-error-code" desc:"The error code of the last executed job."`
+	LastJobStatusDescription         string                        `json:"last_job_status_description,omitempty" mapstructure:"last_job_status_description,omitempty" flag:"last-job-status-description" desc:"The description of the last executed job."`
+	LastJobInfoUpdateDate            string                        `json:"last_job_info_update_date,omitempty" mapstructure:"last_job_info_update_date,omitempty" flag:"last-job-info-update-date" desc:"The timestamp of the last job status update."`
+	IsCertRotation                   bool                          `json:"is_cert_rotation" mapstructure:"is_cert_rotation" flag:"is-cert-rotation" desc:"Indicates whether the relay supports certificate rotation."`
+	LastRotationJobStatus            string                        `json:"last_rotation_job_status,omitempty" mapstructure:"last_rotation_job_status,omitempty" flag:"last-rotation-job-status" desc:"The status of the last certificate rotation job, if one exists.(QUEUED, IN_PROGRESS, SUCCEEDED, FAILED, TIMED_OUT, REJECTED)."`
+	LastRotationJobErrorCode         string                        `json:"last_rotation_job_error_code,omitempty" mapstructure:"last_rotation_job_error_code,omitempty" flag:"last-rotation-job-error-code" desc:"The error code of the last certificate rotation job, if one exists."`
+	LastRotationJobInfoUpdateDate    string                        `json:"last_rotation_job_info_update_date,omitempty" mapstructure:"last_rotation_job_info_update_date,omitempty" flag:"last-rotation-job-info-update-date" desc:"The last time the rotation job status was updated, if one exists."`
+	LastSuccessRotationDate          string                        `json:"last_success_rotation_date,omitempty" mapstructure:"last_success_rotation_date,omitempty" flag:"last-success-rotation-date" desc:"The date of the last successful certificate rotation, if one exists."`
+	LastRotationJobStatusDescription string                        `json:"last_rotation_job_status_description,omitempty" mapstructure:"last_rotation_job_status_description,omitempty" flag:"last-rotation-job-status-description" desc:"The description of the last certificate rotation job error, if one exists."`
 }

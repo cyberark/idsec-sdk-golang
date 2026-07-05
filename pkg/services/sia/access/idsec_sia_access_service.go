@@ -33,7 +33,10 @@ const (
 	httpsRelaysURL           = "/api/https-relays"
 	httpsRelayURL            = "/api/https-relays/%s"
 	httpsRelayUpgradeURL     = "/api/https-relays/%s/upgrade"
+	httpsRelayRotateURL      = "/api/https-relays/%s/rotate"
 	httpsRelaySetupScriptURL = "/api/https-relays/setup-script"
+
+	connectorRotateURL = "/api/connectors/%s/rotate"
 
 	// Linux / Darwin Commands
 	unixStopConnectorServiceCmd   = "sudo systemctl stop cyberark-dpa-connector"
@@ -782,6 +785,50 @@ func (s *IdsecSIAAccessService) UpgradeRelay(upgradeRelay *accessmodels.IdsecSIA
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to upgrade HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	return nil
+}
+
+// RotateRelay initiates a certificate rotation process for an existing HTTPS relay.
+func (s *IdsecSIAAccessService) RotateRelay(rotateRelay *accessmodels.IdsecSIARotateHTTPSRelay) error {
+	if rotateRelay.HTTPSRelayID == "" {
+		return fmt.Errorf("HTTPS relay ID is required")
+	}
+	s.Logger.Info("Rotating certificate for HTTPS relay [%s]", rotateRelay.HTTPSRelayID)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(httpsRelayRotateURL, rotateRelay.HTTPSRelayID), nil)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to rotate HTTPS relay certificate - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	return nil
+}
+
+// RotateConnector initiates a certificate rotation process for an existing connector.
+func (s *IdsecSIAAccessService) RotateConnector(rotateConnector *accessmodels.IdsecSIARotateConnector) error {
+	if rotateConnector.ConnectorID == "" {
+		return fmt.Errorf("connector ID is required")
+	}
+	s.Logger.Info("Rotating certificate for connector [%s]", rotateConnector.ConnectorID)
+	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(connectorRotateURL, rotateConnector.ConnectorID), nil)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusCreated {
+		return fmt.Errorf("failed to rotate connector certificate - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	return nil
 }
