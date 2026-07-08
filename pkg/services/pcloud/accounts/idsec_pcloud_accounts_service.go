@@ -26,6 +26,7 @@ import (
 const (
 	accountsURL                        = "/api/accounts"
 	accountURL                         = "/api/accounts/%s/"
+	accountURLOld                      = "/WebServices/PIMServices.svc/Accounts/%s/"
 	accountSecretVersionsURL           = "/api/accounts/%s/secret/versions"   // #nosec G101
 	generateAccountCredentialsURL      = "/api/accounts/%s/secret/generate"   // #nosec G101
 	verifyAccountCredentialsURL        = "/api/accounts/%s/verify"            // #nosec G101
@@ -789,7 +790,17 @@ func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecP
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Account.htm
 func (s *IdsecPCloudAccountsService) Delete(deleteAccount *accountsmodels.IdsecPCloudDeleteAccount) error {
 	s.Logger.Info("Deleting account [%s]", deleteAccount.AccountID)
-	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(accountURL, deleteAccount.AccountID), nil, nil)
+	account, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{
+		AccountID: deleteAccount.AccountID,
+	})
+	if err != nil {
+		return err
+	}
+	chosenAccountURL := accountURL
+	if account.SecretType == accountsmodels.Key {
+		chosenAccountURL = accountURLOld
+	}
+	response, err := s.ISPClient().Delete(context.Background(), fmt.Sprintf(chosenAccountURL, deleteAccount.AccountID), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -799,7 +810,7 @@ func (s *IdsecPCloudAccountsService) Delete(deleteAccount *accountsmodels.IdsecP
 			common.GlobalLogger.Warning("Error closing response body")
 		}
 	}(response.Body)
-	if response.StatusCode != http.StatusNoContent {
+	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to delete account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	return nil

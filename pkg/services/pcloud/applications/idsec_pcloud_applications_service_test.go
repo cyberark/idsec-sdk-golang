@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	applicationsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications/models"
 )
@@ -508,7 +509,7 @@ func TestCreateApplicationAuthMethod(t *testing.T) {
 				AppID:     "app-123",
 				AuthType:  applicationsmodels.ApplicationAuthMethodHash,
 				AuthValue: "test-hash",
-				Comment:   "Test hash method",
+				Comment:   common.Ptr("Test hash method"),
 			},
 			mockPostResponse: MockHTTPResponse(http.StatusCreated, ""),
 			mockGetResponse:  MockHTTPResponse(http.StatusOK, AuthMethodResponseJSON),

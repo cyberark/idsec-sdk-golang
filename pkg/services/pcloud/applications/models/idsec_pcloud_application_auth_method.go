@@ -11,6 +11,16 @@ const (
 	ApplicationAuthMethodCertificateAttr         = "certificateattr"
 )
 
+var ApplicationAuthMethodTypes = []string{
+	ApplicationAuthMethodHash,
+	ApplicationAuthMethodOsUser,
+	ApplicationAuthMethodMachineAddress,
+	ApplicationAuthMethodPath,
+	ApplicationAuthMethodCertificateSerialNumber,
+	ApplicationAuthMethodKubernetes,
+	ApplicationAuthMethodCertificateAttr,
+}
+
 // IdsecPCloudApplicationAuthMethodCertKeyVal represents a key-value pair for certificate attributes.
 type IdsecPCloudApplicationAuthMethodCertKeyVal struct {
 	Key   string `json:"key" mapstructure:"key" flag:"key" desc:"The attribute key"`
@@ -31,16 +41,16 @@ type IdsecPCloudApplicationAuthMethod struct {
 	AllowInternalScripts *bool `json:"allow_internal_scripts,omitempty" mapstructure:"allow_internal_scripts,omitempty" flag:"allow-internal-scripts" desc:"Whether to allow internal scripts"`
 
 	// Hash, certificate serial number, certificate type extras
-	Comment string `json:"comment,omitempty" mapstructure:"comment,omitempty" flag:"comment" desc:"A comment for the authentication method"`
+	Comment *string `json:"comment,omitempty" mapstructure:"comment,omitempty" flag:"comment" desc:"A comment for the authentication method"`
 
 	// Kubernetes type extras, only one of them should exist
-	Namespace   string `json:"namespace,omitempty" mapstructure:"namespace,omitempty" flag:"namespace" desc:"The Kubernetes namespace"`
-	Image       string `json:"image,omitempty" mapstructure:"image,omitempty" flag:"image" desc:"The Kubernetes image"`
-	EnvVarName  string `json:"env_var_name,omitempty" mapstructure:"env_var_name,omitempty" flag:"env-var-name" desc:"The Kubernetes environment variable name"`
-	EnvVarValue string `json:"env_var_value,omitempty" mapstructure:"env_var_value,omitempty" flag:"env-var-value" desc:"The Kubernetes environment variable value"`
+	Namespace   *string `json:"namespace,omitempty" mapstructure:"namespace,omitempty" flag:"namespace" desc:"The Kubernetes namespace"`
+	Image       *string `json:"image,omitempty" mapstructure:"image,omitempty" flag:"image" desc:"The Kubernetes image"`
+	EnvVarName  *string `json:"env_var_name,omitempty" mapstructure:"env_var_name,omitempty" flag:"env-var-name" desc:"The Kubernetes environment variable name"`
+	EnvVarValue *string `json:"env_var_value,omitempty" mapstructure:"env_var_value,omitempty" flag:"env-var-value" desc:"The Kubernetes environment variable value"`
 
 	// Certificate type extras
-	Subject              []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"subject,omitempty" mapstructure:"subject,omitempty" flag:"subject" desc:"The certificate subject attributes"`
-	Issuer               []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"issuer,omitempty" mapstructure:"issuer,omitempty" flag:"issuer" desc:"The certificate issuer attributes"`
-	SubjectAlternateName []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"subject_alternate_name,omitempty" mapstructure:"subject_alternate_name,omitempty" flag:"subject-alternate-name" desc:"The certificate subject alternate name attributes"`
+	Subject                []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"subject,omitempty" mapstructure:"subject,omitempty" flag:"subject" desc:"The certificate subject attributes"`
+	Issuer                 []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"issuer,omitempty" mapstructure:"issuer,omitempty" flag:"issuer" desc:"The certificate issuer attributes"`
+	SubjectAlternativeName []IdsecPCloudApplicationAuthMethodCertKeyVal `json:"subject_alternative_name,omitempty" mapstructure:"subject_alternative_name,omitempty" flag:"subject-alternative-name" desc:"The certificate subject alternative name attributes"`
 }

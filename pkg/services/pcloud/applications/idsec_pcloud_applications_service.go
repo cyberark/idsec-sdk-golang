@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -21,6 +25,9 @@ const (
 	applicationURL            = "WebServices/PIMServices.svc/Applications/%s"
 	applicationAuthMethodsURL = "WebServices/PIMServices.svc/Applications/%s/Authentications"
 	applicationAuthMethodURL  = "WebServices/PIMServices.svc/Applications/%s/Authentications/%s"
+
+	maxAuthMethodCreationRetries = 5
+	authMethodCreationRetryDelay = 1 * time.Second
 )
 
 // IdsecPCloudApplicationsService is the service for managing pCloud Applications.
@@ -117,6 +124,33 @@ func (s *IdsecPCloudApplicationsService) Create(createApplication *applicationsm
 		return nil, fmt.Errorf("failed to create application - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	return s.Get(&applicationsmodels.IdsecPCloudGetApplication{AppID: createApplication.AppID})
+}
+
+// Update updates a pCloud application.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Update%20an%20Application.htm
+func (s *IdsecPCloudApplicationsService) Update(updateApplication *applicationsmodels.IdsecPCloudUpdateApplication) (*applicationsmodels.IdsecPCloudApplication, error) {
+	s.Logger.Info("Updating pCloud application")
+	_, err := s.Get(&applicationsmodels.IdsecPCloudGetApplication{AppID: updateApplication.AppID})
+	if err != nil {
+		return nil, err
+	}
+	err = s.Delete(&applicationsmodels.IdsecPCloudDeleteApplication{AppID: updateApplication.AppID})
+	if err != nil {
+		return nil, err
+	}
+	return s.Create(&applicationsmodels.IdsecPCloudCreateApplication{
+		AppID:               updateApplication.AppID,
+		Description:         updateApplication.Description,
+		Location:            updateApplication.Location,
+		AccessPermittedFrom: updateApplication.AccessPermittedFrom,
+		AccessPermittedTo:   updateApplication.AccessPermittedTo,
+		ExpirationDate:      updateApplication.ExpirationDate,
+		Disabled:            updateApplication.Disabled,
+		BusinessOwnerFName:  updateApplication.BusinessOwnerFName,
+		BusinessOwnerLName:  updateApplication.BusinessOwnerLName,
+		BusinessOwnerEmail:  updateApplication.BusinessOwnerEmail,
+		BusinessOwnerPhone:  updateApplication.BusinessOwnerPhone,
+	})
 }
 
 // Get retrieves a pCloud application.
@@ -255,76 +289,122 @@ func (s *IdsecPCloudApplicationsService) ListBy(filter *applicationsmodels.Idsec
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Add%20Authentication.htm
 func (s *IdsecPCloudApplicationsService) CreateAuthMethod(createApplicationAuthMethod *applicationsmodels.IdsecPCloudCreateApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
 	s.Logger.Info("Creating pCloud application auth method")
+	if !slices.Contains(applicationsmodels.ApplicationAuthMethodTypes, createApplicationAuthMethod.AuthType) {
+		return nil, fmt.Errorf("unsupported auth type: %s", createApplicationAuthMethod.AuthType)
+	}
 	authMethodJSON := map[string]interface{}{
 		"AuthType": createApplicationAuthMethod.AuthType,
 	}
-	switch createApplicationAuthMethod.AuthType {
-	case applicationsmodels.ApplicationAuthMethodHash,
-		applicationsmodels.ApplicationAuthMethodMachineAddress,
-		applicationsmodels.ApplicationAuthMethodOsUser,
-		applicationsmodels.ApplicationAuthMethodPath,
-		applicationsmodels.ApplicationAuthMethodCertificateSerialNumber:
+	if createApplicationAuthMethod.AuthType != applicationsmodels.ApplicationAuthMethodCertificateAttr {
 		if createApplicationAuthMethod.AuthValue == "" {
 			return nil, fmt.Errorf("auth value is required")
 		}
 		authMethodJSON["AuthValue"] = createApplicationAuthMethod.AuthValue
-		authMethodJSON["Comment"] = createApplicationAuthMethod.Comment
-		if createApplicationAuthMethod.AuthType == applicationsmodels.ApplicationAuthMethodPath {
-			authMethodJSON["IsFolder"] = createApplicationAuthMethod.IsFolder
-			authMethodJSON["AllowInternalScripts"] = createApplicationAuthMethod.AllowInternalScripts
+	}
+	switch createApplicationAuthMethod.AuthType {
+	case applicationsmodels.ApplicationAuthMethodPath:
+		authMethodJSON["AuthValue"] = createApplicationAuthMethod.AuthValue
+		if createApplicationAuthMethod.IsFolder != nil {
+			authMethodJSON["IsFolder"] = *createApplicationAuthMethod.IsFolder
+		}
+		if createApplicationAuthMethod.AllowInternalScripts != nil {
+			authMethodJSON["AllowInternalScripts"] = *createApplicationAuthMethod.AllowInternalScripts
+		}
+	case applicationsmodels.ApplicationAuthMethodHash,
+		applicationsmodels.ApplicationAuthMethodCertificateSerialNumber:
+		if createApplicationAuthMethod.Comment != nil {
+			authMethodJSON["Comment"] = *createApplicationAuthMethod.Comment
 		}
 	case applicationsmodels.ApplicationAuthMethodCertificateAttr:
-		if createApplicationAuthMethod.Subject == nil && createApplicationAuthMethod.Issuer == nil && createApplicationAuthMethod.SubjectAlternateName == nil {
-			return nil, fmt.Errorf("at least one of subject, issuer, or subject alternate name must be provided for certificate attribute auth type")
-		}
-		authMethodJSON["AuthValue"] = createApplicationAuthMethod.AuthValue
 		if createApplicationAuthMethod.Subject != nil {
-			authMethodJSON["Subject"] = createApplicationAuthMethod.Subject
+			subjects := []string{}
+			for _, subject := range createApplicationAuthMethod.Subject {
+				subjects = append(subjects, fmt.Sprintf("%s=%s", subject.Key, subject.Value))
+			}
+			authMethodJSON["Subject"] = subjects
 		}
 		if createApplicationAuthMethod.Issuer != nil {
-			authMethodJSON["Issuer"] = createApplicationAuthMethod.Issuer
+			issuers := []string{}
+			for _, issuer := range createApplicationAuthMethod.Issuer {
+				issuers = append(issuers, fmt.Sprintf("%s=%s", issuer.Key, issuer.Value))
+			}
+			authMethodJSON["Issuer"] = issuers
 		}
-		if createApplicationAuthMethod.SubjectAlternateName != nil {
-			authMethodJSON["SubjectAlternateName"] = createApplicationAuthMethod.SubjectAlternateName
+		if createApplicationAuthMethod.SubjectAlternativeName != nil {
+			subjectAlternativeNames := []string{}
+			for _, subjectAlternativeName := range createApplicationAuthMethod.SubjectAlternativeName {
+				subjectAlternativeNames = append(subjectAlternativeNames, fmt.Sprintf("%s=%s", subjectAlternativeName.Key, subjectAlternativeName.Value))
+			}
+			authMethodJSON["SubjectAlternativeName"] = subjectAlternativeNames
 		}
 	case applicationsmodels.ApplicationAuthMethodKubernetes:
-		if createApplicationAuthMethod.Namespace == "" || createApplicationAuthMethod.Image == "" || createApplicationAuthMethod.EnvVarName == "" || createApplicationAuthMethod.EnvVarValue == "" {
-			return nil, fmt.Errorf("all Kubernetes fields must be provided for Kubernetes auth type")
+		if createApplicationAuthMethod.Namespace == nil || createApplicationAuthMethod.Image == nil || createApplicationAuthMethod.EnvVarName == nil || createApplicationAuthMethod.EnvVarValue == nil {
+			return nil, fmt.Errorf("all Kubernetes fields must be provided for Kubernetes auth type: namespace, image, env-var-name, env-var-value")
 		}
-		authMethodJSON["AuthValue"] = createApplicationAuthMethod.AuthValue
-		authMethodJSON["Namespace"] = createApplicationAuthMethod.Namespace
-		authMethodJSON["Image"] = createApplicationAuthMethod.Image
-		authMethodJSON["EnvVarName"] = createApplicationAuthMethod.EnvVarName
-		authMethodJSON["EnvVarValue"] = createApplicationAuthMethod.EnvVarValue
-	default:
-		return nil, fmt.Errorf("unsupported auth type: %s", createApplicationAuthMethod.AuthType)
+		authMethodJSON["Namespace"] = *createApplicationAuthMethod.Namespace
+		authMethodJSON["Image"] = *createApplicationAuthMethod.Image
+		authMethodJSON["EnvVarName"] = *createApplicationAuthMethod.EnvVarName
+		authMethodJSON["EnvVarValue"] = *createApplicationAuthMethod.EnvVarValue
 	}
-	response, err := s.postOperation()(context.Background(), fmt.Sprintf(applicationAuthMethodsURL, createApplicationAuthMethod.AppID), map[string]interface{}{"authentication": authMethodJSON})
-	if err != nil {
-		return nil, err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	// Retry in cases of parallel auth method creations
+	for i := 0; i < maxAuthMethodCreationRetries; i++ {
+		response, err := s.postOperation()(context.Background(), fmt.Sprintf(applicationAuthMethodsURL, createApplicationAuthMethod.AppID), map[string]interface{}{"authentication": authMethodJSON})
 		if err != nil {
-			common.GlobalLogger.Warning("Error closing response body")
+			return nil, err
 		}
-	}(response.Body)
-	if response.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("failed to create application auth method - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-	}
-	authMethods, err := s.ListAuthMethodsBy(&applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter{
-		AppID:     createApplicationAuthMethod.AppID,
-		AuthTypes: []string{createApplicationAuthMethod.AuthType},
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, authMethod := range authMethods {
-		if authMethod.AuthType == createApplicationAuthMethod.AuthType {
-			return authMethod, nil
+		defer func(Body io.ReadCloser) {
+			err := Body.Close()
+			if err != nil {
+				common.GlobalLogger.Warning("Error closing response body")
+			}
+		}(response.Body)
+		if response.StatusCode != http.StatusCreated {
+			return nil, fmt.Errorf("failed to create application auth method - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 		}
+		authMethods, err := s.ListAuthMethodsBy(&applicationsmodels.IdsecPCloudApplicationAuthMethodsFilter{
+			AppID:     createApplicationAuthMethod.AppID,
+			AuthTypes: []string{createApplicationAuthMethod.AuthType},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, authMethod := range authMethods {
+			if authMethod.AuthType == createApplicationAuthMethod.AuthType {
+				return authMethod, nil
+			}
+		}
+		time.Sleep(authMethodCreationRetryDelay)
 	}
 	return nil, fmt.Errorf("created auth method not found")
+}
+
+// UpdateAuthMethod updates a pCloud application auth method.
+// https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/Add%20Authentication.htm
+func (s *IdsecPCloudApplicationsService) UpdateAuthMethod(updateApplicationAuthMethod *applicationsmodels.IdsecPCloudUpdateApplicationAuthMethod) (*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
+	s.Logger.Info("Updating pCloud application auth method")
+	_, err := s.GetAuthMethod(&applicationsmodels.IdsecPCloudGetApplicationAuthMethod{AppID: updateApplicationAuthMethod.AppID, AuthID: updateApplicationAuthMethod.AuthID})
+	if err != nil {
+		return nil, err
+	}
+	err = s.DeleteAuthMethod(&applicationsmodels.IdsecPCloudDeleteApplicationAuthMethod{AppID: updateApplicationAuthMethod.AppID, AuthID: updateApplicationAuthMethod.AuthID})
+	if err != nil {
+		return nil, err
+	}
+	return s.CreateAuthMethod(&applicationsmodels.IdsecPCloudCreateApplicationAuthMethod{
+		AppID:                  updateApplicationAuthMethod.AppID,
+		AuthType:               updateApplicationAuthMethod.AuthType,
+		AuthValue:              updateApplicationAuthMethod.AuthValue,
+		IsFolder:               updateApplicationAuthMethod.IsFolder,
+		AllowInternalScripts:   updateApplicationAuthMethod.AllowInternalScripts,
+		Comment:                updateApplicationAuthMethod.Comment,
+		Namespace:              updateApplicationAuthMethod.Namespace,
+		Image:                  updateApplicationAuthMethod.Image,
+		EnvVarName:             updateApplicationAuthMethod.EnvVarName,
+		EnvVarValue:            updateApplicationAuthMethod.EnvVarValue,
+		Subject:                updateApplicationAuthMethod.Subject,
+		Issuer:                 updateApplicationAuthMethod.Issuer,
+		SubjectAlternativeName: updateApplicationAuthMethod.SubjectAlternativeName,
+	})
 }
 
 // GetAuthMethod retrieves a pCloud application auth method.
@@ -362,6 +442,34 @@ func (s *IdsecPCloudApplicationsService) DeleteAuthMethod(deleteApplicationAuthM
 	return nil
 }
 
+// parseCertKeyValStrings parses a raw value made of "key=value" strings (as returned for the
+// Subject, Issuer and SubjectAlternativeName certificate auth method attributes) back into a list
+// of key/value maps that mapstructure can decode into []IdsecPCloudApplicationAuthMethodCertKeyVal.
+func parseCertKeyValStrings(raw interface{}) ([]map[string]interface{}, error) {
+	var rawItems []interface{}
+	switch v := raw.(type) {
+	case []interface{}:
+		rawItems = v
+	case string:
+		rawItems = []interface{}{v}
+	default:
+		return nil, fmt.Errorf("unsupported format [%T]", raw)
+	}
+	certKeyVals := make([]map[string]interface{}, 0, len(rawItems))
+	for _, rawItem := range rawItems {
+		item, ok := rawItem.(string)
+		if !ok {
+			return nil, fmt.Errorf("unsupported item format [%T]", rawItem)
+		}
+		key, value, found := strings.Cut(item, "=")
+		if !found {
+			return nil, fmt.Errorf("expected format \"key=value\", got [%s]", item)
+		}
+		certKeyVals = append(certKeyVals, map[string]interface{}{"key": key, "value": value})
+	}
+	return certKeyVals, nil
+}
+
 // ListAuthMethods lists all auth methods for a given pCloud application.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud/Latest/en/Content/WebServices/List%20all%20Authentication%20Methods%20of%20a%20Specific%20Application.htm
 func (s *IdsecPCloudApplicationsService) ListAuthMethods(listApplicationAuthMethods *applicationsmodels.IdsecPCloudListApplicationAuthMethods) ([]*applicationsmodels.IdsecPCloudApplicationAuthMethod, error) {
@@ -396,6 +504,29 @@ func (s *IdsecPCloudApplicationsService) ListAuthMethods(listApplicationAuthMeth
 		}
 		if appID, ok := authMethodJSONMap["auth_i_d"]; ok {
 			authMethodJSONMap["auth_id"] = appID
+		}
+		if isFolder, ok := authMethodJSONMap["is_folder"]; ok && isFolder != nil {
+			isFolderBool, err := strconv.ParseBool(strings.ToLower(fmt.Sprintf("%v", isFolder)))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse is_folder value [%v] as boolean - [%w]", isFolder, err)
+			}
+			authMethodJSONMap["is_folder"] = isFolderBool
+		}
+		if allowInternalScripts, ok := authMethodJSONMap["allow_internal_scripts"]; ok && allowInternalScripts != nil {
+			allowInternalScriptsBool, err := strconv.ParseBool(strings.ToLower(fmt.Sprintf("%v", allowInternalScripts)))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse allow_internal_scripts value [%v] as boolean - [%w]", allowInternalScripts, err)
+			}
+			authMethodJSONMap["allow_internal_scripts"] = allowInternalScriptsBool
+		}
+		for _, certKeyValField := range []string{"subject", "issuer", "subject_alternative_name"} {
+			if rawCertKeyVals, ok := authMethodJSONMap[certKeyValField]; ok && rawCertKeyVals != nil {
+				certKeyVals, err := parseCertKeyValStrings(rawCertKeyVals)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse %s value [%v] - [%w]", certKeyValField, rawCertKeyVals, err)
+				}
+				authMethodJSONMap[certKeyValField] = certKeyVals
+			}
 		}
 		authMethodJSONMap["app_id"] = listApplicationAuthMethods.AppID
 		var authMethod applicationsmodels.IdsecPCloudApplicationAuthMethod

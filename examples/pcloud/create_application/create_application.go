@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud"
 	applicationsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications/models"
@@ -52,7 +53,7 @@ func main() {
 		AppID:     application.AppID,
 		AuthType:  applicationsmodels.ApplicationAuthMethodHash,
 		AuthValue: "myhash",
-		Comment:   "My hash auth method",
+		Comment:   common.Ptr("My hash auth method"),
 	})
 	if err != nil {
 		panic(err)
