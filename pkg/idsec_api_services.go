@@ -40,6 +40,7 @@ import (
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/discovery"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub"

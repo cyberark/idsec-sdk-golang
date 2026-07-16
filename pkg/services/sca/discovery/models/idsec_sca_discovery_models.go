@@ -1,5 +1,5 @@
 // Package models provides data structures for SCA discovery operations including
-// request, response and account info types relocated from the Cloud Access Policy module.
+// request, response and account info types.
 package models
 
 // IdsecSCADiscoveryResponse represents the initial response returned after starting an SCA discovery job.
@@ -19,8 +19,6 @@ type IdsecSCADiscoveryResponse struct {
 // Fields:
 //   - ID: Workspace / Account identifier (required).
 //   - NewAccount: Flag indicating new account onboarding.
-//
-// NOTE: Relocated.
 type IdsecSCADiscoveryAccountInfo struct {
 	ID         string `json:"id" mapstructure:"id" validate:"required" flag:"id" desc:"The ID of the workspace to discover (AWS - AWS account ID | Azure - Management group, subscription, or resource group ID | GCP - Google Cloud project ID )"`
 	NewAccount bool   `json:"new_account" mapstructure:"new_account" flag:"new-account" default:"false" desc:"Indicates whether the account is new to an already onboarded organization and needs to be discovered (e.g., a new AWS account in an already onboarded AWS organization; a new GCP project in an already onboarded Google Cloud organization; a new management group/subscription in an already onboarded Microsoft Entra ID tenant). Defaults to false."`
@@ -32,8 +30,6 @@ type IdsecSCADiscoveryAccountInfo struct {
 //   - CSP: Cloud service provider identifier (aws|azure|gcp).
 //   - OrganizationID: Root organization / subscription / folder id.
 //   - AccountInfo: Nested account/workspace info payload.
-//
-// NOTE: Relocated.
 type IdsecSCADiscoveryRequest struct {
 	CSP            string                       `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"The cloud provider that hosts the workspace to discover (AWS | AZURE | GCP)"`
 	OrganizationID string                       `json:"organization_id" mapstructure:"organization_id" validate:"required" flag:"organization-id" desc:"The ID of the organization to discover (AWS - The AWS organization ID | AZURE: Microsoft Entra ID Directory (Tenant) ID | GCP: Google Cloud organization ID)"`

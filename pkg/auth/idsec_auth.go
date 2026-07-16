@@ -50,10 +50,12 @@ type IdsecAuth interface {
 //
 // A single IdsecAuthBase instance may be shared across many goroutines (for example, the
 // Terraform provider hands one shared authenticator to every resource and data source).
-// All access to the Token/ActiveProfile/ActiveAuthProfile fields must therefore go through
-// the synchronized accessors (GetToken/snapshotState/setState) rather than touching the
-// fields directly. The stored *auth.IdsecToken is treated as immutable once published: it
-// is always created fresh and swapped by pointer, never mutated in place.
+// All access to the Token/ActiveProfile/ActiveAuthProfile/secret fields must therefore go
+// through the synchronized accessors (GetToken/GetSecret/snapshotState/setState/setSecret)
+// rather than touching the fields directly. The stored *auth.IdsecToken and *auth.IdsecSecret
+// are treated as immutable once published: they are always created fresh and swapped by
+// pointer, never mutated in place. The secret is retained in memory only and is never
+// persisted to the keyring or any cache.
 type IdsecAuthBase struct {
 	Authenticator       IdsecAuth
 	Logger              *common.IdsecLogger
@@ -62,8 +64,12 @@ type IdsecAuthBase struct {
 	Token               *auth.IdsecToken
 	ActiveProfile       *models.IdsecProfile
 	ActiveAuthProfile   *auth.IdsecAuthProfile
+	// secret is the in-memory credential retained so token refreshes that require
+	// re-authentication (e.g. identity service user) can run without a cached token.
+	// It is never persisted to the keyring.
+	secret *auth.IdsecSecret
 
-	// stateMu guards reads/writes of Token, ActiveProfile and ActiveAuthProfile.
+	// stateMu guards reads/writes of Token, ActiveProfile, ActiveAuthProfile and secret.
 	// It is held only briefly so concurrent readers never block on network I/O.
 	stateMu sync.RWMutex
 	// opMu serializes auth/refresh operations (Authenticate, LoadAuthentication,
@@ -79,6 +85,24 @@ func (a *IdsecAuthBase) GetToken() *auth.IdsecToken {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 	return a.Token
+}
+
+// GetSecret returns the retained in-memory authentication secret in a thread-safe manner.
+// The returned *auth.IdsecSecret is treated as immutable; callers must not mutate it.
+// It may be nil if no secret was supplied. The secret is kept in memory only and is never
+// persisted to the keyring.
+func (a *IdsecAuthBase) GetSecret() *auth.IdsecSecret {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	return a.secret
+}
+
+// setSecret retains the authentication secret in memory. The secret is treated as immutable
+// once stored (swapped by pointer, never mutated in place) and is never persisted to the keyring.
+func (a *IdsecAuthBase) setSecret(secret *auth.IdsecSecret) {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	a.secret = secret
 }
 
 // snapshotState returns a consistent snapshot of the current auth state under a read lock.
@@ -157,6 +181,11 @@ func (a *IdsecAuthBase) Authenticate(profile *models.IdsecProfile, authProfile *
 	}
 	if slices.Contains(auth.IdsecAuthMethodsRequireCredentials, authProfile.AuthMethod) && authProfile.Username == "" {
 		return nil, errors.New(a.Authenticator.AuthenticatorHumanReadableName() + " requires a username and optionally a secret")
+	}
+	// Retain the secret in memory (never persisted) so later refreshes that must
+	// re-authenticate can reuse it, regardless of whether this call hits the cache.
+	if secret != nil {
+		a.setSecret(secret)
 	}
 	var token *auth.IdsecToken
 	var err error

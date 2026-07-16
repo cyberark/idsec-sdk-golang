@@ -363,6 +363,13 @@ func (s *IdsecSecHubSecretStoresService) UpdateTf(secretStore *secretstoresmodel
 		return nil, fmt.Errorf("failed to retrieve current secret store for TF update: %w", err)
 	}
 
+	// An empty desired state means "leave the state unchanged" (for example, the Terraform
+	// provider omits state when the user never set it). Fall back to the current state so we
+	// skip the state-change path instead of attempting an invalid empty-state action.
+	if secretStore.State == "" {
+		secretStore.State = currentStore.State
+	}
+
 	updatedStore, err := s.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
 		ID:          secretStore.ID,
 		Name:        secretStore.Name,

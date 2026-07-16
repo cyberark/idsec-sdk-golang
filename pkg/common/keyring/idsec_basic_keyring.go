@@ -369,3 +369,32 @@ func (b *IdsecBasicKeyring) ClearAllPasswords() error {
 	}
 	return nil
 }
+
+// ListKeys returns the usernames stored under the given serviceName in the
+// basic (file-backed) keyring. Secret values are not returned.
+//
+// If the keyring file does not exist or the service has no entries, an empty
+// slice is returned with a nil error. MAC validation failures are returned
+// as errors (same integrity rules as GetPassword).
+func (b *IdsecBasicKeyring) ListKeys(serviceName string) ([]string, error) {
+	if _, err := os.Stat(b.keyringFilePath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	data, err := b.validateMacAndGetData()
+	if err != nil {
+		return nil, err
+	}
+	existingKeyring := make(map[string]map[string]map[string]string)
+	if err := json.Unmarshal([]byte(data), &existingKeyring); err != nil {
+		return nil, err
+	}
+	entries, ok := existingKeyring[serviceName]
+	if !ok {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}

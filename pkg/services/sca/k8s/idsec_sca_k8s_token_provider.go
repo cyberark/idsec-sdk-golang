@@ -34,9 +34,9 @@ type IdsecSCAK8sClusterContext struct {
 	// ID, passed via --organizationId.
 	OrganizationID string
 
-	// NamespaceID is the optional Kubernetes namespace, passed via --namespace-id.
+	// Namespace is the optional Kubernetes namespace, passed via --namespace.
 	// Forwarded to the SCA Elevate API target body as "namespace". Empty when omitted.
-	NamespaceID string
+	Namespace string
 
 	// ElevateToken is the raw idsec session JWT used as the Bearer token for
 	// the SCA Elevate API call. AzureTokenProvider decodes it to extract the
@@ -47,9 +47,10 @@ type IdsecSCAK8sClusterContext struct {
 	// JWEExtensionValue is an optional opaque value forwarded as
 	// jwe_extension_value in the DPA SSO acquire request (DPA-K8S).
 	// For Azure proxy this carries the raw AKS access token acquired via az CLI;
-	// it is empty for AWS proxy and all direct flows.
+	// for AWS IDC permission-set proxy it carries the EKS bearer token from
+	// STS GetCallerIdentity presign. It is empty for AWS IAM-role proxy and all
+	// direct flows. The SDK encrypts it as JWE with JSON key "k8s_token".
 	JWEExtensionValue string
-
 	// Diagnostics enables kubectl-login stderr diagnostics from token providers.
 	Diagnostics bool
 }

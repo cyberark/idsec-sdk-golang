@@ -641,6 +641,19 @@ func TestElevate_validation_empty_csp(t *testing.T) {
 	require.Contains(t, err.Error(), "csp")
 }
 
+func TestElevate_validation_unsupported_csp(t *testing.T) {
+	svc := &IdsecSCACloudAccessService{}
+	for _, csp := range []string{"GCP", "ibm", "oracle"} {
+		_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+			CSP:         csp,
+			WorkspaceID: "ws-1",
+			RoleIDs:     "role-1",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "supported values are AWS, AZURE")
+	}
+}
+
 func TestElevate_validation_missing_workspace_id(t *testing.T) {
 	svc := &IdsecSCACloudAccessService{}
 	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
@@ -824,6 +837,36 @@ func TestElevate_RequestBody(t *testing.T) {
 	target := targets[0].(map[string]interface{})
 	require.Equal(t, "test-workspace-id", target["workspaceId"])
 	require.Equal(t, "test-role-id", target["roleId"])
+}
+
+// TestElevate_CSPNormalizedToUppercase verifies that a lowercase CSP value
+// supplied by the caller is uppercased before being sent on the wire.
+func TestElevate_CSPNormalizedToUppercase(t *testing.T) {
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"response":{"organizationId":"","csp":"AWS","results":[]}}`,
+			OnRequest: func(r *http.Request) {
+				capturedBody = make([]byte, r.ContentLength)
+				_, _ = r.Body.Read(capturedBody)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:         "aws",
+		WorkspaceID: "test-workspace-id",
+		RoleIDs:     "test-role-id",
+	})
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "AWS", body["csp"], "csp must be uppercased on the wire regardless of caller casing")
 }
 
 // ---------------------------------------------------------------------------

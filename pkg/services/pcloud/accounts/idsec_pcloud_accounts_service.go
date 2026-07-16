@@ -37,6 +37,7 @@ const (
 	reconcileAccountCredentialsURL     = "/api/accounts/%s/reconcile"         // #nosec G101
 	linkAccountURL                     = "/api/accounts/%s/linkaccount"
 	unlinkAccountURL                   = "/api/accounts/%s/linkaccount/%s/"
+	accountActivitiesURL               = "/api/accounts/%s/activities"
 )
 
 // IdsecPCloudAccountsPage is a paginated type for IdsecPCloudAccount
@@ -337,6 +338,72 @@ func (s *IdsecPCloudAccountsService) ListSecretVersions(listAccountSecretVersion
 		return nil, err
 	}
 	return accountSecretVersions, nil
+}
+
+// ListActivities retrieves the activities performed on an account.
+// https://docs.cyberark.com/privilege-cloud-standard/latest/en/content/sdk/files%20-%20get%20file%20activity%20by%20id.htm
+func (s *IdsecPCloudAccountsService) ListActivities(listAccountActivities *accountsmodels.IdsecPCloudListAccountActivities) ([]*accountsmodels.IdsecPCloudAccountActivity, error) {
+	s.Logger.Info("Retrieving account activities [%s]", listAccountActivities.AccountID)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountActivitiesURL, listAccountActivities.AccountID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to retrieve account activities - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	accountActivitiesJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	accountActivitiesJSONMap, ok := accountActivitiesJSON.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("failed to list account activities: unexpected result")
+	}
+	var accountActivities []*accountsmodels.IdsecPCloudAccountActivity
+	err = mapstructure.Decode(accountActivitiesJSONMap["activities"], &accountActivities)
+	if err != nil {
+		return nil, err
+	}
+	return accountActivities, nil
+}
+
+// ListActivitiesBy retrieves the activities of an account, filtered by the given criteria.
+// The underlying API does not support server-side filtering, so filtering is done client-side.
+// https://docs.cyberark.com/privilege-cloud-standard/latest/en/content/sdk/files%20-%20get%20file%20activity%20by%20id.htm
+func (s *IdsecPCloudAccountsService) ListActivitiesBy(activitiesFilter *accountsmodels.IdsecPCloudAccountActivitiesFilter) ([]*accountsmodels.IdsecPCloudAccountActivity, error) {
+	activities, err := s.ListActivities(&accountsmodels.IdsecPCloudListAccountActivities{AccountID: activitiesFilter.AccountID})
+	if err != nil {
+		return nil, err
+	}
+	filteredActivities := make([]*accountsmodels.IdsecPCloudAccountActivity, 0, len(activities))
+	for _, activity := range activities {
+		if activitiesFilter.User != "" && activity.User != activitiesFilter.User {
+			continue
+		}
+		if activitiesFilter.ActionContains != "" && !strings.Contains(activity.Action, activitiesFilter.ActionContains) {
+			continue
+		}
+		if activitiesFilter.ClientID != "" && activity.ClientID != activitiesFilter.ClientID {
+			continue
+		}
+		if activitiesFilter.AlertsOnly && !activity.Alert {
+			continue
+		}
+		if activitiesFilter.FromDate != 0 && activity.Date < activitiesFilter.FromDate {
+			continue
+		}
+		if activitiesFilter.ToDate != 0 && activity.Date > activitiesFilter.ToDate {
+			continue
+		}
+		filteredActivities = append(filteredActivities, activity)
+	}
+	return filteredActivities, nil
 }
 
 // GenerateCredentials generate a new random password for an existing account with policy restrictions.

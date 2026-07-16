@@ -32,6 +32,7 @@ type IdsecKeyringImpl interface {
 	GetPassword(serviceName string, username string) (string, error)
 	DeletePassword(serviceName string, username string) error
 	ClearAllPasswords() error
+	ListKeys(serviceName string) ([]string, error)
 }
 
 // IdsecKeyringInterface defines the methods for saving and loading authentication tokens

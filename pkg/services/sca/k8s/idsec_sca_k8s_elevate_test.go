@@ -279,8 +279,44 @@ func TestElevate_CSPNormalizedToUppercase(t *testing.T) {
 	require.Equal(t, "AWS", body["csp"], "csp must be uppercased on the wire regardless of caller casing")
 }
 
+// TestElevate_RequestBody_AWS_NamespaceIgnored verifies that Namespace supplied
+// for a non-Azure (AWS) request is not sent on the wire, since namespace-scoped
+// targets are only supported for Azure.
+func TestElevate_RequestBody_AWS_NamespaceIgnored(t *testing.T) {
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockElevateResponse,
+			OnRequest: func(r *http.Request) {
+				buf := new(bytes.Buffer)
+				_, _ = buf.ReadFrom(r.Body)
+				capturedBody = buf.Bytes()
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	_, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
+		CSP:       "AWS",
+		FQDN:      "cluster.gr7.us-east-1.eks.amazonaws.com",
+		RoleID:    "arn:aws:iam::123456789012:role/test-role",
+		Namespace: "ns-prod",
+	})
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	targets := body["targets"].([]interface{})
+	target := targets[0].(map[string]interface{})
+	_, hasNamespace := target["namespace"]
+	require.False(t, hasNamespace, "namespace must not be sent for non-Azure CSPs")
+}
+
 // TestElevate_RequestBody_Azure verifies the POST body when called with the Azure
-// flags (organizationId + namespaceId) so that namespace is sent on the wire.
+// flags (organizationId + namespace) so that namespace is sent on the wire.
 func TestElevate_RequestBody_Azure(t *testing.T) {
 	const azureMockResp = `{
   "response": {
@@ -310,7 +346,7 @@ func TestElevate_RequestBody_Azure(t *testing.T) {
 		RoleID:         "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y",
 		FQDN:           "mycluster.hcp.eastus.azmk8s.io",
 		OrganizationID: "00000000-1111-2222-3333-444444444444",
-		NamespaceID:    "ns-prod",
+		Namespace:      "ns-prod",
 	})
 	require.NoError(t, err)
 
@@ -324,6 +360,50 @@ func TestElevate_RequestBody_Azure(t *testing.T) {
 	require.Equal(t, "mycluster.hcp.eastus.azmk8s.io", target["fqdn"])
 	require.Equal(t, "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y", target["roleId"])
 	require.Equal(t, "ns-prod", target["namespace"])
+}
+
+// TestElevate_RequestBody_Azure_NamespaceResourceID verifies that a fully-qualified
+// Azure namespace resource ID supplied via --namespace is normalized to the value
+// after "/namespaces/" on the elevate wire request.
+func TestElevate_RequestBody_Azure_NamespaceResourceID(t *testing.T) {
+	const azureMockResp = `{
+  "response": {
+    "organizationId": "00000000-1111-2222-3333-444444444444",
+    "csp": "AZURE",
+    "results": [{"workspaceId": "sub-1", "roleId": "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y", "sessionId": "sess-az"}]
+  }
+}`
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: azureMockResp,
+			OnRequest: func(r *http.Request) {
+				buf := new(bytes.Buffer)
+				_, _ = buf.ReadFrom(r.Body)
+				capturedBody = buf.Bytes()
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sElevateService(client)
+	_, err := svc.Elevate(&k8smodels.IdsecSCAK8sElevateKubectlRequest{
+		CSP:            "AZURE",
+		RoleID:         "/subscriptions/x/providers/Microsoft.Authorization/roleDefinitions/y",
+		FQDN:           "mycluster.hcp.eastus.azmk8s.io",
+		OrganizationID: "00000000-1111-2222-3333-444444444444",
+		Namespace:      "/subscriptions/541038cf-0e42-47c0-ace1-f3263530fd72/resourcegroups/roie-resource-group/providers/Microsoft.ContainerService/managedClusters/prod-vulnerability-scanner/namespaces/remediation-tracker",
+	})
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	targets := body["targets"].([]interface{})
+	target := targets[0].(map[string]interface{})
+	require.Equal(t, "remediation-tracker", target["namespace"],
+		"namespace must be the value after the /namespaces/ segment")
 }
 
 // ---------------------------------------------------------------------------

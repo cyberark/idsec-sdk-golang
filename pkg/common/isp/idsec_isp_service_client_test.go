@@ -9,6 +9,7 @@ import (
 	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/models"
 	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 )
@@ -544,6 +545,68 @@ func TestIdsecISPServiceClient_TenantID(t *testing.T) {
 
 			if result != tt.expectedResult {
 				t.Errorf("Expected %s, got %s", tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestRefreshClient(t *testing.T) {
+	tests := []struct {
+		name             string
+		setupISPAuth     func() *auth.IdsecISPAuth
+		expectedError    bool
+		expectedErrorMsg string
+	}{
+		{
+			name: "error_nil_isp_auth",
+			setupISPAuth: func() *auth.IdsecISPAuth {
+				return nil
+			},
+			expectedError:    true,
+			expectedErrorMsg: "ISP auth is nil",
+		},
+		{
+			// LoadAuthentication resolves the active profile but finds no matching
+			// ISP auth profile, so it yields a nil token without any network I/O.
+			// RefreshClient must surface this as an error rather than silently succeed.
+			name: "error_no_token_after_authentication",
+			setupISPAuth: func() *auth.IdsecISPAuth {
+				ispAuth := auth.NewIdsecISPAuth(false).(*auth.IdsecISPAuth)
+				ispAuth.ActiveProfile = &models.IdsecProfile{
+					ProfileName: "test",
+					AuthProfiles: map[string]*authmodels.IdsecAuthProfile{
+						"other": {
+							Username:   "user1",
+							AuthMethod: authmodels.Direct,
+						},
+					},
+				}
+				return ispAuth
+			},
+			expectedError:    true,
+			expectedErrorMsg: "failed to refresh client: no token available after authentication",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ispAuth := tt.setupISPAuth()
+			err := RefreshClient(&common.IdsecClient{}, ispAuth)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Fatal("Expected error, got nil")
+				}
+				if tt.expectedErrorMsg != "" && err.Error() != tt.expectedErrorMsg {
+					t.Errorf("Expected error message '%s', got '%s'", tt.expectedErrorMsg, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Expected no error, got %v", err)
 			}
 		})
 	}

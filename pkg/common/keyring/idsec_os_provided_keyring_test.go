@@ -12,6 +12,8 @@ type mockKeyringStore struct {
 	setErr    error
 	getErr    error
 	removeErr error
+	keysErr   error
+	keys      []string
 	item      keyring.Item
 }
 
@@ -39,7 +41,12 @@ func (m *mockKeyringStore) Remove(key string) error {
 }
 
 // The following methods are required to satisfy keyring.Keyring but are unused in these tests.
-func (m *mockKeyringStore) Keys() ([]string, error) { return nil, nil }
+func (m *mockKeyringStore) Keys() ([]string, error) {
+	if m.keysErr != nil {
+		return nil, m.keysErr
+	}
+	return m.keys, nil
+}
 func (m *mockKeyringStore) GetMetadata(key string) (keyring.Metadata, error) {
 	return keyring.Metadata{}, nil
 }
@@ -57,11 +64,13 @@ func patchOSKeyringOpen(store keyring.Keyring, err error) func() {
 
 // mockFallbackKeyring implements IdsecKeyringImpl for fallback logic.
 type mockFallbackKeyring struct {
-	setCalled    bool
-	getCalled    bool
-	deleteCalled bool
-	password     string
-	shouldError  bool
+	setCalled      bool
+	getCalled      bool
+	deleteCalled   bool
+	listKeysCalled bool
+	password       string
+	keys           []string
+	shouldError    bool
 }
 
 func (m *mockFallbackKeyring) SetPassword(service, user, password string) error {
@@ -86,6 +95,14 @@ func (m *mockFallbackKeyring) ClearAllPasswords() error {
 	m.deleteCalled = true
 	m.password = ""
 	return nil
+}
+
+func (m *mockFallbackKeyring) ListKeys(service string) ([]string, error) {
+	m.listKeysCalled = true
+	if m.shouldError {
+		return nil, errors.New("fallback error")
+	}
+	return m.keys, nil
 }
 
 func TestIdsecOSProvidedKeyring_SetPassword(t *testing.T) {
@@ -439,6 +456,80 @@ func TestIdsecOSProvidedKeyring_ClearAllPasswords(t *testing.T) {
 			// Validate that only IDSEC keys are removed
 			if tt.name == "success_case_os_keyring" && len(store.removed) != 1 {
 				t.Errorf("Expected 1 IDSEC key removed, got %d", len(store.removed))
+			}
+		})
+	}
+}
+
+func TestIdsecOSProvidedKeyring_ListKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		openErr        error
+		keysErr        error
+		keys           []string
+		fallbackKeys   []string
+		expectFallback bool
+		expectedKeys   []string
+	}{
+		{
+			name: "success_strips_prefix",
+			keys: []string{
+				"idsec_sdk_golang_alice",
+				"idsec_sdk_golang_bob",
+				"other_key",
+			},
+			expectedKeys: []string{"alice", "bob"},
+		},
+		{
+			name:           "open_error_falls_back",
+			openErr:        errors.New("open error"),
+			fallbackKeys:   []string{"alice"},
+			expectFallback: true,
+			expectedKeys:   []string{"alice"},
+		},
+		{
+			name:           "keys_error_falls_back",
+			keysErr:        errors.New("keys error"),
+			fallbackKeys:   []string{"bob"},
+			expectFallback: true,
+			expectedKeys:   []string{"bob"},
+		},
+		{
+			name:         "no_matching_prefix",
+			keys:         []string{"other_key"},
+			expectedKeys: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &mockKeyringStore{
+				keys:    tt.keys,
+				keysErr: tt.keysErr,
+			}
+			restore := patchOSKeyringOpen(store, tt.openErr)
+			defer restore()
+
+			mockFallback := &mockFallbackKeyring{keys: tt.fallbackKeys}
+			kr := NewIdsecOSProvidedKeyring(mockFallback)
+
+			got, err := kr.ListKeys("github")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.expectFallback && !mockFallback.listKeysCalled {
+				t.Error("expected fallback ListKeys to be called")
+			}
+			if !tt.expectFallback && mockFallback.listKeysCalled {
+				t.Error("fallback ListKeys should not be called on OS success")
+			}
+			if len(got) != len(tt.expectedKeys) {
+				t.Fatalf("got keys %v, want %v", got, tt.expectedKeys)
+			}
+			for i, want := range tt.expectedKeys {
+				if got[i] != want {
+					t.Errorf("key[%d]=%q, want %q", i, got[i], want)
+				}
 			}
 		})
 	}

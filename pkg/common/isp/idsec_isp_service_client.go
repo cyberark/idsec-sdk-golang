@@ -373,8 +373,9 @@ func FromISPAuth(
 //   - ispAuth: The IdsecISPAuth instance to load fresh authentication from
 //
 // Returns any error that occurred during authentication loading, token updating,
-// or cookie processing. The function performs forced authentication refresh by
-// passing true as the refresh parameter to LoadAuthentication.
+// or cookie processing. It also returns an error if authentication yields no token,
+// rather than silently succeeding. The function performs forced authentication refresh
+// by passing true as the refresh parameter to LoadAuthentication.
 //
 // Example:
 //
@@ -392,14 +393,15 @@ func RefreshClient(client *common.IdsecClient, ispAuth *auth.IdsecISPAuth) error
 	if err != nil {
 		return err
 	}
-	if token != nil {
-		client.UpdateToken(token.Token, client.GetTokenType())
-		cookieJar := make(map[string]string)
-		if cookies, ok := token.Metadata["cookies"]; ok {
-			decoded, _ := base64.StdEncoding.DecodeString(cookies.(string))
-			_ = json.Unmarshal(decoded, &cookieJar)
-		}
-		client.UpdateCookies(cookieJar)
+	if token == nil {
+		return fmt.Errorf("failed to refresh client: no token available after authentication")
 	}
+	client.UpdateToken(token.Token, client.GetTokenType())
+	cookieJar := make(map[string]string)
+	if cookies, ok := token.Metadata["cookies"]; ok {
+		decoded, _ := base64.StdEncoding.DecodeString(cookies.(string))
+		_ = json.Unmarshal(decoded, &cookieJar)
+	}
+	client.UpdateCookies(cookieJar)
 	return nil
 }

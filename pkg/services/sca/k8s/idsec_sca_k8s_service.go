@@ -35,6 +35,10 @@ const (
 	// acquireDpaSsoTokenURL is the path relative to the DPA /api/ base for short-lived client certificate issuance.
 	acquireDpaSsoTokenURL = "adb/sso/acquire" // #nosec G101
 
+	// acquireDpaJwksURL is the path relative to the DPA /api/ base for fetching
+	// the SSO public key used to encrypt the AKS token before /acquire.
+	acquireDpaJwksURL = "adb/sso/jwks" // #nosec G101
+
 	// dpaK8sProxyService is the service identifier sent in the DPA SSO acquire request body.
 	dpaK8sProxyService = "DPA-K8S"
 )
@@ -60,8 +64,8 @@ type IdsecSCAK8sService struct {
 	*services.IdsecISPBaseService
 
 	// dpaISP is a secondary ISP base service bound to the "dpa" subdomain
-	// (https://<tenant>.dpa.<env>/api/). Used by both the generate-kubeconfig
-	// endpoint and the DPA SSO acquire endpoint (adb/sso/acquire).
+	// (https://<tenant>.dpa.<env>/api/). Used by the generate-kubeconfig endpoint,
+	// DPA SSO acquire (adb/sso/acquire), and JWKS (adb/sso/jwks) endpoints.
 	dpaISP *services.IdsecISPBaseService
 }
 
@@ -314,7 +318,7 @@ func (s *IdsecSCAK8sService) EvaluateEligibility(req *k8smodels.IdsecSCAK8sEvalu
 //
 // Parameters:
 //   - req: *IdsecSCAK8sElevateKubectlRequest with CSP, FQDN, and RoleID (all required).
-//     OrganizationID and NamespaceID are forwarded when set.
+//     OrganizationID is forwarded when set. Namespace is only considered for Azure.
 //
 // Returns *IdsecSCAK8sElevateResponse on success or an error when:
 //   - req is nil, CSP is empty, or required target fields are missing
@@ -342,15 +346,18 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 	}
 	s.Logger.Debug("calling elevate API for CSP=%s", cspUpper)
 
+	target := k8smodels.IdsecSCAK8sElevateTarget{
+		RoleID: req.RoleID,
+		FQDN:   req.FQDN,
+	}
+	// Namespace-scoped targets are only supported for Azure.
+	if cspUpper == k8smodels.CSPAzure {
+		target.Namespace = ParseNamespaceName(req.Namespace)
+	}
+
 	apiReq := &k8smodels.IdsecSCAK8sElevateRequest{
-		CSP: cspUpper,
-		Targets: []k8smodels.IdsecSCAK8sElevateTarget{
-			{
-				RoleID:      req.RoleID,
-				FQDN:        req.FQDN,
-				NamespaceID: req.NamespaceID,
-			},
-		},
+		CSP:            cspUpper,
+		Targets:        []k8smodels.IdsecSCAK8sElevateTarget{target},
 		OrganizationID: req.OrganizationID,
 	}
 
@@ -397,21 +404,41 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 	if err != nil {
 		return nil, err
 	}
-	s.Logger.Debug("dispatching proxy ExecCredential generation to provider CSP=%s", provider.CSP())
+	kubectlLoginDiagnostic(clusterDiagnostics(ctx), "dispatching proxy ExecCredential generation to provider CSP=%s", provider.CSP())
 	return provider.GenerateExecCredential(s, ctx)
 }
 
 // generateDPAProxyExecCredential issues a kubectl ExecCredential containing a
 // short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
 // (DPA-K8S). Shared by AWS and Azure proxy providers.
-// jweExtensionValue is forwarded as jwe_extension_value when non-empty (Azure AKS token).
-func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(jweExtensionValue string) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+//
+// jweExtensionValue is the raw k8s token (EKS bearer or AKS access token). When
+// non-empty it is encrypted as JWE with JSON key "k8s_token" and sent as
+// jwe_extension_value. IAM-role AWS proxy leaves it empty.
+func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(jweExtensionValue string, diagnostics bool) (*k8smodels.IdsecSCAK8sExecCredential, error) {
 	jweSet := strings.TrimSpace(jweExtensionValue) != ""
-	s.Logger.Debug("generateDPAProxyExecCredential: POST %s service=%s jwe_extension_value_set=%v",
+	kubectlLoginDiagnostic(diagnostics,
+		"generateDPAProxyExecCredential: POST %s service=%s jwe_extension_value_set=%v",
 		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet)
 
 	if s.dpaISP == nil || s.dpaISP.ISPClient() == nil {
 		return nil, fmt.Errorf("proxy client certificate generation failed: dpa client not initialized")
+	}
+
+	// Generic k8s-token JWE path (AKS + EKS): fetch the DPA SSO public key and
+	// encrypt the token before /acquire so the plaintext never travels over the wire.
+	if jweSet {
+		kid := dpaSsoJWKSKeyID()
+		pubKey, err := s.fetchDPASSOPublicKey(kid, diagnostics)
+		if err != nil {
+			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to fetch DPA JWKS (kid=%s): %w", kid, err)
+		}
+		jweExtensionValue, err = encryptK8STokenAsJWE(pubKey, kid, jweExtensionValue)
+		if err != nil {
+			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to encrypt k8s token: %w", err)
+		}
+		kubectlLoginDiagnostic(diagnostics,
+			"k8s token encrypted as JWE (kid=%s len=%d)", kid, len(jweExtensionValue))
 	}
 
 	body := map[string]interface{}{
@@ -453,7 +480,8 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(jweExtensionValue st
 		return nil, fmt.Errorf("proxy client certificate generation failed: %w", err)
 	}
 
-	s.Logger.Info("generateDPAProxyExecCredential: cert=%d bytes key=%d bytes expires_at=%s — building ExecCredential",
+	kubectlLoginDiagnostic(diagnostics,
+		"DPA SSO acquire returned cert=%d bytes key=%d bytes expires_at=%s — building ExecCredential",
 		len(certPEM), len(keyPEM), expiresAt.UTC().Format(time.RFC3339))
 
 	// Bake the early-refresh buffer into status.expirationTimestamp here, the one

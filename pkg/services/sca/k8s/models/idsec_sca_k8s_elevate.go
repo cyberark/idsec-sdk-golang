@@ -4,9 +4,9 @@ package models
 // IdsecSCAK8sElevateTarget describes a single cluster-role target in the Elevate API
 // POST body (one element of targets[]).
 type IdsecSCAK8sElevateTarget struct {
-	RoleID      string `json:"roleId,omitempty"`
-	FQDN        string `json:"fqdn,omitempty"`
-	NamespaceID string `json:"namespace,omitempty"` // optional; Azure namespace-scoped targets (CLI: --namespaceId)
+	RoleID    string `json:"roleId,omitempty"`
+	FQDN      string `json:"fqdn,omitempty"`
+	Namespace string `json:"namespace,omitempty"` // optional; Azure namespace-scoped targets (CLI: --namespace)
 }
 
 // IdsecSCAK8sElevateRequest is the POST body sent to api/access/elevate/clusters.
@@ -30,6 +30,15 @@ type IdsecSCAK8sAWSAccessCredentials struct {
 	AWSSessionToken    string `json:"aws_session_token"`
 }
 
+// IdsecSCAK8sElevateClientDetails carries AWS IAM Identity Center OIDC client
+// metadata returned by the Elevate API for permission-set targets.
+type IdsecSCAK8sElevateClientDetails struct {
+	ClientID     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+	StartURL     string `json:"startUrl"`
+	SSORegion    string `json:"ssoRegion"`
+}
+
 // IdsecSCAK8sElevateResult represents one result entry inside the Elevate response.
 //
 // AccessCredentials is a JSON-encoded string (double-encoded). For AWS it contains
@@ -43,13 +52,14 @@ type IdsecSCAK8sAWSAccessCredentials struct {
 // responses include this; the kubectl-login cache uses it with a refresh buffer
 // instead of a fixed TTL. AWS may omit it — fallback TTL applies via ElevateTTL().
 type IdsecSCAK8sElevateResult struct {
-	WorkspaceID       string `json:"workspaceId"`
-	RoleID            string `json:"roleId,omitempty"`
-	RoleName          string `json:"roleName,omitempty"`
-	SessionID         string `json:"sessionId"`
-	SessionExpTime    string `json:"sessionExpTime,omitempty"`
-	AccessCredentials string `json:"accessCredentials,omitempty"`
-	TargetID          string `json:"targetId,omitempty"` // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
+	WorkspaceID       string                           `json:"workspaceId"`
+	RoleID            string                           `json:"roleId,omitempty"`
+	RoleName          string                           `json:"roleName,omitempty"`
+	SessionID         string                           `json:"sessionId"`
+	SessionExpTime    string                           `json:"sessionExpTime,omitempty"`
+	AccessCredentials string                           `json:"accessCredentials,omitempty"`
+	TargetID          string                           `json:"targetId,omitempty"` // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
+	ClientDetails     *IdsecSCAK8sElevateClientDetails `json:"clientDetails,omitempty"`
 }
 
 // IdsecSCAK8sElevateResponseBody is the inner "response" object in the Elevate API reply.
@@ -73,7 +83,7 @@ type IdsecSCAK8sElevateResponse struct {
 //
 // Required for all CSPs: CSP, FQDN, RoleID.
 // Azure and AWS organization targets additionally use OrganizationID. Azure
-// also supports optional NamespaceID.
+// also supports optional Namespace.
 //
 // AWS region and cluster name are derived from targetId in the Elevate API response.
 type IdsecSCAK8sElevateKubectlRequest struct {
@@ -81,5 +91,5 @@ type IdsecSCAK8sElevateKubectlRequest struct {
 	RoleID         string `json:"role_id,omitempty" mapstructure:"role_id,omitempty" flag:"role-id" desc:"Cloud role ID to elevate (AWS IAM role ARN or Azure role definition resource ID)"`
 	FQDN           string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"Cluster API endpoint FQDN (always used in kubeconfig)"`
 	OrganizationID string `json:"organization_id,omitempty" mapstructure:"organization_id,omitempty" flag:"organization-id" desc:"Azure Entra Directory ID (tenant) or AWS organization ID"`
-	NamespaceID    string `json:"namespace_id,omitempty" mapstructure:"namespace_id,omitempty" flag:"namespace-id" desc:"Optional Kubernetes namespace identifier (Azure)"`
+	Namespace      string `json:"namespace,omitempty" mapstructure:"namespace,omitempty" flag:"namespace" desc:"Optional Kubernetes namespace (Azure)"`
 }

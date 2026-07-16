@@ -269,6 +269,69 @@ func TestIdsecSecHubSecretStoresService_UpdateTF_RollbackOnStateChangeFailed(t *
 	}
 }
 
+// TestIdsecSecHubSecretStoresService_UpdateTF_EmptyStateNoStateChange verifies that when the
+// desired state is empty, UpdateTf treats it as "no state change": it falls back to the current
+// store state, makes no PUT /state call, and returns the current state.
+func TestIdsecSecHubSecretStoresService_UpdateTF_EmptyStateNoStateChange(t *testing.T) {
+	storeID := "store-abc-123"
+	storeName := "my-aws-store"
+	storeDescription := "Test secret store"
+
+	var setStateCalled bool
+	var mu sync.Mutex
+
+	configs := []mockEndpointConfig{
+		{
+			// GET /api/secret-stores/{id} — retrieve current store (ENABLED)
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, storeID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: currentStoreJSON(storeID, storeName, storeDescription, "ENABLED"),
+		},
+		{
+			// PATCH /api/secret-stores/{id} — field update
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "PATCH" && strings.Contains(r.URL.Path, storeID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: currentStoreJSON(storeID, storeName, storeDescription, "ENABLED"),
+		},
+		{
+			// PUT /api/secret-stores/{id}/state — must NOT be called for an empty desired state
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "PUT" && strings.Contains(r.URL.Path, "/state") {
+					mu.Lock()
+					setStateCalled = true
+					mu.Unlock()
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusNoContent,
+			ResponseBody: "",
+		},
+	}
+
+	service, cleanup := setupMockSecretStoresService(t, configs)
+	defer cleanup()
+
+	result, err := service.UpdateTf(&secretstoresmodels.IdsecSecHubUpdateTfSecretStore{
+		ID:          storeID,
+		Name:        storeName,
+		Description: storeDescription,
+		State:       "",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "ENABLED", result.State)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.False(t, setStateCalled, "PUT /state should not be called when the desired state is empty")
+}
+
 func TestToAction(t *testing.T) {
 	tests := []struct {
 		name             string

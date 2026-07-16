@@ -6,9 +6,15 @@ package models
 
 import "encoding/json"
 
+// Supported cloud provider identifiers (uppercase API / wire form).
+const (
+	CSPAWS   = "AWS"
+	CSPAzure = "AZURE"
+)
+
 // ValidListTargetsCSPs are queried when list-targets is called without an
 // explicit CSP.
-var ValidListTargetsCSPs = []string{"AWS", "AZURE"}
+var ValidListTargetsCSPs = []string{CSPAWS, CSPAzure}
 
 // IdsecSCAListTargetsRequest is the shared input for listing eligible targets.
 // It is used by both the cloudaccess and groupaccess sub-services.

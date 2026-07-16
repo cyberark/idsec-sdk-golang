@@ -1,4 +1,4 @@
-package sca
+package discovery
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
-	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
+	discoverymodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/discovery/models"
 )
 
 const (
@@ -24,25 +24,20 @@ const (
 	jobStatusURL = "/api/integrations/status"
 )
 
-// IdsecSCAService provides minimal SCA discovery capabilities.
+// IdsecSCADiscoveryService provides SCA discovery capabilities.
 //
-// discovery related operations (Discovery, JobStatus and checkIfJobFinished).
+// Covers discovery related operations (Discovery, JobStatus and checkIfJobFinished).
 //
 // Initialization requires a valid IdsecISPAuth to construct the internal ISP client.
 // The client is reused across discovery calls. Token refresh is delegated to
-// refreshScaAuth.
+// refreshDiscoveryAuth.
 //
 // Example:
 //
 //	auth := &auth.IdsecISPAuth{/* populated */}
-//	svc, err := NewIdsecSCAService(auth)
+//	svc, err := NewIdsecSCADiscoveryService(auth)
 //	if err != nil { /* handle */ }
-//	job, err := svc.Discovery(&scamodels.IdsecSCADiscoveryRequest{ /* fields */ })
-//	status, err := svc.JobStatus(job.JobID)
-//	finished, final, err := svc.checkIfJobFinished(context.Background(), job.JobID)
-//	if finished { /* use final */ }
-//
-// customizable polling intervals.
+//	job, err := svc.Discovery(&discoverymodels.IdsecSCADiscoveryRequest{ /* fields */ })
 //
 // Concurrency: The service is safe for concurrent use provided the underlying
 // IdsecISPServiceClient is concurrency-safe (it is assumed to be so in the SDK).
@@ -52,29 +47,22 @@ const (
 // network or decoding failures. Discovery expects 200 status codes; status
 // polling expects 200.
 //
-// Partial Responses: Discovery requires a non-empty JobID; status polling
-// returns raw backend status fields without normalization.
-//
 // Cancellation: checkIfJobFinished honors context cancellation.
 //
 // Timeouts: Polling attempts capped at 40 (20s delay) ~13m20s total.
-//
-// See individual method docs for details.
-//
-// Exported methods have comprehensive documentation per project standards.
-type IdsecSCAService struct {
+type IdsecSCADiscoveryService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
 }
 
-// NewIdsecSCAService creates a new standalone SCA service instance using provided authenticators.
+// NewIdsecSCADiscoveryService creates a new SCA discovery service instance using provided authenticators.
 //
 // Parameters:
 //   - authenticators: Variadic list of auth.IdsecAuth; must include an "isp" authenticator.
 //
-// Returns *IdsecSCAService or error if required authenticators missing or client init fails.
-func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, error) {
-	svc := &IdsecSCAService{}
+// Returns *IdsecSCADiscoveryService or error if required authenticators missing or client init fails.
+func NewIdsecSCADiscoveryService(authenticators ...auth.IdsecAuth) (*IdsecSCADiscoveryService, error) {
+	svc := &IdsecSCADiscoveryService{}
 	base, err := services.NewIdsecBaseService(svc, authenticators...)
 	if err != nil {
 		return nil, err
@@ -85,7 +73,7 @@ func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, err
 	}
 	ispAuth := ispBaseAuth.(*auth.IdsecISPAuth)
 
-	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "sca", ".", "", svc.refreshScaAuth)
+	ispBaseService, err := services.NewIdsecISPBaseService(ispAuth, "sca", ".", "", svc.refreshDiscoveryAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +84,11 @@ func NewIdsecSCAService(authenticators ...auth.IdsecAuth) (*IdsecSCAService, err
 	return svc, nil
 }
 
-// refreshScaAuth refreshes the underlying ISP client authentication.
+// refreshDiscoveryAuth refreshes the underlying ISP client authentication.
 //
 // It delegates to isp.RefreshClient using the stored ispAuth. Returns any
 // propagation error from the refresh attempt.
-func (s *IdsecSCAService) refreshScaAuth(client *common.IdsecClient) error {
+func (s *IdsecSCADiscoveryService) refreshDiscoveryAuth(client *common.IdsecClient) error {
 	return isp.RefreshClient(client, s.ISPAuth())
 }
 
@@ -122,7 +110,7 @@ func serializePayload(req interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// Discovery starts an SCA discovery asynchronous job.
+// discoveryRequest starts an SCA discovery asynchronous job.
 //
 // Parameters:
 //   - req: *IdsecSCADiscoveryRequest containing CSP, OrganizationID and AccountInfo; must be non-nil.
@@ -133,11 +121,7 @@ func serializePayload(req interface{}) (map[string]interface{}, error) {
 //   - network call fails
 //   - response code is not 200
 //   - decoding fails or JobID missing
-//
-// Example:
-//
-//	job, err := svc.Discovery(&scamodels.IdsecSCADiscoveryRequest{CSP:"aws", OrganizationID:"o", AccountInfo: scamodels.IdsecSCADiscoveryAccountInfo{ID:"acct"}})
-func (s *IdsecSCAService) discoveryRequest(req *scamodels.IdsecSCADiscoveryRequest) (*scamodels.IdsecSCADiscoveryResponse, error) {
+func (s *IdsecSCADiscoveryService) discoveryRequest(req *discoverymodels.IdsecSCADiscoveryRequest) (*discoverymodels.IdsecSCADiscoveryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("discovery request cannot be nil")
 	}
@@ -158,7 +142,7 @@ func (s *IdsecSCAService) discoveryRequest(req *scamodels.IdsecSCADiscoveryReque
 	if err != nil {
 		return nil, err
 	}
-	var jobResp scamodels.IdsecSCADiscoveryResponse
+	var jobResp discoverymodels.IdsecSCADiscoveryResponse
 	if err = mapstructure.Decode(decoded, &jobResp); err != nil {
 		return nil, err
 	}
@@ -178,11 +162,7 @@ func (s *IdsecSCAService) discoveryRequest(req *scamodels.IdsecSCADiscoveryReque
 //   - network call fails
 //   - response status not 200
 //   - decoding fails
-//
-// Example:
-//
-//	status, err := svc.jobStatus(job.JobID)
-func (s *IdsecSCAService) jobStatus(jobID string) (*scamodels.IdsecSCAJobStatusResponse, error) {
+func (s *IdsecSCADiscoveryService) jobStatus(jobID string) (*discoverymodels.IdsecSCAJobStatusResponse, error) {
 	if jobID == "" {
 		return nil, fmt.Errorf("jobID cannot be empty")
 	}
@@ -200,7 +180,7 @@ func (s *IdsecSCAService) jobStatus(jobID string) (*scamodels.IdsecSCAJobStatusR
 	if err != nil {
 		return nil, err
 	}
-	var statusResp scamodels.IdsecSCAJobStatusResponse
+	var statusResp discoverymodels.IdsecSCAJobStatusResponse
 	if err = mapstructure.Decode(decoded, &statusResp); err != nil {
 		return nil, err
 	}
@@ -209,7 +189,7 @@ func (s *IdsecSCAService) jobStatus(jobID string) (*scamodels.IdsecSCAJobStatusR
 
 // singleJobProbe performs one status retrieval and interprets terminal states.
 // Returns status response, finished flag, and error (including failure state).
-func (s *IdsecSCAService) singleJobProbe(ctx context.Context, jobID string) (*scamodels.IdsecSCAJobStatusResponse, bool, error) {
+func (s *IdsecSCADiscoveryService) singleJobProbe(ctx context.Context, jobID string) (*discoverymodels.IdsecSCAJobStatusResponse, bool, error) {
 	statusResp, err := s.jobStatus(jobID)
 	if err != nil {
 		return nil, false, fmt.Errorf("error while getting job status request: %v", err)
@@ -231,7 +211,7 @@ func (s *IdsecSCAService) singleJobProbe(ctx context.Context, jobID string) (*sc
 }
 
 // waitInterval sleeps for the polling interval or returns if context canceled.
-func (s *IdsecSCAService) waitInterval(ctx context.Context, d time.Duration) error {
+func (s *IdsecSCADiscoveryService) waitInterval(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("polling canceled: %v", ctx.Err())
@@ -241,8 +221,8 @@ func (s *IdsecSCAService) waitInterval(ctx context.Context, d time.Duration) err
 }
 
 // pollJob executes the polling loop with a fixed attempt cap, preserving original semantics.
-func (s *IdsecSCAService) pollJob(ctx context.Context, jobID string) (bool, *scamodels.IdsecSCAJobStatusResponse, error) {
-	var lastStatus *scamodels.IdsecSCAJobStatusResponse
+func (s *IdsecSCADiscoveryService) pollJob(ctx context.Context, jobID string) (bool, *discoverymodels.IdsecSCAJobStatusResponse, error) {
+	var lastStatus *discoverymodels.IdsecSCAJobStatusResponse
 	for attempt := 0; attempt <= 40; attempt++ {
 		if ctx != nil && ctx.Err() != nil {
 			return false, nil, fmt.Errorf("polling canceled: %v", ctx.Err())
@@ -258,7 +238,7 @@ func (s *IdsecSCAService) pollJob(ctx context.Context, jobID string) (bool, *sca
 		if attempt == 40 { // exhausted attempts
 			break
 		}
-		if err := s.waitInterval(ctx, 20*time.Second); err != nil { // updated to method call
+		if err := s.waitInterval(ctx, 20*time.Second); err != nil {
 			return false, nil, err
 		}
 	}
@@ -269,10 +249,7 @@ func (s *IdsecSCAService) pollJob(ctx context.Context, jobID string) (bool, *sca
 }
 
 // checkIfJobFinished polls the job status until it reaches a terminal state or times out.
-//
-// This refactored version delegates detailed polling logic to helper functions to reduce
-// cyclomatic complexity while preserving original behavior and error messages.
-func (s *IdsecSCAService) checkIfJobFinished(ctx context.Context, jobID string) (bool, *scamodels.IdsecSCAJobStatusResponse, error) { //nolint:revive
+func (s *IdsecSCADiscoveryService) checkIfJobFinished(ctx context.Context, jobID string) (bool, *discoverymodels.IdsecSCAJobStatusResponse, error) { //nolint:revive
 	if jobID == "" {
 		return false, nil, fmt.Errorf("jobID cannot be empty")
 	}
@@ -281,15 +258,11 @@ func (s *IdsecSCAService) checkIfJobFinished(ctx context.Context, jobID string) 
 
 // Discovery starts a discovery job and waits for completion, returning the initial discovery response.
 //
-// ScaDiscovery wraps the lower-level Discovery and checkIfJobFinished methods adding
-// input validation for the request and supported CSP values as well as ensuring the
-// underlying HTTP client is initialized.
-//
 // Parameters:
-//   - req: *scamodels.IdsecSCADiscoveryRequest containing CSP, OrganizationID and AccountInfo.ID; must be non-nil.
+//   - req: *discoverymodels.IdsecSCADiscoveryRequest containing CSP, OrganizationID and AccountInfo.ID; must be non-nil.
 //
 // Returns:
-//   - *scamodels.IdsecSCADiscoveryResponse: The initial discovery response (contains JobID and AlreadyRunning).
+//   - *discoverymodels.IdsecSCADiscoveryResponse: The initial discovery response (contains JobID and AlreadyRunning).
 //   - error: When validation fails, the service is uninitialized, the discovery start fails,
 //     polling fails, times out, or finishes unsuccessfully.
 //
@@ -297,10 +270,10 @@ func (s *IdsecSCAService) checkIfJobFinished(ctx context.Context, jobID string) 
 //
 // Example:
 //
-//	resp, err := svc.ScaDiscovery(&scamodels.IdsecSCADiscoveryRequest{CSP:"aws", OrganizationID:"org", AccountInfo: scamodels.IdsecSCADiscoveryAccountInfo{ID:"acct"}})
+//	resp, err := svc.Discovery(&discoverymodels.IdsecSCADiscoveryRequest{CSP:"aws", OrganizationID:"org", AccountInfo: discoverymodels.IdsecSCADiscoveryAccountInfo{ID:"acct"}})
 //	if err != nil { /* handle */ }
 //	fmt.Println("Discovery Job ID:", resp.JobID)
-func (s *IdsecSCAService) Discovery(req *scamodels.IdsecSCADiscoveryRequest) (*scamodels.IdsecSCADiscoveryResponse, error) { //nolint:revive
+func (s *IdsecSCADiscoveryService) Discovery(req *discoverymodels.IdsecSCADiscoveryRequest) (*discoverymodels.IdsecSCADiscoveryResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("discovery request cannot be nil")
 	}
@@ -318,7 +291,7 @@ func (s *IdsecSCAService) Discovery(req *scamodels.IdsecSCADiscoveryRequest) (*s
 		return nil, fmt.Errorf("account_info.id cannot be empty")
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
-		return nil, fmt.Errorf("sca service not initialized")
+		return nil, fmt.Errorf("sca discovery service not initialized")
 	}
 	s.Logger.Info("Start SCA Discovery [%s]", req.AccountInfo.ID)
 	discResp, err := s.discoveryRequest(req)
@@ -337,6 +310,6 @@ func (s *IdsecSCAService) Discovery(req *scamodels.IdsecSCADiscoveryRequest) (*s
 }
 
 // ServiceConfig returns the service configuration (implements services.IdsecService).
-func (s *IdsecSCAService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
+func (s *IdsecSCADiscoveryService) ServiceConfig() services.IdsecServiceConfig { //nolint:revive
 	return ServiceConfig
 }

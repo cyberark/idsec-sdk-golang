@@ -122,7 +122,7 @@ type IdsecSCACloudAccessElevateResponse struct {
 // The framework maps "elevate" → Elevate() by naming convention (same as list-targets → ListTargets()).
 type IdsecSCACloudAccessElevateActionRequest struct {
 	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS, AZURE)"`
-	WorkspaceID    string `json:"workspaceId" mapstructure:"workspaceId" validate:"required" flag:"workspaceId" desc:"The ID of the workspace (e.g. AWS account ID, Azure subscription ID)"`
+	WorkspaceID    string `json:"workspace_id" mapstructure:"workspace_id" validate:"required" flag:"workspace-id" desc:"The ID of the workspace (e.g. AWS account ID, Azure subscription ID)"`
 	RoleIDs        string `json:"roleIds" mapstructure:"roleIds" validate:"required" flag:"roleIds" desc:"Comma-separated role IDs to elevate with (max 5)"`
-	OrganizationID string `json:"organizationId" mapstructure:"organizationId" flag:"organizationId" desc:"The ID of the organization/tenant. Required for Azure and AWS org accounts."`
+	OrganizationID string `json:"organization_id" mapstructure:"organization_id" flag:"organization-id" desc:"The ID of the organization/tenant. Required for Azure and AWS org accounts."`
 }

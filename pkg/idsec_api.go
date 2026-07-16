@@ -81,8 +81,8 @@ import (
 	groupaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/groupaccess"
 	k8s "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/k8s"
 	vm "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm"
-	sca "github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	cloudaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess"
+	discovery "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/discovery"
 	groupaccess2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
 	k8s2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	configurations "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"
@@ -587,19 +587,6 @@ func (api *IdsecAPI) PolicyVm() (*vm.IdsecPolicyVMService, error) {
 	return service, nil
 }
 
-func (api *IdsecAPI) Sca() (*sca.IdsecSCAService, error) {
-	if serviceIfs, ok := api.services[sca.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sca.IdsecSCAService), nil
-	}
-	service, err := sca.ServiceGenerator(api.loadServiceAuthenticators(sca.ServiceConfig)...)
-	if err != nil {
-		return nil, err
-	}
-	var baseService services.IdsecService = service
-	api.services[sca.ServiceConfig.ServiceName] = &baseService
-	return service, nil
-}
-
 func (api *IdsecAPI) ScaCloudaccess() (*cloudaccess2.IdsecSCACloudAccessService, error) {
 	if serviceIfs, ok := api.services[cloudaccess2.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*cloudaccess2.IdsecSCACloudAccessService), nil
@@ -610,6 +597,19 @@ func (api *IdsecAPI) ScaCloudaccess() (*cloudaccess2.IdsecSCACloudAccessService,
 	}
 	var baseService services.IdsecService = service
 	api.services[cloudaccess2.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) ScaDiscovery() (*discovery.IdsecSCADiscoveryService, error) {
+	if serviceIfs, ok := api.services[discovery.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*discovery.IdsecSCADiscoveryService), nil
+	}
+	service, err := discovery.ServiceGenerator(api.loadServiceAuthenticators(discovery.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[discovery.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

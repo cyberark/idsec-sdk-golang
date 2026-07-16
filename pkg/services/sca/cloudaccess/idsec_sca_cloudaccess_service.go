@@ -108,11 +108,11 @@ func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
-	supported := map[string]struct{}{"AWS": {}, "AZURE": {}}
+	supported := map[string]struct{}{scamodels.CSPAWS: {}, scamodels.CSPAzure: {}}
 	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
 	if cspUpper != "" {
 		if _, ok := supported[cspUpper]; !ok {
-			return nil, fmt.Errorf("unsupported csp '%s': supported values are AWS, AZURE", req.CSP)
+			return nil, fmt.Errorf("unsupported csp '%s': supported values are %s, %s", req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
 		}
 	}
 	if req.All && cspUpper != "" {
@@ -226,14 +226,20 @@ func (s *IdsecSCACloudAccessService) listTargetsForCSP(req *scamodels.IdsecSCALi
 //
 // Returns *IdsecSCACloudAccessElevateResponse on success or an error when:
 //   - req is nil, CSP is empty, WorkspaceID is empty, or RoleIDs is empty
+//   - CSP is not one of AWS / AZURE
 //   - the network call fails or the response status is not 200
 //   - JSON decoding fails
 func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest) (*cloudaccessmodels.IdsecSCACloudAccessElevateResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
-	if strings.TrimSpace(req.CSP) == "" {
+	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
+	if cspUpper == "" {
 		return nil, fmt.Errorf("csp cannot be empty")
+	}
+	supported := map[string]struct{}{scamodels.CSPAWS: {}, scamodels.CSPAzure: {}}
+	if _, ok := supported[cspUpper]; !ok {
+		return nil, fmt.Errorf("unsupported csp '%s': supported values are %s, %s", req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
 	}
 	if strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId cannot be empty")
@@ -244,17 +250,17 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 
 	roleIDs := sca.SplitCommaSeparated(req.RoleIDs)
 	maxAllowedRoleIDs := maxRoleIDs
-	if strings.EqualFold(strings.TrimSpace(req.CSP), "AWS") {
+	if cspUpper == scamodels.CSPAWS {
 		maxAllowedRoleIDs = maxAWSRoleIDs
 	}
 	if len(roleIDs) > maxAllowedRoleIDs {
-		return nil, fmt.Errorf("maximum %d role IDs allowed for %s, got %d", maxAllowedRoleIDs, strings.ToUpper(strings.TrimSpace(req.CSP)), len(roleIDs))
+		return nil, fmt.Errorf("maximum %d role IDs allowed for %s, got %d", maxAllowedRoleIDs, cspUpper, len(roleIDs))
 	}
 
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca cloudaccess service not initialized")
 	}
-	s.Logger.Info("Calling SCA Elevate API for CSP [%s] workspaceId [%s]", req.CSP, req.WorkspaceID)
+	s.Logger.Info("Calling SCA Elevate API for CSP [%s] workspaceId [%s]", cspUpper, req.WorkspaceID)
 
 	var targets []cloudaccessmodels.IdsecSCACloudAccessElevateTarget
 	for _, rid := range roleIDs {
@@ -265,7 +271,7 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 	}
 
 	apiReq := &cloudaccessmodels.IdsecSCACloudAccessElevateRequest{
-		CSP:            req.CSP,
+		CSP:            cspUpper,
 		OrganizationID: req.OrganizationID,
 		Targets:        targets,
 	}

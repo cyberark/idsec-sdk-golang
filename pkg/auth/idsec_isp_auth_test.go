@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,7 +327,9 @@ func TestIdsecISPAuth_performRefreshAuthentication(t *testing.T) {
 		validateFunc  func(t *testing.T, result *auth.IdsecToken)
 	}{
 		{
-			name:    "success_identity_service_user_returns_same_token",
+			// With no secret retained, refreshing an identity service user token must
+			// re-authenticate; since re-auth requires the secret, this now errors out.
+			name:    "error_identity_service_user_refresh_without_secret",
 			profile: CreateTestProfile("test", "isp", "user1"),
 			authProfile: &auth.IdsecAuthProfile{
 				Username:   "user1",
@@ -346,15 +349,7 @@ func TestIdsecISPAuth_performRefreshAuthentication(t *testing.T) {
 				ExpiresIn:    common.IdsecRFC3339Time(futureTime),
 				RefreshToken: "refresh_token",
 			},
-			expectedError: false,
-			validateFunc: func(t *testing.T, result *auth.IdsecToken) {
-				if result == nil {
-					t.Fatal("Expected non-nil token")
-				}
-				if result.Token != "existing_token" {
-					t.Errorf("Expected token 'existing_token', got '%s'", result.Token)
-				}
-			},
+			expectedError: true,
 		},
 	}
 
@@ -682,6 +677,145 @@ func TestISPAuthConstants(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIdsecISPAuth_SecretRoundTrip(t *testing.T) {
+	tests := []struct {
+		name         string
+		secret       *auth.IdsecSecret
+		validateFunc func(t *testing.T, got *auth.IdsecSecret)
+	}{
+		{
+			name:   "success_nil_by_default",
+			secret: nil,
+			validateFunc: func(t *testing.T, got *auth.IdsecSecret) {
+				if got != nil {
+					t.Errorf("Expected nil secret by default, got %v", got)
+				}
+			},
+		},
+		{
+			name:   "success_round_trip_stored_secret",
+			secret: &auth.IdsecSecret{Secret: "top-secret"},
+			validateFunc: func(t *testing.T, got *auth.IdsecSecret) {
+				if got == nil {
+					t.Fatal("Expected non-nil secret")
+				}
+				if got.Secret != "top-secret" {
+					t.Errorf("Expected 'top-secret', got '%s'", got.Secret)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			authInstance := NewIdsecISPAuth(false).(*IdsecISPAuth)
+			if authInstance.GetSecret() != nil {
+				t.Fatalf("Expected nil secret before setSecret, got %v", authInstance.GetSecret())
+			}
+			if tt.secret != nil {
+				authInstance.setSecret(tt.secret)
+			}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, authInstance.GetSecret())
+			}
+		})
+	}
+}
+
+func TestIdsecISPAuth_performIdentityServiceUserRefreshAuthentication(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupSecret   func(authInstance *IdsecISPAuth)
+		expectedError bool
+	}{
+		{
+			name:          "error_refresh_without_secret",
+			setupSecret:   func(authInstance *IdsecISPAuth) {},
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			authInstance := NewIdsecISPAuth(false).(*IdsecISPAuth)
+			if tt.setupSecret != nil {
+				tt.setupSecret(authInstance)
+			}
+
+			authProfile := &auth.IdsecAuthProfile{
+				Username:   "user1",
+				AuthMethod: auth.IdentityServiceUser,
+				AuthMethodSettings: &auth.IdentityServiceUserIdsecAuthMethodSettings{
+					IdentityURL:                      "https://identity.example.com",
+					IdentityTenantSubdomain:          "tenant",
+					IdentityAuthorizationApplication: "app",
+				},
+			}
+			result, err := authInstance.performIdentityServiceUserRefreshAuthentication(
+				CreateTestProfile("test", "isp", "user1"),
+				authProfile,
+				nil,
+			)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Fatal("Expected error, got nil")
+				}
+				if result != nil {
+					t.Errorf("Expected nil token on error, got %v", result)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestIdsecISPAuth_ConcurrentTokenSecretAccess(t *testing.T) {
+	t.Parallel()
+
+	futureTime := time.Now().Add(1 * time.Hour)
+	authInstance := NewIdsecISPAuth(false).(*IdsecISPAuth)
+
+	const goroutines = 20
+	const iterations = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 3)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				authInstance.setSecret(&auth.IdsecSecret{Secret: "secret"})
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_ = authInstance.GetSecret()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				authInstance.setState(CreateTestToken("token", futureTime, "refresh"), nil, nil)
+				_ = authInstance.GetToken()
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestISPAuthMethodDefaults(t *testing.T) {

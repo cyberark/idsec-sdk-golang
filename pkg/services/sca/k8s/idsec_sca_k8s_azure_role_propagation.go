@@ -41,9 +41,7 @@ func AzureSubscriptionFromTargetID(targetID string) string {
 // principalOID is the az login user's object id; callers obtain it via
 // ExtractAzurePrincipalOID on the AKS access token already in hand, which
 // avoids a second `az` subprocess just to mint a management-scoped token.
-//
 // diagnostics controls kubectl-login stderr logs; when false, polling is silent.
-//
 // Poll schedule: immediate, then 1s,1s,1s, then every 3s until 60s budget
 // is exhausted.
 func WaitForAzureRolePropagation(

@@ -189,10 +189,19 @@ func (a *IdsecISPAuth) performIdentityServiceUserAuthentication(profile *models.
 		Username:   authProfile.Username,
 		Endpoint:   identityAuth.IdentityURL(),
 		TokenType:  auth.JWT,
-		AuthMethod: auth.Identity,
+		AuthMethod: auth.IdentityServiceUser,
 		ExpiresIn:  identityAuth.SessionExp(),
 		Metadata:   metadata,
 	}, nil
+}
+
+func (a *IdsecISPAuth) performIdentityServiceUserRefreshAuthentication(profile *models.IdsecProfile, authProfile *auth.IdsecAuthProfile, token *auth.IdsecToken) (*auth.IdsecToken, error) {
+	secret := a.GetSecret()
+	if secret == nil {
+		return nil, errors.New("token secret is required to refresh identity service user auth")
+	}
+	a.Logger.Info("Refreshing identity service user authentication to ISP")
+	return a.performIdentityServiceUserAuthentication(profile, authProfile, secret, true)
 }
 
 // performAuthentication performs authentication to the ISP using the specified auth method.
@@ -213,6 +222,9 @@ func (a *IdsecISPAuth) performRefreshAuthentication(profile *models.IdsecProfile
 	a.Logger.Info("Performing refresh authentication to ISP")
 	if authProfile.AuthMethod == auth.Identity || authProfile.AuthMethod == auth.Default {
 		return a.performIdentityRefreshAuthentication(profile, authProfile, token)
+	}
+	if authProfile.AuthMethod == auth.IdentityServiceUser {
+		return a.performIdentityServiceUserRefreshAuthentication(profile, authProfile, token)
 	}
 	return token, nil
 }

@@ -907,3 +907,88 @@ func TestIdsecBasicKeyring_ClearAllPasswords(t *testing.T) {
 		})
 	}
 }
+
+func TestIdsecBasicKeyring_ListKeys(t *testing.T) {
+	t.Run("populated_service", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
+			_ = os.RemoveAll(tempDir)
+		})
+		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
+
+		kr := NewIdsecBasicKeyring()
+		if err := kr.SetPassword("github", "alice", "secret-a"); err != nil {
+			t.Fatalf("SetPassword alice: %v", err)
+		}
+		if err := kr.SetPassword("github", "bob", "secret-b"); err != nil {
+			t.Fatalf("SetPassword bob: %v", err)
+		}
+		if err := kr.SetPassword("gitlab", "carol", "secret-c"); err != nil {
+			t.Fatalf("SetPassword carol: %v", err)
+		}
+
+		keys, err := kr.ListKeys("github")
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if len(keys) != 2 {
+			t.Fatalf("got %d keys, want 2: %v", len(keys), keys)
+		}
+		seen := map[string]bool{}
+		for _, k := range keys {
+			seen[k] = true
+		}
+		if !seen["alice"] || !seen["bob"] {
+			t.Errorf("got keys %v, want alice and bob", keys)
+		}
+	})
+
+	t.Run("missing_file", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_missing_")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
+			_ = os.RemoveAll(tempDir)
+		})
+		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
+
+		kr := NewIdsecBasicKeyring()
+		keys, err := kr.ListKeys("github")
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if len(keys) != 0 {
+			t.Errorf("got keys %v, want empty", keys)
+		}
+	})
+
+	t.Run("missing_service", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_nosvc_")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
+			_ = os.RemoveAll(tempDir)
+		})
+		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
+
+		kr := NewIdsecBasicKeyring()
+		if err := kr.SetPassword("github", "alice", "secret"); err != nil {
+			t.Fatalf("SetPassword: %v", err)
+		}
+		keys, err := kr.ListKeys("gitlab")
+		if err != nil {
+			t.Fatalf("ListKeys: %v", err)
+		}
+		if len(keys) != 0 {
+			t.Errorf("got keys %v, want empty", keys)
+		}
+	})
+}

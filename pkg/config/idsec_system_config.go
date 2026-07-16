@@ -105,6 +105,7 @@ var (
 	isInteractive             = true
 	isCertificateVerification = true
 	isAllowingOutput          = false
+	isStdoutReservedForData   = false
 	trustedCert               = ""
 	trustedCaCertsBundlePath  = ""
 	currentTool               = IdsecToolSDK
@@ -305,6 +306,24 @@ func DisallowOutput() {
 //	}
 func IsAllowingOutput() bool {
 	return isAllowingOutput
+}
+
+// ReserveStdoutForData marks stdout as reserved for machine-readable output (e.g. kubectl
+// ExecCredential JSON). Prompts that would normally use stdout should go to stderr instead.
+func ReserveStdoutForData() {
+	isStdoutReservedForData = true
+}
+
+// ReleaseStdoutForData clears the stdout reservation set by ReserveStdoutForData,
+// restoring the default behavior where informational prompts may use stdout.
+func ReleaseStdoutForData() {
+	isStdoutReservedForData = false
+}
+
+// IsStdoutReservedForData reports whether stdout is reserved for machine-readable output.
+// It gets activated only when the kubectl-login flow is triggered.
+func IsStdoutReservedForData() bool {
+	return isStdoutReservedForData
 }
 
 // EnableVerboseLogging enables verbose logging with the specified log level.

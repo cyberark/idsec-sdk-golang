@@ -1,15 +1,15 @@
-package sca
+package discovery
 
 import (
 	"context"
 	"testing"
 
-	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
+	discoverymodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/discovery/models"
 )
 
 // TestScaDiscovery_NilRequest tests nil request validation.
 func TestScaDiscovery_NilRequest(t *testing.T) {
-	service := &IdsecSCAService{}
+	service := &IdsecSCADiscoveryService{}
 	resp, err := service.Discovery(nil)
 	if err == nil {
 		t.Fatalf("expected error for nil request, got nil (resp=%v)", resp)
@@ -18,8 +18,8 @@ func TestScaDiscovery_NilRequest(t *testing.T) {
 
 // TestScaDiscovery_EmptyCSP tests empty CSP validation.
 func TestScaDiscovery_EmptyCSP(t *testing.T) {
-	service := &IdsecSCAService{}
-	req := &scamodels.IdsecSCADiscoveryRequest{}
+	service := &IdsecSCADiscoveryService{}
+	req := &discoverymodels.IdsecSCADiscoveryRequest{}
 	resp, err := service.Discovery(req)
 	if err == nil {
 		t.Fatalf("expected error for empty CSP, got nil (resp=%v)", resp)
@@ -28,11 +28,11 @@ func TestScaDiscovery_EmptyCSP(t *testing.T) {
 
 // TestScaDiscovery_UnsupportedCSP tests unsupported CSP validation.
 func TestScaDiscovery_UnsupportedCSP(t *testing.T) {
-	service := &IdsecSCAService{}
-	req := &scamodels.IdsecSCADiscoveryRequest{
+	service := &IdsecSCADiscoveryService{}
+	req := &discoverymodels.IdsecSCADiscoveryRequest{
 		CSP:            "ibm",
 		OrganizationID: "org",
-		AccountInfo:    scamodels.IdsecSCADiscoveryAccountInfo{ID: "acc"},
+		AccountInfo:    discoverymodels.IdsecSCADiscoveryAccountInfo{ID: "acc"},
 	}
 	resp, err := service.Discovery(req)
 	if err == nil {
@@ -42,8 +42,8 @@ func TestScaDiscovery_UnsupportedCSP(t *testing.T) {
 
 // TestScaDiscovery_MissingOrgID tests missing organization ID validation.
 func TestScaDiscovery_MissingOrgID(t *testing.T) {
-	service := &IdsecSCAService{}
-	req := &scamodels.IdsecSCADiscoveryRequest{CSP: "aws"}
+	service := &IdsecSCADiscoveryService{}
+	req := &discoverymodels.IdsecSCADiscoveryRequest{CSP: "aws"}
 	resp, err := service.Discovery(req)
 	if err == nil {
 		t.Fatalf("expected error for missing org ID, got nil (resp=%v)", resp)
@@ -52,8 +52,8 @@ func TestScaDiscovery_MissingOrgID(t *testing.T) {
 
 // TestScaDiscovery_MissingAccountID tests missing account ID validation.
 func TestScaDiscovery_MissingAccountID(t *testing.T) {
-	service := &IdsecSCAService{}
-	req := &scamodels.IdsecSCADiscoveryRequest{
+	service := &IdsecSCADiscoveryService{}
+	req := &discoverymodels.IdsecSCADiscoveryRequest{
 		CSP:            "aws",
 		OrganizationID: "org",
 	}
@@ -63,13 +63,13 @@ func TestScaDiscovery_MissingAccountID(t *testing.T) {
 	}
 }
 
-// TestScaDiscovery_UninitializedService tests uninitialized SCA service error.
+// TestScaDiscovery_UninitializedService tests uninitialized SCA discovery service error.
 func TestScaDiscovery_UninitializedService(t *testing.T) {
-	service := &IdsecSCAService{}
-	req := &scamodels.IdsecSCADiscoveryRequest{
+	service := &IdsecSCADiscoveryService{}
+	req := &discoverymodels.IdsecSCADiscoveryRequest{
 		CSP:            "aws",
 		OrganizationID: "org",
-		AccountInfo:    scamodels.IdsecSCADiscoveryAccountInfo{ID: "acc"},
+		AccountInfo:    discoverymodels.IdsecSCADiscoveryAccountInfo{ID: "acc"},
 	}
 	resp, err := service.Discovery(req)
 	if err == nil {
@@ -87,7 +87,7 @@ func assertErr(t *testing.T, name string, gotErr error, expectErr bool, resp any
 	}
 }
 
-func assertResp(t *testing.T, name string, resp *scamodels.IdsecSCADiscoveryResponse) {
+func assertResp(t *testing.T, name string, resp *discoverymodels.IdsecSCADiscoveryResponse) {
 	t.Helper()
 	if resp == nil || resp.JobID == "" {
 		t.Fatalf("%s: expected job response with id", name)
@@ -95,10 +95,10 @@ func assertResp(t *testing.T, name string, resp *scamodels.IdsecSCADiscoveryResp
 }
 
 func TestDiscovery_validation_only(t *testing.T) {
-	service := &IdsecSCAService{}
+	service := &IdsecSCADiscoveryService{}
 	tests := []struct {
 		name      string
-		req       *scamodels.IdsecSCADiscoveryRequest
+		req       *discoverymodels.IdsecSCADiscoveryRequest
 		expectErr bool
 	}{
 		{name: "error_nil_request", req: nil, expectErr: true},
@@ -114,14 +114,14 @@ func TestDiscovery_validation_only(t *testing.T) {
 }
 
 func TestJobStatus_validation_only(t *testing.T) {
-	service := &IdsecSCAService{}
+	service := &IdsecSCADiscoveryService{}
 	if _, err := service.jobStatus(""); err == nil {
 		t.Fatalf("expected error for empty jobID")
 	}
 }
 
 func TestCheckIfJobFinished_validation_only(t *testing.T) {
-	service := &IdsecSCAService{}
+	service := &IdsecSCADiscoveryService{}
 	if finished, _, err := service.checkIfJobFinished(context.Background(), ""); err == nil || finished {
 		t.Fatalf("expected error for empty jobID in CheckIfJobFinished")
 	}

@@ -12,6 +12,8 @@ var ActionToSchemaMap = map[string]interface{}{
 	"list":                        nil,
 	"list-by":                     &accountsmodels.IdsecPCloudAccountsFilter{},
 	"list-secret-versions":        &accountsmodels.IdsecPCloudListAccountSecretVersions{},
+	"list-activities":             &accountsmodels.IdsecPCloudListAccountActivities{},
+	"list-activities-by":          &accountsmodels.IdsecPCloudAccountActivitiesFilter{},
 	"generate-credentials":        &accountsmodels.IdsecPCloudGenerateAccountCredentials{},
 	"verify-credentials":          &accountsmodels.IdsecPCloudVerifyAccountCredentials{},
 	"change-credentials":          &accountsmodels.IdsecPCloudChangeAccountCredentials{},

@@ -14,15 +14,19 @@ package common
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +41,23 @@ import (
 // Number of retry attempts for token refresh operations.
 const (
 	refreshRetryCount = 3
+)
+
+// Defaults governing automatic retry of transient failures. These cover
+// connection-close style transport errors (for example a bare "EOF" produced
+// when an idle keep-alive connection is reused after the server or an
+// intervening load balancer has already closed it) and HTTP 429 rate-limit
+// responses. Both classes indicate the request was not durably processed, so
+// retrying with backoff is safe even for non-idempotent methods.
+const (
+	// defaultTransientRetryCount is the number of additional attempts made when
+	// a request fails with a transient transport error or a 429 response.
+	defaultTransientRetryCount = 3
+	// defaultTransientRetryBaseWait is the base backoff applied before the first
+	// retry; subsequent retries grow exponentially up to defaultTransientRetryMaxWait.
+	defaultTransientRetryBaseWait = 500 * time.Millisecond
+	// defaultTransientRetryMaxWait caps the exponential backoff between retries.
+	defaultTransientRetryMaxWait = 10 * time.Second
 )
 
 // IdsecAuthorizationTokenTypeRaw is the tokenType argument for UpdateToken that sets
@@ -98,6 +119,9 @@ type IdsecClient struct {
 	logger                    *IdsecLogger
 	retryCallback             func(*IdsecClient, *http.Request, *http.Response) bool
 	retryCount                int
+	transientRetryCount       int
+	transientRetryBaseWait    time.Duration
+	transientRetryMaxWait     time.Duration
 }
 
 // MarshalCookies serializes a cookie jar into a JSON byte array.
@@ -273,7 +297,7 @@ func NewIdsecClient(
 	enableTelemetry bool,
 ) *IdsecClient {
 	var err error
-	if baseURL != "" && !strings.HasPrefix(baseURL, "https://") {
+	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "https://" + baseURL
 	}
 	if cookieJar == nil {
@@ -348,6 +372,9 @@ func NewIdsecClient(
 		logger:                    GetLogger("IdsecClient", Unknown),
 		retryCallback:             nil,
 		retryCount:                1,
+		transientRetryCount:       defaultTransientRetryCount,
+		transientRetryBaseWait:    defaultTransientRetryBaseWait,
+		transientRetryMaxWait:     defaultTransientRetryMaxWait,
 	}
 	client.UpdateToken(token, tokenType)
 	client.headers["User-Agent"] = config.UserAgent()
@@ -722,7 +749,7 @@ func (ac *IdsecClient) fillMetadataTelemetry(route string, refreshRetryCountLoca
 // - TLS certificate verification based on global settings
 // - Request/response timing logging
 // - Token refresh retry logic on 401 Unauthorized responses
-func (ac *IdsecClient) doRequest(ctx context.Context, method string, route string, body interface{}, params interface{}, refreshRetryCountLocal int, retryCountLocal int) (*http.Response, error) {
+func (ac *IdsecClient) doRequest(ctx context.Context, method string, route string, body interface{}, params interface{}, refreshRetryCountLocal int, retryCountLocal int, transientRetryLocal int) (*http.Response, error) {
 	var err error
 	fullURL := ac.BaseURL
 	if route != "" {
@@ -806,6 +833,19 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 	}()
 	resp, err := ac.client.Do(req)
 	if err != nil {
+		// Retry transient connection-close style transport errors (e.g. a bare
+		// EOF from reusing a stale keep-alive connection). These indicate the
+		// request never reached the application, so a retry is safe.
+		if transientRetryLocal > 0 && isRetryableTransportError(err, method) {
+			attempt := ac.transientRetryCount - transientRetryLocal
+			delay := transientRetryBackoff(ac.transientRetryBaseWait, ac.transientRetryMaxWait, attempt)
+			ac.logger.Warning("Transient transport error on '%s %s' (attempt %d/%d): %v - retrying in %s",
+				method, fullURL, attempt+1, ac.transientRetryCount, err, delay)
+			if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+				return nil, err
+			}
+			return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal, retryCountLocal, transientRetryLocal-1)
+		}
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized && ac.refreshConnectionCallback != nil && refreshRetryCountLocal > 0 {
@@ -814,11 +854,34 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 			return nil, err
 		}
 		ac.logger.Info("Retrying request '%s %s' after refreshing authentication", method, fullURL)
-		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal-1, retryCountLocal)
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal-1, retryCountLocal, transientRetryLocal)
+	}
+	// Retry rate-limited responses, honoring the server's Retry-After hint when
+	// present and otherwise falling back to exponential backoff.
+	if resp.StatusCode == http.StatusTooManyRequests && transientRetryLocal > 0 {
+		attempt := ac.transientRetryCount - transientRetryLocal
+		delay, ok := parseRetryAfter(resp)
+		if !ok {
+			delay = transientRetryBackoff(ac.transientRetryBaseWait, ac.transientRetryMaxWait, attempt)
+		} else if delay > ac.transientRetryMaxWait {
+			// Clamp a server-supplied Retry-After to the configured maximum so a
+			// large (or malicious/misconfigured) header value cannot stall the
+			// caller far beyond the configured backoff cap.
+			delay = ac.transientRetryMaxWait
+		}
+		// Drain and close the body so the underlying connection can be reused.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		ac.logger.Warning("Rate limited (429) on '%s %s' (attempt %d/%d) - retrying in %s",
+			method, fullURL, attempt+1, ac.transientRetryCount, delay)
+		if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+			return nil, sleepErr
+		}
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal, retryCountLocal, transientRetryLocal-1)
 	}
 	if resp.StatusCode >= http.StatusInternalServerError && ac.retryCallback != nil && retryCountLocal > 0 && ac.retryCallback(ac, req, resp) {
 		ac.logger.Info("Retrying request '%s %s' due to server error %d", method, fullURL, resp.StatusCode)
-		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal, retryCountLocal-1)
+		return ac.doRequest(ctx, method, route, body, params, refreshRetryCountLocal, retryCountLocal-1, transientRetryLocal)
 	}
 	return resp, nil
 }
@@ -846,7 +909,7 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 //	}
 //	defer response.Body.Close()
 func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodGet, route, nil, params, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodGet, route, nil, params, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // Post performs an HTTP POST request to the specified route.
@@ -871,7 +934,7 @@ func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}
 //	}
 //	defer response.Body.Close()
 func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodPost, route, body, nil, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // PostWithParams performs an HTTP POST request to the specified route with query parameters.
@@ -894,7 +957,7 @@ func (ac *IdsecClient) Post(ctx context.Context, route string, body interface{})
 //	params := map[string]string{"attributeid": "abc-123"}
 //	response, err := client.PostWithParams(ctx, "/SomeApi/Update", body, params)
 func (ac *IdsecClient) PostWithParams(ctx context.Context, route string, body interface{}, params interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPost, route, body, params, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodPost, route, body, params, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // Put performs an HTTP PUT request to the specified route.
@@ -915,7 +978,7 @@ func (ac *IdsecClient) PostWithParams(ctx context.Context, route string, body in
 //	updatedUser := map[string]string{"name": "John Doe", "email": "john.doe@example.com"}
 //	response, err := client.Put(ctx, "/users/123", updatedUser)
 func (ac *IdsecClient) Put(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPut, route, body, nil, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodPut, route, body, nil, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // Delete performs an HTTP DELETE request to the specified route.
@@ -937,7 +1000,7 @@ func (ac *IdsecClient) Put(ctx context.Context, route string, body interface{}) 
 //	deleteOptions := map[string]bool{"force": true}
 //	response, err := client.Delete(ctx, "/users/123", deleteOptions)
 func (ac *IdsecClient) Delete(ctx context.Context, route string, body interface{}, params interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodDelete, route, body, params, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodDelete, route, body, params, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // Patch performs an HTTP PATCH request to the specified route.
@@ -958,7 +1021,7 @@ func (ac *IdsecClient) Delete(ctx context.Context, route string, body interface{
 //	partialUpdate := map[string]string{"email": "newemail@example.com"}
 //	response, err := client.Patch(ctx, "/users/123", partialUpdate)
 func (ac *IdsecClient) Patch(ctx context.Context, route string, body interface{}) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodPatch, route, body, nil, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodPatch, route, body, nil, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // Options performs an HTTP OPTIONS request to the specified route.
@@ -978,7 +1041,7 @@ func (ac *IdsecClient) Patch(ctx context.Context, route string, body interface{}
 //	response, err := client.Options(ctx, "/users")
 //	// Check response headers for allowed methods, CORS info, etc.
 func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Response, error) {
-	return ac.doRequest(ctx, http.MethodOptions, route, nil, nil, refreshRetryCount, ac.retryCount)
+	return ac.doRequest(ctx, http.MethodOptions, route, nil, nil, refreshRetryCount, ac.retryCount, ac.transientRetryCount)
 }
 
 // UpdateToken updates the authentication token and token type for the client.
@@ -1084,4 +1147,242 @@ func (ac *IdsecClient) GetTokenType() string {
 func (ac *IdsecClient) SetRetry(retryCallback func(*IdsecClient, *http.Request, *http.Response) bool, retryCount int) {
 	ac.retryCallback = retryCallback
 	ac.retryCount = retryCount
+}
+
+// SetTransientRetry configures automatic retry of transient failures.
+//
+// Transient failures are connection-close style transport errors (such as a
+// bare "EOF" produced when a stale keep-alive connection is reused) and HTTP
+// 429 rate-limit responses. Unlike SetRetry (which is opt-in and only applies
+// to 5xx responses), transient retry is enabled by default with sensible
+// backoff.
+//
+// A connection that was closed before the request was processed (a bare "EOF"
+// or a closed idle connection) is retried for any method. Ambiguous mid-flight
+// transport errors that may occur after the server began processing (e.g. a
+// connection reset) are only retried for idempotent methods, so a non-idempotent
+// request (such as a POST that creates a resource) is never silently duplicated.
+// A server-supplied Retry-After on a 429 is honored but clamped to maxWait.
+//
+// Parameters:
+//   - count: The number of retry attempts for transient failures. A value of 0
+//     disables transient retry. Negative values are treated as 0.
+//   - baseWait: The base backoff before the first retry. Values <= 0 leave the
+//     current base wait unchanged.
+//   - maxWait: The maximum backoff between retries (also the upper bound applied
+//     to a server-supplied Retry-After). Values <= 0 leave the current maximum
+//     wait unchanged.
+//
+// Example:
+//
+//	// Retry transient failures up to 5 times, starting at 1s and capping at 30s.
+//	client.SetTransientRetry(5, 1*time.Second, 30*time.Second)
+//
+//	// Disable transient retry entirely.
+//	client.SetTransientRetry(0, 0, 0)
+func (ac *IdsecClient) SetTransientRetry(count int, baseWait, maxWait time.Duration) {
+	if count < 0 {
+		count = 0
+	}
+	ac.transientRetryCount = count
+	if baseWait > 0 {
+		ac.transientRetryBaseWait = baseWait
+	}
+	if maxWait > 0 {
+		ac.transientRetryMaxWait = maxWait
+	}
+}
+
+// isIdempotentMethod reports whether an HTTP method is idempotent per RFC 7231
+// (repeating the request has the same effect as issuing it once), and is
+// therefore safe to retry even when the request may already have reached the
+// server.
+//
+// Parameters:
+//   - method: The HTTP method (case-insensitive).
+//
+// Returns true for GET, HEAD, OPTIONS, TRACE, PUT, and DELETE.
+func isIdempotentMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// isRetryableTransportError reports whether a transport-level error returned by
+// http.Client.Do represents a transient, connection-close style failure that is
+// safe to retry for the given HTTP method.
+//
+// It deliberately excludes context cancellation and deadline errors (which
+// reflect caller intent and must be honored) and generic timeouts (which are
+// ambiguous with respect to whether the server processed the request).
+//
+// Errors are split into two classes:
+//   - Connection-closed-before-processing (a bare "EOF" or a closed idle
+//     connection). These occur when a stale keep-alive connection is reused and
+//     the server had already closed it, so the request never reached the
+//     application. They are safe to retry for ANY method, including POST - this
+//     is the failure mode OLY-18600 was reported for.
+//   - Ambiguous mid-flight resets ("connection reset", "broken pipe",
+//     "http2: server sent goaway"). These can occur after the server began
+//     processing the request, so retrying a non-idempotent method (e.g. POST)
+//     could duplicate a side effect. They are only retried for idempotent
+//     methods.
+//
+// Parameters:
+//   - err: The error returned by the HTTP client.
+//   - method: The HTTP method of the request that produced the error.
+//
+// Returns true if the error is a retryable transient transport error for the
+// given method.
+func isRetryableTransportError(err error, method string) bool {
+	if err == nil {
+		return false
+	}
+	// Never retry when the caller cancelled or the deadline elapsed.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// Connection closed without the request being processed - safe for any
+	// method (the stale keep-alive reuse case).
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	unprocessedSubstrings := []string{
+		"eof",
+		"server closed idle connection",
+	}
+	for _, substr := range unprocessedSubstrings {
+		if strings.Contains(msg, substr) {
+			return true
+		}
+	}
+	// Ambiguous errors that may occur after the server began processing the
+	// request are only safe to retry for idempotent methods.
+	if isIdempotentMethod(method) {
+		ambiguousSubstrings := []string{
+			"connection reset by peer",
+			"connection reset",
+			"broken pipe",
+			"http2: server sent goaway",
+		}
+		for _, substr := range ambiguousSubstrings {
+			if strings.Contains(msg, substr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseRetryAfter extracts a delay from an HTTP response's Retry-After header.
+//
+// The header may be expressed either as an integer number of seconds or as an
+// HTTP date. Negative or past values are clamped to zero.
+//
+// Parameters:
+//   - resp: The HTTP response to inspect (may be nil).
+//
+// Returns the parsed delay and true when a valid Retry-After header is present,
+// or a zero duration and false otherwise.
+func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
+	if resp == nil {
+		return 0, false
+	}
+	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds < 0 {
+			seconds = 0
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if t, err := http.ParseTime(value); err == nil {
+		delay := time.Until(t)
+		if delay < 0 {
+			delay = 0
+		}
+		return delay, true
+	}
+	return 0, false
+}
+
+// transientRetryBackoff computes the backoff before a transient retry attempt.
+//
+// The delay grows exponentially from base (doubling each attempt) up to the max
+// cap, with up to 50% random jitter added to avoid synchronized retries across
+// concurrent requests (the "thundering herd" problem).
+//
+// Parameters:
+//   - base: The base delay for the first attempt.
+//   - max: The maximum delay cap.
+//   - attempt: The zero-based retry attempt index.
+//
+// Returns the jittered backoff duration.
+func transientRetryBackoff(base, max time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = defaultTransientRetryBaseWait
+	}
+	if max <= 0 {
+		max = defaultTransientRetryMaxWait
+	}
+	delay := base
+	for i := 0; i < attempt; i++ {
+		delay *= 2
+		if delay >= max {
+			delay = max
+			break
+		}
+	}
+	if delay > max {
+		delay = max
+	}
+	return delay + randomJitter(delay)
+}
+
+// randomJitter returns a random duration between 0 and half of the provided
+// duration, using a cryptographically secure source. On any error it returns 0.
+//
+// Parameters:
+//   - duration: The base duration to derive jitter from.
+//
+// Returns the jitter duration to add to a backoff delay.
+func randomJitter(duration time.Duration) time.Duration {
+	maxJitter := int64(duration) / 2
+	if maxJitter <= 0 {
+		return 0
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(maxJitter))
+	if err != nil {
+		return 0
+	}
+	return time.Duration(n.Int64())
+}
+
+// sleepWithContext sleeps for the given duration but returns early if the
+// context is cancelled or its deadline elapses.
+//
+// Parameters:
+//   - ctx: The context governing cancellation.
+//   - d: The duration to sleep. Non-positive values return immediately.
+//
+// Returns the context's error if it is done before the duration elapses, or nil
+// once the full duration has passed.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

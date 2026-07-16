@@ -40,6 +40,9 @@ Two authenticator types are supported, both derived from the IdsecAuth interface
 
 - <b>Identity</b> (`identity`) - Identity authentication to a tenant or to an application within the Identity tenant, used with the IdentityIdsecAuthMethodSettings class
 - <b>IdentityServiceUser</b> (`identity_service_user`) - Identity authentication with a service user, used with IdentityServiceUserIdsecAuthMethodSettings class
+
+    For long-running clients (for example, a Terraform apply that exceeds the JWT lifetime), the SDK retains the service token in memory and re-runs the full OAuth client-credentials + authorize flow when the access token expires. HTTP clients with a refresh callback automatically retry once after a `401 Unauthorized` response.
+
 - <b>PVWA</b> (`pvwa`) - PVWA username/password authentication for self-hosted instances, used with PVWAIdsecAuthMethodSettings (PVWAURL, PVWALoginMethod: `cyberark`, `ldap`, or `windows`)
 - <b>Direct</b> (`direct`) - Direct authentication to an endpoint, used with the DirectIdsecAuthMethodSettings class
 - <b>Default</b> (`default`) - Default authenticator auth method for the authenticator

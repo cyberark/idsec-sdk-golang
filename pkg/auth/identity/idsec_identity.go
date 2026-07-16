@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	authcommon "github.com/cyberark/idsec-sdk-golang/pkg/auth/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
+	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
@@ -437,7 +439,12 @@ func (ai *IdsecIdentity) performIdpAuthentication(startAuthResponse *identity.St
 		return errors.New("MFA / IDP Polling is already in progress")
 	}
 	if interactive {
-		fmt.Printf("\nYou are now being redirected from your browser to your external identity provider for authentication\n"+
+		// When stdout is reserved for machine-readable output (e.g. kubectl-login), use stderr.
+		promptOut := io.Writer(os.Stdout)
+		if config.IsStdoutReservedForData() {
+			promptOut = os.Stderr
+		}
+		_, _ = fmt.Fprintf(promptOut, "\nYou are now being redirected from your browser to your external identity provider for authentication\n"+
 			"If the browser did not open, you may also click the following URL to access your identity provider authentication\n\n"+
 			"%s\n", startAuthResponse.Result.IdpRedirectShortURL)
 	}

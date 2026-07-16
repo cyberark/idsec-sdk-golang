@@ -220,3 +220,27 @@ func (b *IdsecOSProvidedKeyring) ClearAllPasswords() error {
 	}
 	return nil
 }
+
+// ListKeys returns the usernames stored under the given serviceName in the
+// OS keyring. On OS keyring open/list failure, falls back to the basic keyring.
+// Secret values are not returned.
+func (b *IdsecOSProvidedKeyring) ListKeys(serviceName string) ([]string, error) {
+	keyringStore, err := b.keyringForService(serviceName)
+	if err != nil {
+		b.logger.Warning("Failed to open OS keyring: %v. Falling back to basic keyring.", err)
+		return b.fallbackKeyring.ListKeys(serviceName)
+	}
+	rawKeys, err := keyringStore.Keys()
+	if err != nil {
+		b.logger.Warning("Failed to list keys from OS keyring: %v. Falling back to basic keyring.", err)
+		return b.fallbackKeyring.ListKeys(serviceName)
+	}
+	prefix := keyringPrefix + "_"
+	keys := make([]string, 0, len(rawKeys))
+	for _, k := range rawKeys {
+		if trimmed, ok := strings.CutPrefix(k, prefix); ok {
+			keys = append(keys, trimmed)
+		}
+	}
+	return keys, nil
+}
