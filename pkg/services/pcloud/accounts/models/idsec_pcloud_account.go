@@ -27,7 +27,7 @@ type IdsecPCloudAccount struct {
 	Status                                 string                 `json:"status,omitempty" mapstructure:"status,omitempty" desc:"The account's management status" flag:"status"`
 	CreatedTime                            int                    `json:"created_time,omitempty" mapstructure:"created_time,omitempty" desc:"The date and time the account was created" flag:"created-time"`
 	CategoryModificationTime               int                    `json:"category_modification_time,omitempty" mapstructure:"category_modification_time,omitempty" desc:"The last time the account or one of its file categories was created or changed" flag:"category-modification-time"`
-	Name                                   string                 `json:"name" mapstructure:"name" desc:"The name of the account" flag:"name" validate:"required"`
+	Name                                   string                 `json:"name" mapstructure:"name" desc:"The name of the account" flag:"name" validate:"required" maxlength:"170"`
 	SafeName                               string                 `json:"safe_name" mapstructure:"safe_name" desc:"The name of the Safe where the account is stored" flag:"safe-name" validate:"required"`
 	PlatformID                             string                 `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"The ID of the platform assigned to the account" flag:"platform-id"`
 	Username                               string                 `json:"username,omitempty" mapstructure:"username,omitempty" desc:"The account username" flag:"username"`
