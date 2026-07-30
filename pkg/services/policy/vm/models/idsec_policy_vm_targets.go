@@ -342,7 +342,7 @@ func (r *IdsecPolicyVMGCPResource) Deserialize(data map[string]interface{}) erro
 
 // IdsecPolicyVMFQDNIPResource represents the fqdn/ip resources for a virtual machine access policy.
 type IdsecPolicyVMFQDNIPResource struct {
-	FQDNRules []IdsecPolicyVMFQDNRule `json:"fqdn_rules,omitempty" mapstructure:"fqdn_rules" flag:"fqdn-rules" desc:"The FQDN rules used to match DNS records. This is a list of FQDN rules."`
+	FQDNRules []IdsecPolicyVMFQDNRule `json:"fqdn_rules,omitempty" mapstructure:"fqdn_rules" flag:"fqdn-rules" validate:"max=1000" desc:"The FQDN rules used to match DNS records. This is a list of FQDN rules."`
 	IPRules   []IdsecPolicyVMIPRule   `json:"ip_rules,omitempty" mapstructure:"ip_rules" flag:"ip-rules" desc:"The IP rules used to match IP addresses and logical names. This is a list of IP rules."`
 }
 
