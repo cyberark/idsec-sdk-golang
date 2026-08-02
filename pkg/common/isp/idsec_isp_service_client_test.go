@@ -1,9 +1,11 @@
 package isp
 
 import (
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	cookiejar "github.com/juju/persistent-cookiejar"
@@ -609,6 +611,50 @@ func TestRefreshClient(t *testing.T) {
 				t.Errorf("Expected no error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestRefreshClientRestoresSerializedCookies(t *testing.T) {
+	sourceClient := common.NewSimpleIdsecClient("https://identity.example.com")
+	sourceClient.SetCookie("identity-session", "refreshed-cookie")
+	serializedCookies, err := common.MarshalCookies(sourceClient.GetCookieJar())
+	if err != nil {
+		t.Fatalf("failed to serialize source cookies: %v", err)
+	}
+
+	authProfile := &authmodels.IdsecAuthProfile{
+		Username:   "user@test.com",
+		AuthMethod: authmodels.Identity,
+	}
+	profile := &models.IdsecProfile{
+		ProfileName: "test",
+		AuthProfiles: map[string]*authmodels.IdsecAuthProfile{
+			"isp": authProfile,
+		},
+	}
+	token := &authmodels.IdsecToken{
+		Token:     "valid-token",
+		Username:  authProfile.Username,
+		ExpiresIn: commonmodels.IdsecRFC3339Time(time.Now().Add(time.Hour)),
+		Metadata: map[string]interface{}{
+			"cookies": base64.StdEncoding.EncodeToString(serializedCookies),
+		},
+	}
+	ispAuth := auth.NewIdsecISPAuth(false).(*auth.IdsecISPAuth)
+	ispAuth.Token = token
+	ispAuth.ActiveProfile = profile
+	ispAuth.ActiveAuthProfile = authProfile
+
+	targetClient := common.NewSimpleIdsecClient("https://identity.example.com")
+	targetClient.UpdateToken("stale-token", "Bearer")
+	if err := RefreshClient(targetClient, ispAuth); err != nil {
+		t.Fatalf("RefreshClient returned an error: %v", err)
+	}
+	if targetClient.GetToken() != token.Token {
+		t.Fatal("expected refreshed bearer token")
+	}
+	if targetClient.GetCookies()["identity-session"] != "refreshed-cookie" {
+		t.Fatal("expected serialized Identity cookie to be restored")
 	}
 }
 

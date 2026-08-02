@@ -36,16 +36,21 @@ func TestGetProxyProvider(t *testing.T) {
 	}
 }
 
-func TestAzureProxyProvider_GenerateExecCredential_MissingJWE(t *testing.T) {
-	p := &AzureProxyProvider{}
+func TestDpaProxyProvider_GenerateExecCredential_MissingJWE(t *testing.T) {
+	p, err := GetProxyProvider("azure")
+	require.NoError(t, err)
 	require.Equal(t, "AZURE", p.CSP())
 	cred, err := p.GenerateExecCredential(&IdsecSCAK8sService{}, &IdsecSCAK8sClusterContext{CSP: "AZURE"})
 	require.Error(t, err)
 	require.Nil(t, cred)
-	require.Contains(t, err.Error(), "JWEExtensionValue")
+	require.Contains(t, err.Error(), "K8sToken")
 }
 
-func TestAWSProxyProvider_CSP(t *testing.T) {
-	p := &AWSProxyProvider{}
+func TestDpaProxyProvider_AWS_AllowsEmptyJWE(t *testing.T) {
+	p, err := GetProxyProvider("aws")
+	require.NoError(t, err)
 	require.Equal(t, "AWS", p.CSP())
+	_, err = p.GenerateExecCredential(&IdsecSCAK8sService{}, &IdsecSCAK8sClusterContext{CSP: "AWS"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "dpa client not initialized")
 }

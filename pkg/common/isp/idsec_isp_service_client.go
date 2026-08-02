@@ -8,7 +8,6 @@ package isp
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -374,8 +373,13 @@ func FromISPAuth(
 //
 // Returns any error that occurred during authentication loading, token updating,
 // or cookie processing. It also returns an error if authentication yields no token,
-// rather than silently succeeding. The function performs forced authentication refresh
-// by passing true as the refresh parameter to LoadAuthentication.
+// rather than silently succeeding. RefreshClient is invoked on the client's HTTP 401
+// refresh-retry path, so it forces a genuine re-authentication (via ForceRefreshAuthentication)
+// rather than deferring to the client-side grace-expiration check: a server 401 is authoritative
+// proof the current token is no longer accepted, even if it still appears valid locally.
+// The token currently held by the client (the one the server rejected) is passed through so
+// concurrent refreshes sharing the same authenticator can coalesce onto an already-refreshed
+// token instead of each issuing a redundant re-authentication.
 //
 // Example:
 //
@@ -387,9 +391,13 @@ func RefreshClient(client *common.IdsecClient, ispAuth *auth.IdsecISPAuth) error
 	if ispAuth == nil {
 		return fmt.Errorf("ISP auth is nil")
 	}
-	// Pass nil so LoadAuthentication resolves the active profile under its own lock,
+	// The token the client is currently sending is the one the server just rejected with a
+	// 401; pass it as the rejected token so a genuine re-authentication is forced unless a
+	// newer token is already available.
+	rejectedToken := client.GetToken()
+	// Pass nil so ForceRefreshAuthentication resolves the active profile under its own lock,
 	// avoiding an unsynchronized read of ispAuth.ActiveProfile from this goroutine.
-	token, err := ispAuth.LoadAuthentication(nil, true)
+	token, err := ispAuth.ForceRefreshAuthentication(nil, rejectedToken)
 	if err != nil {
 		return err
 	}
@@ -397,11 +405,18 @@ func RefreshClient(client *common.IdsecClient, ispAuth *auth.IdsecISPAuth) error
 		return fmt.Errorf("failed to refresh client: no token available after authentication")
 	}
 	client.UpdateToken(token.Token, client.GetTokenType())
-	cookieJar := make(map[string]string)
 	if cookies, ok := token.Metadata["cookies"]; ok {
-		decoded, _ := base64.StdEncoding.DecodeString(cookies.(string))
-		_ = json.Unmarshal(decoded, &cookieJar)
+		encodedCookies, ok := cookies.(string)
+		if !ok {
+			return fmt.Errorf("failed to refresh client: cookie metadata has unexpected type %T", cookies)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encodedCookies)
+		if err != nil {
+			return fmt.Errorf("failed to refresh client: invalid cookie metadata: %w", err)
+		}
+		if err := common.UnmarshalCookies(decoded, client.GetCookieJar()); err != nil {
+			return fmt.Errorf("failed to refresh client cookies: %w", err)
+		}
 	}
-	client.UpdateCookies(cookieJar)
 	return nil
 }

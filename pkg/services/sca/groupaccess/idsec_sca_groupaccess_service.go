@@ -13,6 +13,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	groupaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess/models"
+	scacommon "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal/common"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
@@ -63,10 +64,10 @@ func (s *IdsecSCAGroupAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
 	if req.CSP == "" {
-		return nil, fmt.Errorf("csp cannot be empty")
+		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAzure)
 	}
-	if strings.ToUpper(req.CSP) != "AZURE" {
-		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for groupaccess targets", req.CSP)
+	if !scacommon.IsSupportedCSP(req.CSP, scamodels.CSPAzure) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAzure)
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca groupaccess service not initialized")
@@ -114,10 +115,10 @@ func (s *IdsecSCAGroupAccessService) Elevate(req *groupaccessmodels.IdsecSCAGrou
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
 	if strings.TrimSpace(req.CSP) == "" {
-		return nil, fmt.Errorf("csp cannot be empty")
+		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAzure)
 	}
-	if strings.ToUpper(req.CSP) != "AZURE" {
-		return nil, fmt.Errorf("unsupported csp '%s': only AZURE is supported for groupaccess elevate", req.CSP)
+	if !scacommon.IsSupportedCSP(req.CSP, scamodels.CSPAzure) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAzure)
 	}
 	if strings.TrimSpace(req.DirectoryID) == "" {
 		return nil, fmt.Errorf("directoryId cannot be empty")

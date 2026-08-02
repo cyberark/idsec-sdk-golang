@@ -130,7 +130,7 @@ func TestListTargets_UnsupportedCSP(t *testing.T) {
 	got, err := svc.ListTargets(req)
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "unsupported csp")
+	require.Contains(t, err.Error(), "Unsupported CSP")
 }
 
 func TestListTargets_CSPAndAll(t *testing.T) {
@@ -139,7 +139,7 @@ func TestListTargets_CSPAndAll(t *testing.T) {
 	got, err := svc.ListTargets(req)
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "choose either csp or all")
+	require.Contains(t, err.Error(), "When using '--csp', '--all' can only be 'false'")
 }
 
 func TestListTargets_InvalidLimit_TooLow(t *testing.T) {

@@ -44,12 +44,12 @@ func TestGenerateProxyExecCredential_UnsupportedCSP(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported CSP for kubectl-login proxy flow")
 }
 
-func TestGenerateProxyExecCredential_AzureMissingJWE(t *testing.T) {
+func TestGenerateProxyExecCredential_AzureMissingK8sToken(t *testing.T) {
 	svc := setupK8sElevateService(&isp.IdsecISPServiceClient{})
 	cred, err := svc.GenerateProxyExecCredential("AZURE", &IdsecSCAK8sClusterContext{CSP: "AZURE"})
 	require.Error(t, err)
 	require.Nil(t, cred)
-	require.Contains(t, err.Error(), "JWEExtensionValue")
+	require.Contains(t, err.Error(), "K8sToken")
 }
 
 func TestGenerateProxyExecCredential_Success(t *testing.T) {
@@ -154,7 +154,10 @@ func TestGenerateProxyExecCredential_WithJWE(t *testing.T) {
 	svc.dpaISP = dpaBase
 
 	const rawK8SToken = "k8s-jwt-token"
-	cred, err := svc.generateDPAProxyExecCredential(rawK8SToken, false)
+	cred, err := svc.generateDPAProxyExecCredential(&IdsecSCAK8sClusterContext{
+		K8sToken: rawK8SToken,
+		RootCA:   testProxyJWERootCA,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, cred)
 
@@ -168,18 +171,21 @@ func TestGenerateProxyExecCredential_WithJWE(t *testing.T) {
 	require.NotEqual(t, rawK8SToken, jweValue, "jwe_extension_value must be encrypted, not the raw token")
 	require.Len(t, strings.Split(jweValue, "."), 5, "jwe_extension_value must be a JWE compact string (5 segments)")
 
-	jweObj, parseErr := jose.ParseEncrypted(jweValue,
-		[]jose.KeyAlgorithm{jose.RSA_OAEP_256},
-		[]jose.ContentEncryption{jose.A256GCM})
-	require.NoError(t, parseErr)
-	plaintext, decryptErr := jweObj.Decrypt(privKey)
-	require.NoError(t, decryptErr)
-
-	var payload map[string]string
-	require.NoError(t, json.Unmarshal(plaintext, &payload),
-		"decrypted jwe_extension_value must be a JSON object")
+	payload := decryptProxyJWEPayload(t, jweValue, privKey)
 	require.Equal(t, rawK8SToken, payload["k8s_token"],
 		"k8s token must be JSON-wrapped under the k8s_token key before encryption")
+	require.Equal(t, testProxyJWERootCA, payload["root_ca"],
+		"cluster root CA must be JSON-wrapped under the root_ca key before encryption")
+}
+
+func TestGenerateProxyExecCredential_MissingRootCAWhenJWESet(t *testing.T) {
+	svc := &IdsecSCAK8sService{}
+	cred, err := svc.generateDPAProxyExecCredential(&IdsecSCAK8sClusterContext{
+		K8sToken: "k8s-jwt-token",
+	})
+	require.Error(t, err)
+	require.Nil(t, cred)
+	require.Contains(t, err.Error(), "root_ca is required when k8s_token is set")
 }
 
 func TestGenerateProxyExecCredential_Non201Status(t *testing.T) {
@@ -197,7 +203,7 @@ func TestGenerateProxyExecCredential_Non201Status(t *testing.T) {
 	scainternal.InjectISPClient(dpaBase, client)
 	svc.dpaISP = dpaBase
 
-	cred, err := svc.generateDPAProxyExecCredential("", false)
+	cred, err := svc.generateDPAProxyExecCredential(nil)
 	require.Error(t, err)
 	require.Nil(t, cred)
 	require.Contains(t, err.Error(), "proxy client certificate generation failed")

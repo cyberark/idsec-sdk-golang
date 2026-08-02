@@ -15,6 +15,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sca"
 	cloudaccessmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/cloudaccess/models"
+	scacommon "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal/common"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
 
@@ -108,15 +109,12 @@ func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
-	supported := map[string]struct{}{scamodels.CSPAWS: {}, scamodels.CSPAzure: {}}
 	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
-	if cspUpper != "" {
-		if _, ok := supported[cspUpper]; !ok {
-			return nil, fmt.Errorf("unsupported csp '%s': supported values are %s, %s", req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
-		}
+	if cspUpper != "" && !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
 	}
 	if req.All && cspUpper != "" {
-		return nil, fmt.Errorf("choose either csp or all, not both")
+		return nil, scacommon.ErrCSPAllConflict()
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca cloudaccess service not initialized")
@@ -235,11 +233,10 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 	}
 	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
 	if cspUpper == "" {
-		return nil, fmt.Errorf("csp cannot be empty")
+		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAWS, scamodels.CSPAzure)
 	}
-	supported := map[string]struct{}{scamodels.CSPAWS: {}, scamodels.CSPAzure: {}}
-	if _, ok := supported[cspUpper]; !ok {
-		return nil, fmt.Errorf("unsupported csp '%s': supported values are %s, %s", req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
+	if !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
 	}
 	if strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId cannot be empty")

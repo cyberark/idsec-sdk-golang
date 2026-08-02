@@ -12,6 +12,11 @@ import (
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
+const (
+	testEvaluateCertDataDirect = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkRJUkVDVAo="
+	testEvaluateCertDataProxy  = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tClBST1hZCg=="
+)
+
 // mockEvaluateResponse is the confirmed JSON shape returned by the SCA Evaluate API.
 // It mirrors the sample from the Confluence spec and the actual API response.
 const mockEvaluateResponse = `{
@@ -33,7 +38,8 @@ const mockEvaluateResponse = `{
         "namespaceId": null,
         "fqdn": null
       },
-      "connectionMethod": "direct"
+      "connectionMethod": "direct",
+      "certificateData": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkRJUkVDVAo="
     },
     {
       "organizationId": null,
@@ -52,7 +58,8 @@ const mockEvaluateResponse = `{
         "namespaceId": null,
         "fqdn": "https://745445889F087548523CF96B3D365FF0.gr7.us-east-1.eks.amazonaws.com"
       },
-      "connectionMethod": "direct"
+      "connectionMethod": "direct",
+      "certificateData": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkRJUkVDVAo="
     }
   ],
   "nextToken": null,
@@ -166,11 +173,13 @@ func TestEvaluateEligibility_Success(t *testing.T) {
 	require.Equal(t, "cluster", result.Target.Scope)
 	require.Equal(t, "us-east-1", result.Target.Region)
 	require.Equal(t, "direct", result.ConnectionMethod)
+	require.Equal(t, testEvaluateCertDataDirect, result.CertificateData)
 
 	result2 := resp.Response[1]
 	require.NotNil(t, result2.Target.FQDN)
 	require.Equal(t, "https://745445889F087548523CF96B3D365FF0.gr7.us-east-1.eks.amazonaws.com", *result2.Target.FQDN)
 	require.Equal(t, "direct", result2.ConnectionMethod)
+	require.Equal(t, testEvaluateCertDataDirect, result2.CertificateData)
 }
 
 func TestEvaluateEligibility_SuccessWithNameTarget(t *testing.T) {
@@ -213,7 +222,8 @@ func TestEvaluateEligibility_ProxyConnectionMethod(t *testing.T) {
         "namespaceId": null,
         "fqdn": "proxy-cluster.gr7.us-east-1.eks.amazonaws.com"
       },
-      "connectionMethod": "proxy"
+      "connectionMethod": "proxy",
+      "certificateData": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tClBST1hZCg=="
     }
   ],
   "total": 1
@@ -235,6 +245,7 @@ func TestEvaluateEligibility_ProxyConnectionMethod(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.Response, 1)
 	require.Equal(t, "proxy", resp.Response[0].ConnectionMethod)
+	require.Equal(t, testEvaluateCertDataProxy, resp.Response[0].CertificateData)
 }
 
 // ---------------------------------------------------------------------------

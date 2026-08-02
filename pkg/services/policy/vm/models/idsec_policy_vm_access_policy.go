@@ -1,7 +1,10 @@
 package models
 
 import (
+	"reflect"
+
 	"github.com/mitchellh/mapstructure"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 )
 
@@ -12,11 +15,16 @@ type IdsecPolicyVMAccessPolicy struct {
 	Behavior                                              IdsecPolicyVMBehavior        `json:"behavior,omitempty" mapstructure:"behavior,omitempty" flag:"behavior" desc:"The behavior of the VM access policy, including SSH and RDP profiles."`
 }
 
-// Serialize converts the VM access policy to a map.
+// Serialize converts the VM access policy into the camelCase, wire-ready map
+// the backend expects. Most fields (including nested slice-of-struct fields
+// like conditions.access_approval.approvers) convert automatically via the
+// shared, schema-aware JSON round-trip (SerializeJSONCamelSchema), but Targets
+// and Behavior need structural reshaping (workspace-keyed resource selection,
+// "connectAs" wrapping) that a casing-only conversion can't produce, so they're
+// overwritten with their own Serialize() output afterward.
 func (p *IdsecPolicyVMAccessPolicy) Serialize() (map[string]interface{}, error) {
-	var err error
-	data := make(map[string]interface{})
-	err = mapstructure.Decode(p, &data)
+	policyType := reflect.TypeOf(p)
+	data, err := common.SerializeJSONCamelSchema(p, &policyType)
 	if err != nil {
 		return nil, err
 	}

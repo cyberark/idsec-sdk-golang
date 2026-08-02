@@ -39,6 +39,9 @@ Two authenticator types are supported, both derived from the IdsecAuth interface
 ## Auth methods
 
 - <b>Identity</b> (`identity`) - Identity authentication to a tenant or to an application within the Identity tenant, used with the IdentityIdsecAuthMethodSettings class
+
+    Regular Identity sessions can refresh their platform token during long-running operations even when credential caching is disabled. When caching is enabled, the persisted Identity session is preferred so another process's newer session can be reused; the current in-memory token is used when persisted state is unavailable or incomplete.
+
 - <b>IdentityServiceUser</b> (`identity_service_user`) - Identity authentication with a service user, used with IdentityServiceUserIdsecAuthMethodSettings class
 
     For long-running clients (for example, a Terraform apply that exceeds the JWT lifetime), the SDK retains the service token in memory and re-runs the full OAuth client-credentials + authorize flow when the access token expires. HTTP clients with a refresh callback automatically retry once after a `401 Unauthorized` response.

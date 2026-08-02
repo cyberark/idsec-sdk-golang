@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	survey "github.com/Iilun/survey/v2"
-	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/toqueteos/webbrowser"
 	authcommon "github.com/cyberark/idsec-sdk-golang/pkg/auth/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
@@ -191,55 +191,164 @@ func NewIdsecIdentity(username string, password string, identityURL string, iden
 }
 
 func (ai *IdsecIdentity) loadCache(profile *models.IdsecProfile) bool {
-	if ai.keyring != nil && profile != nil {
-		token, err := ai.keyring.LoadToken(profile, ai.username+"_identity", false)
-		if err != nil {
-			ai.logger.Error("Error loading token from cache: %v", err)
-			return false
-		}
-		session, err := ai.keyring.LoadToken(profile, ai.username+"_identity_session", false)
-		if err != nil {
-			ai.logger.Error("Error loading session from cache: %v", err)
-			return false
-		}
-		if token != nil && session != nil {
-			err = json.Unmarshal([]byte(token.Token), &ai.sessionDetails)
-			if err != nil {
-				return false
-			}
-			ai.sessionExp = token.ExpiresIn
-			sessionInfo := map[string]interface{}{}
-			err = json.Unmarshal([]byte(session.Token), &sessionInfo)
-			if err != nil {
-				return false
-			}
-			ai.session = common.NewSimpleIdsecClient(session.Endpoint)
-			headers := make(map[string]string)
-			for k, v := range sessionInfo["headers"].(map[string]interface{}) {
-				headers[k] = v.(string)
-			}
-			ai.session.SetHeaders(headers)
+	if ai.keyring == nil || profile == nil {
+		return false
+	}
 
-			cookies := make(map[string]string)
-			for k, v := range sessionInfo["cookies"].(map[string]interface{}) {
-				cookies[k] = v.(string)
-			}
-			ai.session.SetCookies(cookies)
-			ai.session.UpdateToken(ai.sessionDetails.Token, "Bearer")
-			ai.loadedFromCache = true
-			return true
+	token, err := ai.keyring.LoadToken(profile, ai.username+"_identity", false)
+	if err != nil {
+		ai.logger.Error("Error loading token from cache: %v", err)
+		return false
+	}
+	session, err := ai.keyring.LoadToken(profile, ai.username+"_identity_session", false)
+	if err != nil {
+		ai.logger.Error("Error loading session from cache: %v", err)
+		return false
+	}
+	return ai.restoreCachedRefreshState(token, session)
+}
+
+func (ai *IdsecIdentity) restoreCachedRefreshState(token, session *auth.IdsecToken) bool {
+	if token == nil || session == nil {
+		return false
+	}
+	if (token.Username != "" && token.Username != ai.username) ||
+		(session.Username != "" && session.Username != ai.username) {
+		ai.logger.Warning("Cached identity refresh state belongs to a different user")
+		return false
+	}
+
+	var sessionDetails identity.AdvanceAuthResult
+	if err := json.Unmarshal([]byte(token.Token), &sessionDetails); err != nil {
+		return false
+	}
+	if sessionDetails.Token == "" || sessionDetails.RefreshToken == "" || session.Endpoint == "" {
+		ai.logger.Warning("Cached identity refresh state is incomplete")
+		return false
+	}
+	claims, err := parseUnverifiedTokenClaims(sessionDetails.Token)
+	if err != nil {
+		ai.logger.Warning("Cached identity token is invalid: %v", err)
+		return false
+	}
+	if _, err = requiredStringClaim(claims, "tenant_id"); err != nil {
+		ai.logger.Warning("Cached identity token is invalid: %v", err)
+		return false
+	}
+
+	sessionInfo := struct {
+		Headers map[string]string `json:"headers"`
+		Cookies map[string]string `json:"cookies"`
+	}{}
+	if err = json.Unmarshal([]byte(session.Token), &sessionInfo); err != nil {
+		return false
+	}
+	loadedSession := common.NewSimpleIdsecClient(session.Endpoint)
+	if len(sessionInfo.Headers) == 0 {
+		loadedSession.SetHeaders(DefaultHeaders())
+	} else {
+		loadedSession.SetHeaders(sessionInfo.Headers)
+	}
+	if len(sessionInfo.Cookies) > 0 {
+		loadedSession.SetCookies(sessionInfo.Cookies)
+	}
+	loadedSession.UpdateToken(sessionDetails.Token, "Bearer")
+
+	ai.sessionDetails = &sessionDetails
+	ai.sessionExp = token.ExpiresIn
+	ai.session = loadedSession
+	ai.loadedFromCache = true
+	return true
+}
+
+// HasRefreshState reports whether the Identity session contains the minimum state
+// needed for a non-interactive platform-token refresh.
+func (ai *IdsecIdentity) HasRefreshState() bool {
+	return ai.session != nil &&
+		ai.session.BaseURL != "" &&
+		ai.sessionDetails != nil &&
+		ai.sessionDetails.Token != "" &&
+		ai.sessionDetails.RefreshToken != ""
+}
+
+// LoadRefreshState hydrates an Identity session from the generic in-memory token.
+// This is the runtime fallback when persistent caching is disabled or its records
+// are unavailable/incomplete.
+func (ai *IdsecIdentity) LoadRefreshState(token *auth.IdsecToken) error {
+	if token == nil {
+		return errors.New("identity refresh token is not available")
+	}
+	if token.Token == "" {
+		return errors.New("identity access token is not available")
+	}
+	if token.RefreshToken == "" {
+		return errors.New("identity refresh token is not available")
+	}
+	if token.Username != "" && token.Username != ai.username {
+		return errors.New("identity refresh token belongs to a different user")
+	}
+	if token.AuthMethod != "" && token.AuthMethod != auth.Identity && token.AuthMethod != auth.Default {
+		return fmt.Errorf("identity refresh token has incompatible auth method %q", token.AuthMethod)
+	}
+	claims, err := parseUnverifiedTokenClaims(token.Token)
+	if err != nil {
+		return err
+	}
+	if _, err = requiredStringClaim(claims, "tenant_id"); err != nil {
+		return err
+	}
+	expiresAt := token.ExpiresIn
+	if time.Time(expiresAt).IsZero() {
+		expiresAt, err = tokenExpiration(token.Token)
+		if err != nil {
+			return err
 		}
 	}
-	return false
+
+	endpoint := token.Endpoint
+	if endpoint == "" && ai.session != nil {
+		endpoint = ai.session.BaseURL
+	}
+	if endpoint == "" {
+		return errors.New("identity endpoint is not available")
+	}
+
+	session := common.NewSimpleIdsecClient(endpoint)
+	session.SetHeaders(DefaultHeaders())
+	session.UpdateToken(token.Token, "Bearer")
+
+	if token.Metadata != nil {
+		if encodedCookies, ok := token.Metadata["cookies"].(string); ok && encodedCookies != "" {
+			cookies, err := base64.StdEncoding.DecodeString(encodedCookies)
+			if err != nil {
+				return fmt.Errorf("failed to decode identity refresh cookies: %w", err)
+			}
+			if err := common.UnmarshalCookies(cookies, session.GetCookieJar()); err != nil {
+				return fmt.Errorf("failed to restore identity refresh cookies: %w", err)
+			}
+		}
+	}
+
+	ai.session = session
+	ai.sessionDetails = &identity.AdvanceAuthResult{
+		Token:         token.Token,
+		RefreshToken:  token.RefreshToken,
+		TokenLifetime: tokenLifetime(token.Token, expiresAt),
+	}
+	ai.sessionExp = expiresAt
+	ai.loadedFromCache = false
+	return nil
 }
 
 func (ai *IdsecIdentity) saveCache(profile *models.IdsecProfile) error {
 	if ai.keyring != nil && profile != nil && ai.sessionDetails != nil {
-		delta := ai.sessionDetails.TokenLifetime
-		if delta == 0 {
-			delta = authcommon.DefaultTokenLifetimeSeconds
+		if time.Time(ai.sessionExp).IsZero() {
+			delta := ai.sessionDetails.TokenLifetime
+			if delta == 0 {
+				delta = authcommon.DefaultTokenLifetimeSeconds
+			}
+			ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 		}
-		ai.sessionExp = authcommon.CalculateExpirationTime(delta)
 		sessionDetailsBytes, err := json.Marshal(ai.sessionDetails)
 		if err != nil {
 			return err
@@ -928,13 +1037,15 @@ func (ai *IdsecIdentity) RefreshAuthIdentity(profile *models.IdsecProfile, inter
 	ai.session = common.NewSimpleIdsecClient(ai.session.BaseURL)
 	ai.session.SetHeaders(DefaultHeaders())
 
-	// Decode the token to get the tenant ID
-	token, _, err := new(jwt.Parser).ParseUnverified(ai.sessionDetails.Token, jwt.MapClaims{})
+	// Decode the token to get the tenant ID.
+	claims, err := parseUnverifiedTokenClaims(ai.sessionDetails.Token)
 	if err != nil {
 		return err
 	}
-	claims := token.Claims.(jwt.MapClaims)
-	platformTenantID := claims["tenant_id"].(string)
+	platformTenantID, err := requiredStringClaim(claims, "tenant_id")
+	if err != nil {
+		return err
+	}
 
 	refreshCookies := map[string]string{
 		fmt.Sprintf("refreshToken-%s", platformTenantID): ai.sessionDetails.RefreshToken,
@@ -978,21 +1089,13 @@ func (ai *IdsecIdentity) RefreshAuthIdentity(profile *models.IdsecProfile, inter
 	ai.sessionDetails.Token = newToken
 	ai.sessionDetails.RefreshToken = newRefreshToken
 
-	// Decode the new token to get the expiration time
-	newTokenClaims, _, err := new(jwt.Parser).ParseUnverified(newToken, jwt.MapClaims{})
+	// Use the token's absolute expiration instead of extending it from the
+	// current local time by its original lifetime.
+	ai.sessionExp, err = tokenExpiration(newToken)
 	if err != nil {
 		return err
 	}
-	newClaims := newTokenClaims.Claims.(jwt.MapClaims)
-	exp := int64(newClaims["exp"].(float64))
-	iat := int64(newClaims["iat"].(float64))
-	ai.sessionDetails.TokenLifetime = int(exp - iat)
-
-	delta := ai.sessionDetails.TokenLifetime
-	if delta == 0 {
-		delta = authcommon.DefaultTokenLifetimeSeconds
-	}
-	ai.sessionExp = authcommon.CalculateExpirationTime(delta)
+	ai.sessionDetails.TokenLifetime = tokenLifetime(newToken, ai.sessionExp)
 
 	if ai.cacheAuthentication {
 		if err := ai.saveCache(profile); err != nil {
@@ -1024,6 +1127,11 @@ func (ai *IdsecIdentity) SessionToken() string {
 // SessionDetails returns the current identity session details if logged in
 func (ai *IdsecIdentity) SessionDetails() *identity.AdvanceAuthResult {
 	return ai.sessionDetails
+}
+
+// SessionExp returns the absolute expiration time of the current identity session.
+func (ai *IdsecIdentity) SessionExp() commonmodels.IdsecRFC3339Time {
+	return ai.sessionExp
 }
 
 // IdentityURL returns the current identity URL

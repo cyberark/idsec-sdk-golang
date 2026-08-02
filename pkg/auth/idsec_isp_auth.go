@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -58,14 +59,13 @@ func (a *IdsecISPAuth) constructMetadata(env commonmodels.AwsEnv, token string, 
 	}
 	parsedToken, _, err := new(jwt.Parser).ParseUnverified(token, jwt.MapClaims{})
 	if err == nil {
-		claims := parsedToken.Claims.(jwt.MapClaims)
-		localTenantID, ok := claims["tenant_id"].(string)
-		if ok {
-			metadata["tenant_id"] = localTenantID
-		}
-		localSubdomain, ok := claims["subdomain"].(string)
-		if ok {
-			metadata["subdomain"] = localSubdomain
+		if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok {
+			if localTenantID, ok := claims["tenant_id"].(string); ok {
+				metadata["tenant_id"] = localTenantID
+			}
+			if localSubdomain, ok := claims["subdomain"].(string); ok {
+				metadata["subdomain"] = localSubdomain
+			}
 		}
 	}
 	return metadata, nil
@@ -97,6 +97,10 @@ func (a *IdsecISPAuth) performIdentityAuthentication(profile *models.IdsecProfil
 	if tokenLifetime == 0 {
 		tokenLifetime = DefaultTokenLifetime
 	}
+	expiresAt := identityAuth.SessionExp()
+	if time.Time(expiresAt).IsZero() {
+		expiresAt = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(tokenLifetime) * time.Second))
+	}
 	metadata, err := a.constructMetadata(commonmodels.GetDeployEnv(), identityAuth.SessionToken(), identityAuth.Session().GetCookieJar())
 	if err != nil {
 		return nil, err
@@ -107,7 +111,7 @@ func (a *IdsecISPAuth) performIdentityAuthentication(profile *models.IdsecProfil
 		Endpoint:     identityAuth.IdentityURL(),
 		TokenType:    auth.JWT,
 		AuthMethod:   auth.Identity,
-		ExpiresIn:    commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(tokenLifetime) * time.Second)),
+		ExpiresIn:    expiresAt,
 		RefreshToken: identityAuth.SessionDetails().RefreshToken,
 		Metadata:     metadata,
 	}, nil
@@ -115,22 +119,52 @@ func (a *IdsecISPAuth) performIdentityAuthentication(profile *models.IdsecProfil
 
 func (a *IdsecISPAuth) performIdentityRefreshAuthentication(profile *models.IdsecProfile, authProfile *auth.IdsecAuthProfile, token *auth.IdsecToken) (*auth.IdsecToken, error) {
 	methodSettings := authProfile.AuthMethodSettings.(*auth.IdentityIdsecAuthMethodSettings)
-	identityAuth, err := identity.NewIdsecIdentity(
-		authProfile.Username,
-		"",
-		methodSettings.IdentityURL,
-		methodSettings.IdentityTenantSubdomain,
-		methodSettings.IdentityMFAMethod,
-		a.Logger,
-		a.CacheAuthentication,
-		a.CacheAuthentication,
-		profile,
-	)
+	newIdentityAuth := func(loadCache bool) (*identity.IdsecIdentity, error) {
+		return identity.NewIdsecIdentity(
+			authProfile.Username,
+			"",
+			methodSettings.IdentityURL,
+			methodSettings.IdentityTenantSubdomain,
+			methodSettings.IdentityMFAMethod,
+			a.Logger,
+			a.CacheAuthentication,
+			loadCache,
+			profile,
+		)
+	}
+
+	// Persistent Identity session state remains canonical when caching is enabled.
+	// If it is unavailable or incomplete, hydrate from the current in-memory token
+	// so disabling persistence does not also disable runtime refresh.
+	identityAuth, err := newIdentityAuth(a.CacheAuthentication)
 	if err != nil {
 		a.Logger.Error("Failed to create identity security platform object: %v", err)
 		return nil, err
 	}
+	if !identityAuth.HasRefreshState() {
+		if err := identityAuth.LoadRefreshState(token); err != nil {
+			return nil, fmt.Errorf("failed to load identity refresh state: %w", err)
+		}
+	}
+
+	refreshSourceToken := identityAuth.SessionToken()
 	err = identityAuth.RefreshAuthIdentity(profile, methodSettings.IdentityMFAInteractive, false)
+	if err != nil && a.CacheAuthentication {
+		// Another process may have refreshed the keyring while this request was
+		// using an older rotating refresh token. Reload once and use the changed
+		// state, refreshing it only when it is already near expiration.
+		reloadedAuth, reloadErr := newIdentityAuth(true)
+		if reloadErr == nil &&
+			reloadedAuth.HasRefreshState() &&
+			reloadedAuth.SessionToken() != refreshSourceToken {
+			identityAuth = reloadedAuth
+			if time.Time(identityAuth.SessionExp()).Add(-time.Duration(defaultExpirationGraceDeltaSeconds) * time.Second).Before(time.Now()) {
+				err = identityAuth.RefreshAuthIdentity(profile, methodSettings.IdentityMFAInteractive, false)
+			} else {
+				err = nil
+			}
+		}
+	}
 	if err != nil {
 		a.Logger.Error("Failed to refresh authentication to identity security platform: %v", err)
 		return nil, err
@@ -139,6 +173,10 @@ func (a *IdsecISPAuth) performIdentityRefreshAuthentication(profile *models.Idse
 	if tokenLifetime == 0 {
 		tokenLifetime = DefaultTokenLifetime
 	}
+	expiresAt := identityAuth.SessionExp()
+	if time.Time(expiresAt).IsZero() {
+		expiresAt = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(tokenLifetime) * time.Second))
+	}
 	metadata, err := a.constructMetadata(commonmodels.GetDeployEnv(), identityAuth.SessionToken(), identityAuth.Session().GetCookieJar())
 	if err != nil {
 		return nil, err
@@ -149,7 +187,7 @@ func (a *IdsecISPAuth) performIdentityRefreshAuthentication(profile *models.Idse
 		Endpoint:     identityAuth.IdentityURL(),
 		TokenType:    auth.JWT,
 		AuthMethod:   auth.Identity,
-		ExpiresIn:    commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(tokenLifetime) * time.Second)),
+		ExpiresIn:    expiresAt,
 		RefreshToken: identityAuth.SessionDetails().RefreshToken,
 		Metadata:     metadata,
 	}, nil

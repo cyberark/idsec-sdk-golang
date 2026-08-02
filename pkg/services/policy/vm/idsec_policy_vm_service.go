@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"reflect"
 
@@ -14,6 +15,20 @@ import (
 	policycommonmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/common/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/policy/vm/models"
 )
+
+const accessApprovalNotSupportedMsg = "Access approval is not supported"
+
+func wrapAccessApprovalNotSupportedErr(err error, accessApproval *policycommonmodels.IdsecPolicyAccessApprovalCondition) error {
+	if err == nil || accessApproval == nil || !accessApproval.Required {
+		return err
+	}
+	if !strings.Contains(err.Error(), accessApprovalNotSupportedMsg) {
+		return err
+	}
+	return fmt.Errorf("dual control (access_approval.required=true) is not enabled for this tenant; "+
+		"contact Idira support to enable it, or remove access_approval from the policy to create "+
+		"it without dual control: %w", err)
+}
 
 // IdsecPolicyVMPolicyPage represents a page of Infrastructure VM policies in the Policies service.
 type IdsecPolicyVMPolicyPage = common.IdsecPage[models.IdsecPolicyVMAccessPolicy]
@@ -54,18 +69,13 @@ func (s *IdsecPolicyVMService) CreatePolicy(createPolicy *models.IdsecPolicyVMAc
 	if createPolicy.Metadata.PolicyTags == nil {
 		createPolicy.Metadata.PolicyTags = make([]string, 0)
 	}
-	policyType := reflect.TypeOf(createPolicy)
-	createPolicySerialized, err := createPolicy.Serialize()
+	createPolicyJSON, err := createPolicy.Serialize()
 	if err != nil {
 		return nil, err
 	}
-	createPolicyJSON := common.ConvertToCamelCase(createPolicySerialized, &policyType)
+	policyResp, err := s.baseService.BaseCreatePolicy(createPolicyJSON)
 	if err != nil {
-		return nil, err
-	}
-	policyResp, err := s.baseService.BaseCreatePolicy(createPolicyJSON.(map[string]interface{}))
-	if err != nil {
-		return nil, err
+		return nil, wrapAccessApprovalNotSupportedErr(err, createPolicy.Conditions.AccessApproval)
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
 		PolicyID: policyResp.PolicyID,
@@ -92,18 +102,13 @@ func (s *IdsecPolicyVMService) Policy(policyRequest *policycommonmodels.IdsecPol
 // UpdatePolicy edits an existing policy with the given information.
 func (s *IdsecPolicyVMService) UpdatePolicy(updatePolicy *models.IdsecPolicyVMAccessPolicy) (*models.IdsecPolicyVMAccessPolicy, error) {
 	s.Logger.Info("Updating policy [%s]", updatePolicy.Metadata.PolicyID)
-	policyType := reflect.TypeOf(models.IdsecPolicyVMAccessPolicy{})
-	updatePolicySerialized, err := updatePolicy.Serialize()
+	updatePolicyJSON, err := updatePolicy.Serialize()
 	if err != nil {
 		return nil, err
 	}
-	updatePolicyJSON := common.ConvertToCamelCase(updatePolicySerialized, &policyType)
+	err = s.baseService.BaseUpdatePolicy(updatePolicy.Metadata.PolicyID, updatePolicyJSON)
 	if err != nil {
-		return nil, err
-	}
-	err = s.baseService.BaseUpdatePolicy(updatePolicy.Metadata.PolicyID, updatePolicyJSON.(map[string]interface{}))
-	if err != nil {
-		return nil, err
+		return nil, wrapAccessApprovalNotSupportedErr(err, updatePolicy.Conditions.AccessApproval)
 	}
 	return s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{
 		PolicyID: updatePolicy.Metadata.PolicyID,

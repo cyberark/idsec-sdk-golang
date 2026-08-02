@@ -195,6 +195,7 @@ func (s *IdsecSecHubSecretStoresService) stripImmutableFields(updateJSON map[str
 	}
 }
 
+// This method is intended for Terraform use only
 // List returns a channel of IdsecSecHubSecretStoresPage containing all Secret Stores.
 func (s *IdsecSecHubSecretStoresService) List() (<-chan *IdsecSecHubSecretStoresPage, error) {
 	return s.getSecretStoresWithFilters(
@@ -203,6 +204,7 @@ func (s *IdsecSecHubSecretStoresService) List() (<-chan *IdsecSecHubSecretStores
 	)
 }
 
+// This method is intended for Terraform use only
 // ListBy returns a channel of IdsecSecHubSecretStoresPage containing secret stores filtered by the given filters.
 func (s *IdsecSecHubSecretStoresService) ListBy(secretStoresFilters *secretstoresmodels.IdsecSecHubSecretStoresFilters) (<-chan *IdsecSecHubSecretStoresPage, error) {
 	var behavior string
@@ -215,6 +217,7 @@ func (s *IdsecSecHubSecretStoresService) ListBy(secretStoresFilters *secretstore
 	)
 }
 
+// This method is intended for Terraform use only
 // Get returns an individual secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/tw80b23aww65j-get-a-secret-store
 func (s *IdsecSecHubSecretStoresService) Get(
@@ -249,6 +252,7 @@ func (s *IdsecSecHubSecretStoresService) Get(
 	return &secretStore, nil
 }
 
+// This method is intended for Terraform use only
 // ConnStatus retrieves the connection status of a secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/b7f2joyxr9ekn-get-connection-status-of-secret-store
 func (s *IdsecSecHubSecretStoresService) ConnStatus(
@@ -279,6 +283,7 @@ func (s *IdsecSecHubSecretStoresService) ConnStatus(
 	return &connStatus, nil
 }
 
+// This method is intended for Terraform use only
 // Create creates a new secret store
 // https://api-docs.cyberark.com/docs/secretshub-api/99oqbphsqgomi-create-secret-store
 func (s *IdsecSecHubSecretStoresService) Create(secretStore *secretstoresmodels.IdsecSecHubCreateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
@@ -316,6 +321,7 @@ func (s *IdsecSecHubSecretStoresService) Create(secretStore *secretstoresmodels.
 	return &secretStoreResponse, nil
 }
 
+// This method is intended for Terraform use only
 // Update updates a secret store
 // https://api-docs.cyberark.com/docs/secretshub-api/99oqbphsqgomi-create-secret-store
 func (s *IdsecSecHubSecretStoresService) Update(secretStore *secretstoresmodels.IdsecSecHubUpdateSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
@@ -352,6 +358,7 @@ func (s *IdsecSecHubSecretStoresService) Update(secretStore *secretstoresmodels.
 	return &secretStoreResponse, nil
 }
 
+// This method is intended for Terraform use only
 // UpdateTf updates a secret store using the Terraform-specific set of steps as the idsec-terraform-provider does not have the option to pass state changes per filed.
 func (s *IdsecSecHubSecretStoresService) UpdateTf(secretStore *secretstoresmodels.IdsecSecHubUpdateTfSecretStore) (*secretstoresmodels.IdsecSecHubSecretStore, error) {
 	s.Logger.Info("Updating secret store [%s] via Terraform", secretStore.Name)
@@ -398,6 +405,7 @@ func (s *IdsecSecHubSecretStoresService) UpdateTf(secretStore *secretstoresmodel
 	return updatedStore, nil
 }
 
+// This method is intended for Terraform use only
 // SetState sets the state of a secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/qb5o0s8br9nxg-set-secret-store-state
 func (s *IdsecSecHubSecretStoresService) SetState(
@@ -422,6 +430,7 @@ func (s *IdsecSecHubSecretStoresService) SetState(
 	return nil
 }
 
+// This method is intended for Terraform use only
 // SetStates sets the state of multiple secret stores
 // https://api-docs.cyberark.com/docs/secretshub-api/hxzzult869lhk-set-state-for-multiple-secret-stores
 func (s *IdsecSecHubSecretStoresService) SetStates(
@@ -456,6 +465,7 @@ func (s *IdsecSecHubSecretStoresService) SetStates(
 	return &secretStoresState, nil
 }
 
+// This method is intended for Terraform use only
 // Delete deletes a specified secret store based on ID
 // https://api-docs.cyberark.com/docs/secretshub-api/88xyegf662fxm-delete-secret-store
 func (s *IdsecSecHubSecretStoresService) Delete(secretStore *secretstoresmodels.IdsecSecHubDeleteSecretStore) error {
@@ -476,6 +486,7 @@ func (s *IdsecSecHubSecretStoresService) Delete(secretStore *secretstoresmodels.
 	return nil
 }
 
+// This method is intended for Terraform use only
 // Stats retrieves statistics about secret stores.
 func (s *IdsecSecHubSecretStoresService) Stats() (*secretstoresmodels.IdsecSecHubSecretStoresStats, error) {
 	s.Logger.Info("Retrieving secret store stats")

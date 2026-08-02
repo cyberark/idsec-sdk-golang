@@ -32,35 +32,35 @@ type IdsecSCAK8sProxyProvider interface {
 func GetProxyProvider(csp string) (IdsecSCAK8sProxyProvider, error) {
 	switch strings.ToUpper(strings.TrimSpace(csp)) {
 	case k8smodels.CSPAWS:
-		return &AWSProxyProvider{}, nil
+		// AWS IAM role proxy calls DPA SSO acquire without jwe_extension_value.
+		// AWS IDC permission-set proxy sets ctx.K8sToken (EKS bearer) and
+		// ctx.RootCA (cluster CA); both are encrypted into the JWE for DPA.
+		return &dpaProxyProvider{csp: k8smodels.CSPAWS}, nil
 	case k8smodels.CSPAzure:
-		return &AzureProxyProvider{}, nil
+		// Azure AKS proxy encrypts ctx.K8sToken (AKS token) and ctx.RootCA
+		// as JWE (k8s_token + root_ca) for DPA proxy→cluster mTLS.
+		return &dpaProxyProvider{csp: k8smodels.CSPAzure, requireJWE: true}, nil
 	default:
 		return nil, fmt.Errorf("unsupported CSP for kubectl-login proxy flow: %q", csp)
 	}
 }
 
-// AzureProxyProvider implements IdsecSCAK8sProxyProvider for Azure AKS clusters
-// reached via the DPA proxy connection method.
-//
-// The AKS access token acquired by the CLI (via az CLI) must be placed in
-// ctx.JWEExtensionValue before calling GenerateExecCredential. It is encrypted
-// as JWE (k8s_token) and forwarded as jwe_extension_value in the DPA SSO
-// acquire request so the DPA backend can validate the caller's Azure identity.
-type AzureProxyProvider struct{}
+// dpaProxyProvider implements IdsecSCAK8sProxyProvider for AWS EKS and Azure AKS
+// clusters reached via the DPA proxy connection method.
+type dpaProxyProvider struct {
+	csp        string
+	requireJWE bool
+}
 
-// CSP returns the Azure CSP identifier.
-func (p *AzureProxyProvider) CSP() string { return k8smodels.CSPAzure }
+func (p *dpaProxyProvider) CSP() string { return p.csp }
 
-// GenerateExecCredential issues a kubectl ExecCredential containing the
-// short-lived client certificate/key pair from DPA SSO acquire using the
-// k8s token supplied in ctx.JWEExtensionValue.
-func (p *AzureProxyProvider) GenerateExecCredential(
+func (p *dpaProxyProvider) GenerateExecCredential(
 	s *IdsecSCAK8sService,
 	ctx *IdsecSCAK8sClusterContext,
 ) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	if ctx == nil || strings.TrimSpace(ctx.JWEExtensionValue) == "" {
-		return nil, fmt.Errorf("azure aks proxy: JWEExtensionValue (k8s token) is required but was not set in the cluster context")
+	if p.requireJWE && (ctx == nil || strings.TrimSpace(ctx.K8sToken) == "") {
+		return nil, fmt.Errorf("%s proxy: K8sToken is required but was not set in the cluster context",
+			strings.ToLower(p.csp))
 	}
-	return s.generateDPAProxyExecCredential(ctx.JWEExtensionValue, ctx.Diagnostics)
+	return s.generateDPAProxyExecCredential(ctx)
 }

@@ -19,6 +19,22 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry/collectors"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
 func TestMarshalCookies(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -2171,4 +2187,56 @@ func (m *mockMetricsEncoder) EncodeMetrics(metrics []*collectors.IdsecMetrics) (
 		return nil, m.err
 	}
 	return m.encodedData, nil
+}
+
+func TestDoRequestClosesUnauthorizedResponseBeforeRefresh(t *testing.T) {
+	unauthorizedBody := &closeTrackingBody{Reader: strings.NewReader("unauthorized")}
+	requestCount := 0
+	refreshCalled := false
+
+	client := NewIdsecClient(
+		"https://example.com",
+		"expired",
+		"Bearer",
+		"Authorization",
+		nil,
+		func(*IdsecClient) error {
+			refreshCalled = true
+			if !unauthorizedBody.closed {
+				t.Fatal("expected unauthorized response body to be closed before refresh")
+			}
+			return nil
+		},
+		"",
+		false,
+	)
+	client.client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestCount++
+		if requestCount == 1 {
+			return &http.Response{
+				StatusCode: http.StatusUnauthorized,
+				Header:     make(http.Header),
+				Body:       unauthorizedBody,
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Request:    req,
+		}, nil
+	})
+
+	response, err := client.Get(context.Background(), "/resource", nil)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer response.Body.Close()
+	if !refreshCalled {
+		t.Fatal("expected refresh callback to be called")
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected one retry after refresh, got %d requests", requestCount)
+	}
 }

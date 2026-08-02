@@ -33,7 +33,57 @@ go test -tags=e2e -v ./tests/e2e/...
 
 # Run specific package
 go test -tags=e2e -v ./tests/e2e/pcloud/
+
+# Run regular Identity authentication/refresh tests
+IDSEC_E2E_AUTH_EXPECT=isp \
+IDSEC_E2E_ISP_AUTH_METHOD=identity \
+go test -tags=e2e -v ./tests/e2e/auth/
+
+# Run Identity service-user authentication/refresh tests
+IDSEC_E2E_AUTH_EXPECT=isp \
+IDSEC_E2E_ISP_AUTH_METHOD=identity_service_user \
+go test -tags=e2e -v ./tests/e2e/auth/
 ```
+
+The proactive-refresh test seeds a copied token inside the 60-second expiration
+grace window and runs cache operations in a helper subprocess with a unique
+basic-keyring directory. This keeps its environment isolated from other E2E
+packages and allows parent tests to run in parallel safely. The reactive 401
+test invalidates only a read-only service client's bearer and cookies; its
+refresh callback restores authentication and retries the request. Additional
+tests verify proactive refresh from in-memory state with caching disabled and a
+401 callback that performs real token renewal before retrying.
+
+### Triggering E2E Tests on a Pull Request
+
+The E2E pipeline is opt-in. After pushing a commit that changes E2E tests or
+behavior requiring E2E validation, add this exact comment to the pull request:
+
+```text
+#run_e2e_tests
+```
+
+Agents updating such a pull request should post the comment after the relevant
+commit is pushed. A documentation-only change does not require an E2E trigger.
+
+After posting the trigger:
+
+1. Record the pushed commit SHA and wait four minutes before the first status check.
+2. Read the pull request's commit statuses and verify the response is for that SHA.
+3. Inspect the `ci/jenkins-e2e` context specifically. Do not use the aggregate
+   commit state because unrelated checks can fail independently.
+4. While `ci/jenkins-e2e` is pending, poll the commit statuses every 30 seconds.
+5. Stop when that context reports success or failure, or after 12 minutes total.
+
+### Retrying Fragile E2E Runs
+
+E2E tests depend on live services and can fail because of transient environment
+instability. A failed `ci/jenkins-e2e` run may be retried up to three times by
+posting `#run_e2e_tests` again. Wait five minutes after each failed run before
+posting the next trigger, then use the polling procedure above for the rerun.
+
+Stop after three retries and report the failure. A repeated failure in the same
+test should be investigated rather than treated as environment instability.
 
 ## Generating New Tests
 

@@ -106,14 +106,19 @@ func (s *IdsecSCAK8sService) fetchDPASSOPublicKey(kid string, diagnostics bool) 
 	return pub, nil
 }
 
-// encryptK8STokenAsJWE encrypts k8sToken as a JWE compact serialization (RSA-OAEP-256
-// key-wrap, A256GCM content encryption). The token is JSON-wrapped as {"k8s_token": <token>},
-// which is the plaintext the SSO service expects for both AKS and EKS. kid is embedded in
-// the JWE "kid" header so the SSO service can look up the matching private key.
-func encryptK8STokenAsJWE(pubKey *rsa.PublicKey, kid, k8sToken string) (string, error) {
-	payload, err := json.Marshal(map[string]string{"k8s_token": k8sToken})
+// encryptProxyJWEExtension encrypts the proxy JWE plaintext as a compact JWE
+// (RSA-OAEP-256 key-wrap, A256GCM content encryption). Plaintext is always
+// {"k8s_token": <token>} and, when rootCA is non-empty, also "root_ca" (cluster
+// CA for SIA proxy → cluster mTLS). kid is set in the JWE header so SSO can
+// select the matching private key.
+func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA string) (string, error) {
+	payloadMap := map[string]string{"k8s_token": k8sToken}
+	if ca := strings.TrimSpace(rootCA); ca != "" {
+		payloadMap["root_ca"] = ca
+	}
+	payload, err := json.Marshal(payloadMap)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal k8s token payload: %w", err)
+		return "", fmt.Errorf("failed to marshal proxy JWE payload: %w", err)
 	}
 
 	encrypter, err := jose.NewEncrypter(

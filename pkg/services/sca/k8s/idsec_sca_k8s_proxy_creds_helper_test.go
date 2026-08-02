@@ -18,6 +18,8 @@ import (
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
+const testProxyJWERootCA = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkNBDQo="
+
 // jwksBodyForRSAKey serializes the given RSA public key as a JWKS JSON response.
 func jwksBodyForRSAKey(t *testing.T, kid string, pubKey *rsa.PublicKey) string {
 	t.Helper()
@@ -37,32 +39,68 @@ func TestDpaSsoJWKSKeyID_Format(t *testing.T) {
 	require.Equal(t, time.Now().UTC().Format("20060102"), kid)
 }
 
-func TestEncryptK8STokenAsJWE_RSA_RoundTrip(t *testing.T) {
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	token := "eyJhbGciOiJSUzI1NiJ9.test-k8s-jwt-payload.sig"
-	kid := dpaSsoJWKSKeyID()
-	jweCompact, err := encryptK8STokenAsJWE(&privKey.PublicKey, kid, token)
-	require.NoError(t, err)
-	require.NotEmpty(t, jweCompact)
-
-	parts := strings.Split(jweCompact, ".")
-	require.Len(t, parts, 5, "JWE compact must have 5 segments")
-
+// decryptProxyJWEPayload decrypts a proxy JWE compact string and returns the JSON payload map.
+func decryptProxyJWEPayload(t *testing.T, jweCompact string, privKey *rsa.PrivateKey) map[string]string {
+	t.Helper()
 	jweObj, err := jose.ParseEncrypted(jweCompact,
 		[]jose.KeyAlgorithm{jose.RSA_OAEP_256},
 		[]jose.ContentEncryption{jose.A256GCM})
 	require.NoError(t, err)
-	require.Equal(t, kid, jweObj.Header.KeyID, "kid must be embedded in the JWE protected header")
 	plaintext, err := jweObj.Decrypt(privKey)
 	require.NoError(t, err)
-
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal(plaintext, &payload),
 		"decrypted plaintext must be a JSON object")
-	require.Equal(t, token, payload["k8s_token"],
-		"k8s token must be JSON-wrapped under the k8s_token key")
+	return payload
+}
+
+func TestEncryptProxyJWEExtension_RSA_RoundTrip(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name          string
+		token         string
+		rootCA        string
+		wantRootCA    string
+		omitRootCAKey bool
+	}{
+		{
+			name:          "token_only",
+			token:         "eyJhbGciOiJSUzI1NiJ9.test-k8s-jwt-payload.sig",
+			omitRootCAKey: true,
+		},
+		{
+			name:       "token_and_root_ca",
+			token:      "k8s-bearer-token",
+			rootCA:     testProxyJWERootCA,
+			wantRootCA: testProxyJWERootCA,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kid := dpaSsoJWKSKeyID()
+			jweCompact, err := encryptProxyJWEExtension(&privKey.PublicKey, kid, tt.token, tt.rootCA)
+			require.NoError(t, err)
+			require.NotEmpty(t, jweCompact)
+			require.Len(t, strings.Split(jweCompact, "."), 5, "JWE compact must have 5 segments")
+
+			jweObj, err := jose.ParseEncrypted(jweCompact,
+				[]jose.KeyAlgorithm{jose.RSA_OAEP_256},
+				[]jose.ContentEncryption{jose.A256GCM})
+			require.NoError(t, err)
+			require.Equal(t, kid, jweObj.Header.KeyID, "kid must be embedded in the JWE protected header")
+
+			payload := decryptProxyJWEPayload(t, jweCompact, privKey)
+			require.Equal(t, tt.token, payload["k8s_token"])
+			if tt.omitRootCAKey {
+				_, hasRootCA := payload["root_ca"]
+				require.False(t, hasRootCA, "root_ca must be omitted when empty")
+				return
+			}
+			require.Equal(t, tt.wantRootCA, payload["root_ca"])
+		})
+	}
 }
 
 func TestFetchDPASSOPublicKey_RSA_Success(t *testing.T) {

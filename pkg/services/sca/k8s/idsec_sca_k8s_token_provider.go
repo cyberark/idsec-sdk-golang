@@ -3,7 +3,6 @@ package k8s
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
@@ -44,13 +43,19 @@ type IdsecSCAK8sClusterContext struct {
 	// Empty for non-Azure CSPs.
 	ElevateToken string
 
-	// JWEExtensionValue is an optional opaque value forwarded as
-	// jwe_extension_value in the DPA SSO acquire request (DPA-K8S).
-	// For Azure proxy this carries the raw AKS access token acquired via az CLI;
-	// for AWS IDC permission-set proxy it carries the EKS bearer token from
-	// STS GetCallerIdentity presign. It is empty for AWS IAM-role proxy and all
-	// direct flows. The SDK encrypts it as JWE with JSON key "k8s_token".
-	JWEExtensionValue string
+	// K8sToken is the cluster API token used for DPA proxy JWE encryption on
+	// Azure / AWS IDC paths: AKS access token (az CLI) or EKS bearer token (STS
+	// presign). Encrypted into the DPA jwe_extension_value JWE under JSON key
+	// "k8s_token" together with RootCA as "root_ca". Empty for AWS IAM-role
+	// proxy and all direct flows.
+	K8sToken string
+
+	// RootCA is the cluster root CA from Evaluate certificateData (always set
+	// when evaluate returns it). For Azure / AWS IDC proxy it is encrypted into
+	// the DPA JWE as JSON key "root_ca" so the SIA proxy can mTLS to the cluster.
+	// Unused on direct and AWS IAM-role proxy paths.
+	RootCA string
+
 	// Diagnostics enables kubectl-login stderr diagnostics from token providers.
 	Diagnostics bool
 }
@@ -58,12 +63,9 @@ type IdsecSCAK8sClusterContext struct {
 // IdsecSCAK8sTokenProvider is the interface each CSP token generator must satisfy.
 //
 // CSP returns the uppercase CSP identifier handled by this provider.
-// ElevateTTL returns how long elevated credentials (from the Elevate API) remain
-// valid; this drives the keyring cache TTL in the kubectl-login action.
 // GenerateToken converts an Elevate result into the kubectl ExecCredential JSON.
 type IdsecSCAK8sTokenProvider interface {
 	CSP() string
-	ElevateTTL() time.Duration
 	GenerateToken(
 		result *k8smodels.IdsecSCAK8sElevateResult,
 		ctx *IdsecSCAK8sClusterContext,

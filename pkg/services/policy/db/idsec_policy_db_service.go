@@ -47,6 +47,13 @@ func NewIdsecPolicyDBService(authenticators ...auth.IdsecAuth) (*IdsecPolicyDBSe
 	return policyDbService, nil
 }
 
+func checkAccessApprovalNotSupported(accessApproval *policycommonmodels.IdsecPolicyAccessApprovalCondition) error {
+	if accessApproval != nil && accessApproval.Required {
+		return fmt.Errorf("dual control (access_approval.required=true) is not supported for DB policies; remove access_approval from the policy to create or update it")
+	}
+	return nil
+}
+
 func (s *IdsecPolicyDBService) serializeProfile(policy *models.IdsecPolicyDBAccessPolicy, policyJSON map[string]interface{}) error {
 	// Fill the profiles for the instances
 	var err error
@@ -82,6 +89,11 @@ func (s *IdsecPolicyDBService) deserializeProfile(policy *models.IdsecPolicyDBAc
 
 // CreatePolicy creates a new policy with the given information.
 func (s *IdsecPolicyDBService) CreatePolicy(createPolicy *models.IdsecPolicyDBAccessPolicy) (*models.IdsecPolicyDBAccessPolicy, error) {
+	if createPolicy != nil {
+		if err := checkAccessApprovalNotSupported(createPolicy.Conditions.AccessApproval); err != nil {
+			return nil, err
+		}
+	}
 	s.Logger.Info("Creating new policy [%s]", createPolicy.Metadata.Name)
 	createPolicy.Metadata.PolicyEntitlement.TargetCategory = commonmodels.CategoryTypeDB
 	if createPolicy.Metadata.PolicyTags == nil {
@@ -127,6 +139,11 @@ func (s *IdsecPolicyDBService) Policy(policyRequest *policycommonmodels.IdsecPol
 
 // UpdatePolicy edits an existing policy with the given information.
 func (s *IdsecPolicyDBService) UpdatePolicy(updatePolicy *models.IdsecPolicyDBAccessPolicy) (*models.IdsecPolicyDBAccessPolicy, error) {
+	if updatePolicy != nil {
+		if err := checkAccessApprovalNotSupported(updatePolicy.Conditions.AccessApproval); err != nil {
+			return nil, err
+		}
+	}
 	s.Logger.Info("Updating policy [%s]", updatePolicy.Metadata.PolicyID)
 	policyType := reflect.TypeOf(models.IdsecPolicyDBAccessPolicy{})
 	policyJSON, err := common.SerializeJSONCamelSchema(updatePolicy, &policyType)

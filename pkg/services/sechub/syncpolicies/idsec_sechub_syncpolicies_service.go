@@ -219,6 +219,7 @@ func mergeKnownPredefined(t syncpoliciesmodels.IdsecSecHubPolicyTransformation, 
 	}
 }
 
+// This method is intended for Terraform use only
 // List returns a channel of IdsecSecHubSyncPoliciesPage containing all Sync Policies.
 func (s *IdsecSecHubSyncPoliciesService) List(syncPolicies *syncpoliciesmodels.IdsecSecHubGetSyncPolicies) (<-chan *IdsecSecHubSyncPoliciesPage, error) {
 	var projection string
@@ -231,6 +232,7 @@ func (s *IdsecSecHubSyncPoliciesService) List(syncPolicies *syncpoliciesmodels.I
 	)
 }
 
+// This method is intended for Terraform use only
 // ListBy returns a channel of IdsecSecHubSyncPoliciesPage containing secrets filtered by the given filters.
 func (s *IdsecSecHubSyncPoliciesService) ListBy(syncPoliciesFilters *syncpoliciesmodels.IdsecSecHubSyncPoliciesFilters) (<-chan *IdsecSecHubSyncPoliciesPage, error) {
 	var projection string
@@ -243,6 +245,7 @@ func (s *IdsecSecHubSyncPoliciesService) ListBy(syncPoliciesFilters *syncpolicie
 	)
 }
 
+// This method is intended for Terraform use only
 // Get returns an individual sync policy with Extended Projection response by default.
 // When getSyncPolicy.Transformation.Predefined is non-empty, that value is merged onto the returned policy's
 // Transformation (keeping Transformation.ID from the GET response) because the extended GET payload may omit predefined.
@@ -270,6 +273,7 @@ func (s *IdsecSecHubSyncPoliciesService) Get(
 	return syncPolicy, nil
 }
 
+// This method is intended for Terraform use only
 // Create creates a new sync policy and returns the extended GET representation via Get (see Get for response shape).
 // When syncPolicy.Transformation.Predefined is non-empty, that value is merged onto the returned policy's
 // Transformation (keeping Transformation.ID from the GET response) because the extended GET payload may omit predefined.
@@ -316,6 +320,7 @@ func (s *IdsecSecHubSyncPoliciesService) Create(syncPolicy *syncpoliciesmodels.I
 	return syncPolicyExtendedResponse, nil
 }
 
+// This method is intended for Terraform use only
 // SetState sets the state of a sync policy.
 // https://api-docs.cyberark.com/docs/secretshub-api/by05aodbep6xy-set-sync-policy-state
 func (s *IdsecSecHubSyncPoliciesService) SetState(
@@ -334,6 +339,7 @@ func (s *IdsecSecHubSyncPoliciesService) SetState(
 	return nil
 }
 
+// This method is intended for Terraform use only
 // Delete disables and then deletes a specified sync policy based on the id
 // https://api-docs.cyberark.com/docs/secretshub-api/lgbolpf4ka7oa-delete-sync-policy
 func (s *IdsecSecHubSyncPoliciesService) Delete(syncPolicy *syncpoliciesmodels.IdsecSecHubDeleteSyncPolicy) error {
@@ -366,12 +372,14 @@ func (s *IdsecSecHubSyncPoliciesService) Delete(syncPolicy *syncpoliciesmodels.I
 	return nil
 }
 
+// This method is intended for Terraform use only
 // Update Align with legacy terraform provider and do not allow updates to sync policies through this service.
 // If updates are needed see SetState for state changes.
 func (s *IdsecSecHubSyncPoliciesService) Update(syncPolicy *syncpoliciesmodels.IdsecSecHubUpdateSyncPolicy) (*syncpoliciesmodels.IdsecSecHubPolicy, error) {
 	return nil, fmt.Errorf("updating the sync policy is not supported through terraform. Please consult with your CyberArk Administrator about updating policy with id [%s]", syncPolicy.ID)
 }
 
+// This method is intended for Terraform use only
 // Stats retrieves statistics about sync policies.
 func (s *IdsecSecHubSyncPoliciesService) Stats() (*syncpoliciesmodels.IdsecSecHubSyncPoliciesStats, error) {
 	s.Logger.Info("Retrieving sync policy stats")

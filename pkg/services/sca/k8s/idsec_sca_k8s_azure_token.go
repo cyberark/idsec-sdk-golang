@@ -22,7 +22,6 @@ const (
 	aksTokenScope  = aksServerAppID + "/.default"
 	aksExecCredAPI = "client.authentication.k8s.io/v1beta1"
 
-	azureElevateTTL          = 1 * time.Hour
 	acquireAKSTokenTimeout   = 30 * time.Second
 	aksExecCredRefreshBuffer = 60 * time.Second // subtract from JWT exp for ExecCredential.expirationTimestamp
 )
@@ -31,8 +30,6 @@ const (
 type AzureTokenProvider struct{}
 
 func (p *AzureTokenProvider) CSP() string { return k8smodels.CSPAzure }
-
-func (p *AzureTokenProvider) ElevateTTL() time.Duration { return azureElevateTTL }
 
 // GenerateToken returns an AKS ExecCredential after EnsureAzureCLISession (diagnostics gated by ctx.Diagnostics).
 func (p *AzureTokenProvider) GenerateToken(

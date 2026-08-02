@@ -44,6 +44,9 @@ var validFQDNReq = k8smodels.IdsecSCAK8sElevateKubectlRequest{
 
 // setupK8sElevateService creates an IdsecSCAK8sService with a mock ISP client injected.
 func setupK8sElevateService(client *isp.IdsecISPServiceClient) *IdsecSCAK8sService {
+	if client != nil && client.IdsecClient != nil && client.GetToken() == "" {
+		client.UpdateToken(testCLISignatureIDToken, "Bearer")
+	}
 	ispBase := &services.IdsecISPBaseService{}
 	v := reflect.ValueOf(ispBase).Elem()
 	clientField := v.FieldByName("client")
@@ -483,7 +486,6 @@ func TestGetTokenProvider_AWS(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	require.Equal(t, "AWS", p.CSP())
-	require.Equal(t, awsElevateTTL, p.ElevateTTL())
 }
 
 func TestGetTokenProvider_AWSLowercase(t *testing.T) {
@@ -517,11 +519,6 @@ func TestAzureTokenProvider_GenerateToken_NilContext(t *testing.T) {
 	_, err := p.GenerateToken(&k8smodels.IdsecSCAK8sElevateResult{}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cluster context cannot be nil")
-}
-
-func TestAzureTokenProvider_ElevateTTL(t *testing.T) {
-	p := &AzureTokenProvider{}
-	require.Equal(t, azureElevateTTL, p.ElevateTTL())
 }
 
 func TestAWSTokenProvider_GenerateToken_EmptyAccessCredentials(t *testing.T) {

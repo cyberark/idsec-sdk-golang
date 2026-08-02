@@ -34,10 +34,6 @@ const (
 
 	// eksExecCredAPIVersion is the Kubernetes client-auth API version.
 	eksExecCredAPIVersion = "client.authentication.k8s.io/v1beta1"
-
-	// awsElevateTTL is the maximum session duration returned by the Elevate API
-	// for AWS STS credentials.
-	awsElevateTTL = 1 * time.Hour
 )
 
 // AWSTokenProvider implements IdsecSCAK8sTokenProvider for AWS EKS.
@@ -45,9 +41,6 @@ type AWSTokenProvider struct{}
 
 // CSP returns the AWS CSP identifier.
 func (p *AWSTokenProvider) CSP() string { return k8smodels.CSPAWS }
-
-// ElevateTTL returns the Elevate credential cache duration for AWS (1 hour).
-func (p *AWSTokenProvider) ElevateTTL() time.Duration { return awsElevateTTL }
 
 // GenerateToken creates an EKS bearer token by presigning a GetCallerIdentity
 // request using the AWS STS credentials from the Elevate API response.

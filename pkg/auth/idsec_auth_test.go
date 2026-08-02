@@ -1097,3 +1097,100 @@ func TestLoadAuthentication(t *testing.T) {
 		})
 	}
 }
+
+// TestForceRefreshAuthentication verifies the two behaviors that distinguish
+// ForceRefreshAuthentication from LoadAuthentication: it re-authenticates a token the server
+// rejected with a 401 even while that token still looks valid client-side (the bug LoadAuthentication
+// could not recover from), and it coalesces onto an already-refreshed token instead of issuing a
+// redundant re-authentication. The shared token-lifecycle branches are already covered by
+// TestLoadAuthentication, so they are not repeated here.
+func TestForceRefreshAuthentication(t *testing.T) {
+	futureTime := time.Now().Add(1 * time.Hour) // well beyond the 60s grace window
+
+	// newBase builds an authenticator whose keyring returns keyringToken and whose re-auth
+	// yields a token named "reauthed_token".
+	newBase := func(keyringToken string) *IdsecAuthBase {
+		mockAuth := &MockIdsecAuth{AuthenticatorNameFunc: func() string { return "mock_auth" }}
+		mockKeyring := &MockKeyring{
+			LoadTokenFunc: func(*models.IdsecProfile, string, bool) (*auth.IdsecToken, error) {
+				return CreateTestToken(keyringToken, futureTime, "refresh"), nil
+			},
+			SaveTokenFunc: func(*models.IdsecProfile, *auth.IdsecToken, string, bool) error { return nil },
+		}
+		mockAuth.PerformRefreshAuthenticationFunc = func(*models.IdsecProfile, *auth.IdsecAuthProfile, *auth.IdsecToken) (*auth.IdsecToken, error) {
+			return CreateTestToken("reauthed_token", futureTime, "new_refresh"), nil
+		}
+		base := NewIdsecAuthBase(true, "test", mockAuth)
+		base.CacheKeyring = mockKeyring
+		base.ActiveAuthProfile = &auth.IdsecAuthProfile{Username: "user1", AuthMethod: auth.Direct}
+		return base
+	}
+
+	tests := []struct {
+		name          string
+		keyringToken  string // token currently cached (what LoadToken returns)
+		rejectedToken string // token the server 401'd on
+		expectedToken string // expected result token
+	}{
+		{
+			// Core regression: cached token is still valid client-side but was rejected, so a
+			// genuine re-auth must happen (LoadAuthentication would short-circuit instead).
+			name:          "reauth_even_when_token_valid_beyond_grace",
+			keyringToken:  "rejected_token",
+			rejectedToken: "rejected_token",
+			expectedToken: "reauthed_token",
+		},
+		{
+			// A different valid token is already cached (another goroutine refreshed after the
+			// same 401), so it is adopted without a redundant re-auth.
+			name:          "coalesce_onto_already_refreshed_token",
+			keyringToken:  "newer_token",
+			rejectedToken: "rejected_token",
+			expectedToken: "newer_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := newBase(tt.keyringToken).ForceRefreshAuthentication(
+				CreateTestProfile("test", "mock_auth", "user1"), tt.rejectedToken)
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+			if result == nil || result.Token != tt.expectedToken {
+				t.Fatalf("expected token %q, got %v", tt.expectedToken, result)
+			}
+		})
+	}
+}
+
+func TestLoadAuthenticationPreservesRefreshErrorAndCurrentState(t *testing.T) {
+	refreshErr := errors.New("refresh endpoint unavailable")
+	mockAuth := &MockIdsecAuth{
+		AuthenticatorNameFunc: func() string { return "mock_auth" },
+		PerformRefreshAuthenticationFunc: func(profile *models.IdsecProfile, authProfile *auth.IdsecAuthProfile, token *auth.IdsecToken) (*auth.IdsecToken, error) {
+			return nil, refreshErr
+		},
+	}
+	base := NewIdsecAuthBase(false, "test", mockAuth)
+	profile := CreateTestProfile("test", "mock_auth", "user1")
+	authProfile := &auth.IdsecAuthProfile{
+		Username:   "user1",
+		AuthMethod: auth.Direct,
+	}
+	currentToken := CreateTestToken("current_token", time.Now().Add(30*time.Second), "refresh")
+	base.setState(currentToken, profile, authProfile)
+
+	result, err := base.LoadAuthentication(nil, true)
+	if result != nil {
+		t.Fatalf("expected no refreshed token, got %+v", result)
+	}
+	if !errors.Is(err, refreshErr) {
+		t.Fatalf("expected wrapped refresh error, got %v", err)
+	}
+	if base.GetToken() != currentToken {
+		t.Fatal("expected the existing authentication state to remain published after refresh failure")
+	}
+}

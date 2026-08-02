@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
@@ -207,15 +206,13 @@ func (ai *IdsecIdentityServiceUser) AuthIdentity(profile *models.IdsecProfile, f
 
 	ai.sessionToken = idTokens[0]
 
-	// Try and decode exp from token
-	newTokenClaims, _, err := new(jwt.Parser).ParseUnverified(ai.sessionToken, jwt.MapClaims{})
+	// Use the token's absolute expiration. Reconstructing the original lifetime
+	// from exp-iat and adding it to the local clock would extend tokens that were
+	// not consumed immediately after issuance.
+	ai.sessionExp, err = tokenExpiration(ai.sessionToken)
 	if err != nil {
 		return err
 	}
-	newClaims := newTokenClaims.Claims.(jwt.MapClaims)
-	exp := int64(newClaims["exp"].(float64))
-	iat := int64(newClaims["iat"].(float64))
-	ai.sessionExp = commonmodels.IdsecRFC3339Time(time.Now().Add(time.Duration(int(exp-iat)) * time.Second))
 	ai.session.UpdateToken(ai.sessionToken, "Bearer")
 	ai.logger.Info("Created a service user session via endpoint [%s] with user [%s] to platform", ai.identityURL, ai.username)
 

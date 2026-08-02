@@ -14,6 +14,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	scacommon "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/internal/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 	scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 )
@@ -124,17 +125,11 @@ func (s *IdsecSCAK8sService) ListTargets(req *k8smodels.IdsecSCAk8sListClustersR
 
 	csp := strings.TrimSpace(req.CSP)
 	cspLower := strings.ToLower(csp)
-	supported := map[string]struct{}{
-		strings.ToLower(k8smodels.CSPAWS):   {},
-		strings.ToLower(k8smodels.CSPAzure): {},
-	}
-	if cspLower != "" {
-		if _, ok := supported[cspLower]; !ok {
-			return nil, fmt.Errorf("unsupported csp '%s'", csp)
-		}
+	if cspLower != "" && !scacommon.IsSupportedCSP(csp, k8smodels.CSPAWS, k8smodels.CSPAzure) {
+		return nil, scacommon.ErrUnsupportedCSP(csp, k8smodels.CSPAWS, k8smodels.CSPAzure)
 	}
 	if req.All && cspLower != "" {
-		return nil, fmt.Errorf("choose either csp or all, not both")
+		return nil, scacommon.ErrCSPAllConflict()
 	}
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca k8s service not initialized")
@@ -283,7 +278,7 @@ func (s *IdsecSCAK8sService) EvaluateEligibility(req *k8smodels.IdsecSCAK8sEvalu
 
 	route := strings.TrimPrefix(strings.Replace(evaluateRelURL, "<csp>", cspUpper, 1), "/")
 
-	response, err := s.ISPClient().Post(context.Background(), route, req)
+	response, err := s.postWithCLISignature(route, req)
 	if err != nil {
 		return nil, fmt.Errorf("evaluate eligibility API call failed: %w", err)
 	}
@@ -361,7 +356,7 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 		OrganizationID: req.OrganizationID,
 	}
 
-	response, err := s.ISPClient().Post(context.Background(), elevateRelURL, apiReq)
+	response, err := s.postWithCLISignature(elevateRelURL, apiReq)
 	if err != nil {
 		return nil, fmt.Errorf("elevate API call failed: %w", err)
 	}
@@ -412,33 +407,47 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 // short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
 // (DPA-K8S). Shared by AWS and Azure proxy providers.
 //
-// jweExtensionValue is the raw k8s token (EKS bearer or AKS access token). When
-// non-empty it is encrypted as JWE with JSON key "k8s_token" and sent as
-// jwe_extension_value. IAM-role AWS proxy leaves it empty.
-func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(jweExtensionValue string, diagnostics bool) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	jweSet := strings.TrimSpace(jweExtensionValue) != ""
+// When ctx.K8sToken is set (Azure / AWS IDC), it is encrypted as JWE with
+// JSON keys "k8s_token" and "root_ca" (from ctx.RootCA) and sent as
+// jwe_extension_value. root_ca is required whenever K8sToken is set.
+// IAM-role AWS proxy leaves K8sToken empty.
+func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClusterContext) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	diagnostics := clusterDiagnostics(ctx)
+	k8sToken := ""
+	rootCA := ""
+	if ctx != nil {
+		k8sToken = strings.TrimSpace(ctx.K8sToken)
+		rootCA = strings.TrimSpace(ctx.RootCA)
+	}
+	jweSet := k8sToken != ""
 	kubectlLoginDiagnostic(diagnostics,
-		"generateDPAProxyExecCredential: POST %s service=%s jwe_extension_value_set=%v",
-		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet)
+		"generateDPAProxyExecCredential: POST %s service=%s proxy_jwe=%v k8s_token_len=%d root_ca_len=%d",
+		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet, len(k8sToken), len(rootCA))
+
+	if jweSet && rootCA == "" {
+		return nil, fmt.Errorf("proxy client certificate generation failed: root_ca is required when k8s_token is set")
+	}
 
 	if s.dpaISP == nil || s.dpaISP.ISPClient() == nil {
 		return nil, fmt.Errorf("proxy client certificate generation failed: dpa client not initialized")
 	}
 
-	// Generic k8s-token JWE path (AKS + EKS): fetch the DPA SSO public key and
-	// encrypt the token before /acquire so the plaintext never travels over the wire.
+	// Azure / AWS IDC: fetch the DPA SSO public key and encrypt before /acquire so
+	// plaintext k8s token and cluster CA never travel over the wire.
+	var jweExtensionValue string
 	if jweSet {
 		kid := dpaSsoJWKSKeyID()
 		pubKey, err := s.fetchDPASSOPublicKey(kid, diagnostics)
 		if err != nil {
 			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to fetch DPA JWKS (kid=%s): %w", kid, err)
 		}
-		jweExtensionValue, err = encryptK8STokenAsJWE(pubKey, kid, jweExtensionValue)
+		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA)
 		if err != nil {
-			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to encrypt k8s token: %w", err)
+			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to encrypt extension: %w", err)
 		}
 		kubectlLoginDiagnostic(diagnostics,
-			"k8s token encrypted as JWE (kid=%s len=%d)", kid, len(jweExtensionValue))
+			"proxy JWE encrypted (kid=%s encrypted_jwe_len=%d k8s_token_len=%d root_ca_len=%d)",
+			kid, len(jweExtensionValue), len(k8sToken), len(rootCA))
 	}
 
 	body := map[string]interface{}{
@@ -654,7 +663,7 @@ func (s *IdsecSCAK8sService) generateKubeconfigViaDpa(req *k8smodels.IdsecSCAK8s
 
 	client := s.dpaISP.ISPClient()
 	client.RemoveHeader("Content-Type")
-	response, err := client.Get(context.Background(), route, nil)
+	response, err := s.getWithCLISignature(client, route, nil)
 	client.SetHeader("Content-Type", "application/json")
 
 	if err != nil {
@@ -718,15 +727,10 @@ func (s *IdsecSCAK8sService) parseGenerateKubeconfigBody(bodyBytes []byte, csp s
 	return k8smodels.IdsecSCAK8sGenerateKubeconfigResponse{key: rawBody}, nil
 }
 
-// validateSupportedCSP returns an error if csp is not one of the supported lowercase CSP names.
+// validateSupportedCSP returns an error if csp is not one of the supported CSP names (case-insensitive).
 func validateSupportedCSP(csp string) error {
-	supported := map[string]struct{}{
-		strings.ToLower(k8smodels.CSPAWS):   {},
-		strings.ToLower(k8smodels.CSPAzure): {},
-	}
-	if _, ok := supported[csp]; !ok {
-		return fmt.Errorf("unsupported csp '%s'; must be one of: %s, %s",
-			csp, strings.ToLower(k8smodels.CSPAWS), strings.ToLower(k8smodels.CSPAzure))
+	if !scacommon.IsSupportedCSP(csp, k8smodels.CSPAWS, k8smodels.CSPAzure) {
+		return scacommon.ErrUnsupportedCSP(csp, k8smodels.CSPAWS, k8smodels.CSPAzure)
 	}
 	return nil
 }

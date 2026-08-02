@@ -849,6 +849,10 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized && ac.refreshConnectionCallback != nil && refreshRetryCountLocal > 0 {
+		// Drain and close the unauthorized response before retrying so the
+		// underlying connection can be reused and the response body is not leaked.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 		err = ac.refreshConnectionCallback(ac)
 		if err != nil {
 			return nil, err

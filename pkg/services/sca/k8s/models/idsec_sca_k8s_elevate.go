@@ -48,9 +48,9 @@ type IdsecSCAK8sElevateClientDetails struct {
 // TargetID is the cloud-provider cluster identifier returned by the API (e.g. an EKS
 // cluster ARN for AWS). For AWS, parse it with ParseEKSARN to extract region and cluster name.
 //
-// SessionExpTime is the SCA elevation session expiry (RFC3339/RFC3339Nano). Azure
-// responses include this; the kubectl-login cache uses it with a refresh buffer
-// instead of a fixed TTL. AWS may omit it — fallback TTL applies via ElevateTTL().
+// SessionExpTime is the SCA elevation session expiry (RFC3339/RFC3339Nano). All CSPs
+// (AWS IAM, AWS IDC, Azure) return this; the kubectl-login cache uses it with a
+// refresh buffer. If absent, the elevate cache is not used.
 type IdsecSCAK8sElevateResult struct {
 	WorkspaceID       string                           `json:"workspaceId"`
 	RoleID            string                           `json:"roleId,omitempty"`

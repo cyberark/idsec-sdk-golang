@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"sync"
@@ -267,7 +268,40 @@ func (a *IdsecAuthBase) IsAuthenticated(profile *models.IdsecProfile) bool {
 // The token is computed into a local variable and published exactly once at the end so that
 // concurrent readers (via GetToken) never observe a transiently-nil token while a cache load
 // or network refresh is in progress.
+//
+// When refreshAuth is true the token is only re-authenticated if it is at (or within the grace
+// window of) its client-side expiry. To force a genuine re-authentication regardless of the
+// client-side expiry - for example after the server has rejected the token with an HTTP 401 -
+// use ForceRefreshAuthentication instead.
 func (a *IdsecAuthBase) LoadAuthentication(profile *models.IdsecProfile, refreshAuth bool) (*auth.IdsecToken, error) {
+	return a.loadAuthentication(profile, refreshAuth, false, "")
+}
+
+// ForceRefreshAuthentication forces a genuine re-authentication, bypassing the client-side
+// grace-expiration check performed by LoadAuthentication.
+//
+// It is intended for the case where the server has rejected the current token with an HTTP 401.
+// A server-side rejection is authoritative proof that the cached token is no longer usable, even
+// when its client-side ExpiresIn has not yet elapsed (for example when a downstream service
+// enforces a shorter session lifetime than the token advertises, or invalidates the session
+// early). In that situation LoadAuthentication's grace check would incorrectly conclude the token
+// is still valid ("no need to refresh") and hand back the same dead token, so the caller could
+// never recover.
+//
+// rejectedToken is the raw token string that the server rejected (typically the token currently
+// held by the failing client). It is used to coalesce concurrent refreshes: when the authenticator
+// or keyring already holds a different, still-valid token (because another goroutine sharing this
+// authenticator already refreshed after the same 401), that newer token is adopted without issuing
+// another network re-authentication. Pass an empty string to always force re-authentication.
+func (a *IdsecAuthBase) ForceRefreshAuthentication(profile *models.IdsecProfile, rejectedToken string) (*auth.IdsecToken, error) {
+	return a.loadAuthentication(profile, true, true, rejectedToken)
+}
+
+// loadAuthentication is the shared implementation behind LoadAuthentication and
+// ForceRefreshAuthentication. When forceRefresh is true the client-side grace-expiration
+// short-circuit is skipped so a genuine re-authentication is performed even if the token still
+// appears valid locally, unless a newer token (different from rejectedToken) is already available.
+func (a *IdsecAuthBase) loadAuthentication(profile *models.IdsecProfile, refreshAuth bool, forceRefresh bool, rejectedToken string) (*auth.IdsecToken, error) {
 	a.opMu.Lock()
 	defer a.opMu.Unlock()
 
@@ -307,11 +341,20 @@ func (a *IdsecAuthBase) LoadAuthentication(profile *models.IdsecProfile, refresh
 		}
 	}
 	if refreshAuth {
-		if token != nil && time.Time(token.ExpiresIn).Add(-time.Duration(defaultExpirationGraceDeltaSeconds)*time.Second).After(time.Now()) {
+		withinGrace := token != nil && time.Time(token.ExpiresIn).Add(-time.Duration(defaultExpirationGraceDeltaSeconds)*time.Second).After(time.Now())
+		alreadyRefreshed := forceRefresh && rejectedToken != "" &&
+			token != nil && token.Token != rejectedToken && withinGrace
+		switch {
+		case alreadyRefreshed:
+			a.Logger.Info("A newer token is already available, adopting it without re-authentication")
+		case !forceRefresh && withinGrace:
 			a.Logger.Info("Token did not pass grace expiration, no need to refresh")
-		} else {
+		default:
 			a.Logger.Info("Trying to refresh token authentication")
-			token, _ = a.Authenticator.performRefreshAuthentication(profile, authProfile, token)
+			token, err = a.Authenticator.performRefreshAuthentication(profile, authProfile, token)
+			if err != nil {
+				return nil, fmt.Errorf("failed to refresh %s authentication: %w", a.Authenticator.AuthenticatorName(), err)
+			}
 			if token != nil && time.Time(token.ExpiresIn).After(time.Now()) {
 				a.Logger.Info("Token refreshed")
 			}

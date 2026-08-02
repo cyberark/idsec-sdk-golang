@@ -66,15 +66,13 @@ func main() {
 					},
 				},
 				Conditions: policycommomodels.IdsecPolicyInfraCommonConditions{
-					IdsecPolicyConditions: policycommomodels.IdsecPolicyConditions{
-						AccessWindow: policycommomodels.IdsecPolicyTimeCondition{
-							DaysOfTheWeek: []int{1, 2, 3, 4, 5},
-							FromHour:      "09:00",
-							ToHour:        "17:00",
-						},
-						MaxSessionDuration: 4,
+					AccessWindow: policycommomodels.IdsecPolicyInfraTimeCondition{
+						DaysOfTheWeek: []int{1, 2, 3, 4, 5},
+						FromHour:      "09:00",
+						ToHour:        "17:00",
 					},
-					IdleTime: 10,
+					MaxSessionDuration: 4,
+					IdleTime:           10,
 				},
 			},
 			Targets: policyvmmodels.IdsecPolicyVMPlatformTargets{

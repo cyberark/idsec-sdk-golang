@@ -71,7 +71,7 @@ func TestListTargets_CSPAndAll(t *testing.T) {
 
 	require.Error(t, err)
 	require.Nil(t, resp)
-	require.Contains(t, err.Error(), "choose either csp or all")
+	require.Contains(t, err.Error(), "When using '--csp', '--all' can only be 'false'")
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +638,7 @@ func TestElevate_validation_empty_csp(t *testing.T) {
 		RoleIDs:     "role-1",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "csp")
+	require.Contains(t, err.Error(), "The CSP cannot be empty")
 }
 
 func TestElevate_validation_unsupported_csp(t *testing.T) {
@@ -650,7 +650,7 @@ func TestElevate_validation_unsupported_csp(t *testing.T) {
 			RoleIDs:     "role-1",
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "supported values are AWS, AZURE")
+		require.Contains(t, err.Error(), "Supported providers are: AWS, AZURE")
 	}
 }
 

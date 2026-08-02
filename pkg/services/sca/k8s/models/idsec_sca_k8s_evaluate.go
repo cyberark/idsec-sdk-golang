@@ -31,6 +31,12 @@ type IdsecSCAK8sEvaluateResult struct {
 
 	// ConnectionMethod indicates how the user should connect: "direct" or "proxy".
 	ConnectionMethod string `json:"connectionMethod"`
+
+	// CertificateData is the cluster root CA (base64-encoded PEM).
+	// Present on evaluate results for both direct and proxy connection methods.
+	// Proxy Azure / AWS IDC flows encrypt it into the DPA JWE as "root_ca" for
+	// mTLS between the SIA proxy and the cluster API.
+	CertificateData string `json:"certificateData,omitempty"`
 }
 
 // IdsecSCAK8sEvaluateResponse is the top-level evaluate API reply.
