@@ -10,11 +10,12 @@ import "encoding/json"
 const (
 	CSPAWS   = "AWS"
 	CSPAzure = "AZURE"
+	CSPGCP   = "GCP"
 )
 
-// ValidListTargetsCSPs are queried when list-targets is called without an
-// explicit CSP.
-var ValidListTargetsCSPs = []string{CSPAWS, CSPAzure}
+// ValidCloudAccessCSPs are the CSPs supported by the cloudaccess list-targets
+// and all-CSPs aggregation paths. GCP is supported here but not in k8s list-targets.
+var ValidCloudAccessCSPs = []string{CSPAWS, CSPAzure, CSPGCP}
 
 // IdsecSCAListTargetsRequest is the shared input for listing eligible targets.
 // It is used by both the cloudaccess and groupaccess sub-services.
@@ -25,14 +26,14 @@ var ValidListTargetsCSPs = []string{CSPAWS, CSPAzure}
 // Use Limit and NextToken for paginating through results (up to 50 per page).
 //
 // Fields:
-//   - CSP:         Cloud service provider — AWS | AZURE. When omitted, AWS and AZURE are queried.
-//   - All:         When true, queries AWS and AZURE regardless of CSP.
+//   - CSP:         Cloud service provider — AWS | AZURE | GCP. When omitted, AWS, AZURE and GCP are queried.
+//   - All:         When true, queries AWS, AZURE and GCP regardless of CSP.
 //   - WorkspaceID: Optional workspace ID to filter eligible targets.
 //   - Limit:       Maximum number of targets to return; up to 50.
 //   - NextToken:   Pagination token from the previous response.
 type IdsecSCAListTargetsRequest struct {
-	CSP         string `json:"csp" mapstructure:"csp" flag:"csp" desc:"The cloud provider to list eligible targets for (AWS | AZURE). Omit to list AWS and AZURE targets."`
-	All         bool   `json:"all,omitempty" mapstructure:"all,omitempty" flag:"all" desc:"List targets for all default CSPs (AWS and AZURE)."`
+	CSP         string `json:"csp" mapstructure:"csp" flag:"csp" desc:"The cloud provider to list eligible targets for (AWS | AZURE | GCP). Omit to list AWS, AZURE and GCP targets."`
+	All         bool   `json:"all,omitempty" mapstructure:"all,omitempty" flag:"all" desc:"List targets for all default CSPs (AWS, AZURE and GCP)."`
 	WorkspaceID string `json:"workspace_id,omitempty" mapstructure:"workspace_id,omitempty" flag:"workspace-id" desc:"Optional workspace ID to filter eligible targets"`
 	Limit       int    `json:"limit,omitempty" mapstructure:"limit,omitempty" flag:"limit" desc:"The maximum number of targets to return in the response (up to 50)"`
 	NextToken   string `json:"next_token,omitempty" mapstructure:"next_token,omitempty" flag:"next-token" desc:"The pagination token from the previous API response"`

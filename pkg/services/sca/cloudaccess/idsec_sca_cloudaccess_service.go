@@ -37,7 +37,7 @@ const (
 // IdsecSCACloudAccessService provides SCA cloudaccess eligibility operations.
 //
 // It is an independent service that hits GET /api/access/{csp}/eligibility
-// and supports AWS and AZURE as valid CSP values.
+// and supports AWS, AZURE and GCP as valid CSP values.
 //
 // Initialization requires a valid "isp" authenticator. Token refresh is delegated
 // to refreshAuth.
@@ -94,7 +94,7 @@ func (s *IdsecSCACloudAccessService) refreshAuth(client *common.IdsecClient) err
 //
 // Returns *IdsecSCAListTargetsResponse with Response, Total and NextToken on success, or error when:
 //   - req is nil
-//   - CSP is not one of AWS / AZURE
+//   - CSP is not one of AWS / AZURE / GCP
 //   - the service is not initialized
 //   - the network call fails
 //   - the response status is not 200
@@ -110,8 +110,8 @@ func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
 	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
-	if cspUpper != "" && !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure) {
-		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
+	if cspUpper != "" && !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure, scamodels.CSPGCP) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure, scamodels.CSPGCP)
 	}
 	if req.All && cspUpper != "" {
 		return nil, scacommon.ErrCSPAllConflict()
@@ -128,7 +128,7 @@ func (s *IdsecSCACloudAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 func (s *IdsecSCACloudAccessService) ListTargetsAllCSPs(req *scamodels.IdsecSCAListTargetsRequest) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) {
 	combined := &cloudaccessmodels.IdsecSCAListTargetsResponse{}
 
-	for _, csp := range scamodels.ValidListTargetsCSPs {
+	for _, csp := range scamodels.ValidCloudAccessCSPs {
 		resp, err := s.listAllTargetsForCSP(req, csp)
 		if err != nil {
 			if combined.Errors == nil {
@@ -224,7 +224,7 @@ func (s *IdsecSCACloudAccessService) listTargetsForCSP(req *scamodels.IdsecSCALi
 //
 // Returns *IdsecSCACloudAccessElevateResponse on success or an error when:
 //   - req is nil, CSP is empty, WorkspaceID is empty, or RoleIDs is empty
-//   - CSP is not one of AWS / AZURE
+//   - CSP is not one of AWS / AZURE / GCP
 //   - the network call fails or the response status is not 200
 //   - JSON decoding fails
 func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest) (*cloudaccessmodels.IdsecSCACloudAccessElevateResponse, error) { //nolint:revive
@@ -233,10 +233,10 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 	}
 	cspUpper := strings.ToUpper(strings.TrimSpace(req.CSP))
 	if cspUpper == "" {
-		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAWS, scamodels.CSPAzure)
+		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAWS, scamodels.CSPAzure, scamodels.CSPGCP)
 	}
-	if !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure) {
-		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure)
+	if !scacommon.IsSupportedCSP(cspUpper, scamodels.CSPAWS, scamodels.CSPAzure, scamodels.CSPGCP) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAWS, scamodels.CSPAzure, scamodels.CSPGCP)
 	}
 	if strings.TrimSpace(req.WorkspaceID) == "" {
 		return nil, fmt.Errorf("workspaceId cannot be empty")
@@ -257,7 +257,7 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca cloudaccess service not initialized")
 	}
-	s.Logger.Info("Calling SCA Elevate API for CSP [%s] workspaceId [%s]", cspUpper, req.WorkspaceID)
+	s.Logger.Info("Calling SCA Elevate API for CSP [%s]", cspUpper)
 
 	var targets []cloudaccessmodels.IdsecSCACloudAccessElevateTarget
 	for _, rid := range roleIDs {

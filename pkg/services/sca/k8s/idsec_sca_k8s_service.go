@@ -140,10 +140,14 @@ func (s *IdsecSCAK8sService) ListTargets(req *k8smodels.IdsecSCAk8sListClustersR
 	return s.listAllTargetsForCSP(req, strings.ToUpper(csp))
 }
 
+// validK8sCSPs lists the CSPs supported by this service's list-clusters operation.
+// GCP is intentionally excluded; it is only supported in the cloudaccess service.
+var validK8sCSPs = []string{scamodels.CSPAWS, scamodels.CSPAzure}
+
 func (s *IdsecSCAK8sService) ListTargetsAllCSPs(req *k8smodels.IdsecSCAk8sListClustersRequest) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
 	combined := &k8smodels.IdsecSCAk8sListClustersResponse{}
 
-	for _, csp := range scamodels.ValidListTargetsCSPs {
+	for _, csp := range validK8sCSPs {
 		resp, err := s.listAllTargetsForCSP(req, csp)
 		if err != nil {
 			if combined.Errors == nil {

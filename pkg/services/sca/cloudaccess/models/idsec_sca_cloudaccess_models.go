@@ -25,20 +25,21 @@ type IdsecSCARoleInfo struct {
 // Corresponds to the CommonEligibleTarget + CSP-specific allOf schemas in the API spec:
 //   - AWSAccountEligibleTarget    (workspaceType: ACCOUNT)
 //   - AWSOrgAccountEligibleTarget (workspaceType: ACCOUNT, organizationId present)
+//   - GCPEligibleTarget           (workspaceType: PROJECT | FOLDER | GCP_ORGANIZATION, organizationId required)
 //   - AzureEligibleTarget         (workspaceType: RESOURCE | RESOURCE_GROUP | SUBSCRIPTION | MANAGEMENT_GROUP | DIRECTORY)
 //
 // Fields:
 //   - WorkspaceID:     The ID of the workspace (required by API).
 //   - WorkspaceName:   The display name of the workspace (max 255 chars).
 //   - RoleInfo:        The role with which the user is eligible to access the workspace.
-//   - OrganizationID:  The ID of the containing organization/tenant (AWS org or Azure tenant).
+//   - OrganizationID:  The ID of the containing organization/tenant (AWS org, GCP org, or Azure tenant).
 //   - WorkspaceType:   The type of the workspace (enum varies per CSP).
 type IdsecSCAEligibleTarget struct {
 	WorkspaceID    string           `json:"workspaceId" mapstructure:"workspaceId" flag:"workspace-id" desc:"The ID of the workspace"`
 	WorkspaceName  string           `json:"workspaceName,omitempty" mapstructure:"workspaceName" flag:"workspace-name" desc:"The display name of the workspace"`
 	RoleInfo       IdsecSCARoleInfo `json:"role" mapstructure:"roleInfo" flag:"role-info" desc:"The role with which you are eligible to access the workspace"`
-	OrganizationID string           `json:"organizationId,omitempty" mapstructure:"organizationId" flag:"organization-id" desc:"The ID of the organization or tenant that contains the workspace (AWS org ID | Azure Entra tenant ID)"`
-	WorkspaceType  string           `json:"workspaceType,omitempty" mapstructure:"workspaceType" flag:"workspace-type" desc:"The type of the workspace (AWS: ACCOUNT | AZURE: RESOURCE, RESOURCE_GROUP, SUBSCRIPTION, MANAGEMENT_GROUP, DIRECTORY)"`
+	OrganizationID string           `json:"organizationId,omitempty" mapstructure:"organizationId" flag:"organization-id" desc:"The ID of the organization or tenant that contains the workspace (AWS org ID | GCP org ID | Azure Entra tenant ID)"`
+	WorkspaceType  string           `json:"workspaceType,omitempty" mapstructure:"workspaceType" flag:"workspace-type" desc:"The type of the workspace (AWS: ACCOUNT | GCP: PROJECT, FOLDER, GCP_ORGANIZATION | AZURE: RESOURCE, RESOURCE_GROUP, SUBSCRIPTION, MANAGEMENT_GROUP, DIRECTORY)"`
 }
 
 // IdsecSCAListTargetsResponse is the response from GET /access/{csp}/eligibility.
@@ -82,10 +83,11 @@ type IdsecSCACloudAccessElevateTarget struct {
 //   - Standalone AWS account: max 1 target.
 //   - AWS account in an org: max 1 target.
 //   - Azure subscriptions/resource groups/resources: max 5.
+//   - GCP projects/folders/organizations: max 5.
 //
 // OrganizationID is not relevant for standalone AWS accounts.
 type IdsecSCACloudAccessElevateRequest struct {
-	CSP            string                             `json:"csp" mapstructure:"csp" flag:"csp" desc:"The cloud provider that hosts the workspaces for which access is required. Enum: AWS | AZURE"`
+	CSP            string                             `json:"csp" mapstructure:"csp" flag:"csp" desc:"The cloud provider that hosts the workspaces for which access is required. Enum: AWS | AZURE | GCP"`
 	Targets        []IdsecSCACloudAccessElevateTarget `json:"targets" mapstructure:"targets" flag:"targets" desc:"The targets (workspace + role) for which access is being requested. Min: 1, Max: 5 (exact limit varies by CSP and configuration)"`
 	OrganizationID string                             `json:"organizationId,omitempty" mapstructure:"organizationId,omitempty" flag:"organization-id" desc:"The ID of the organization that contains the workspaces. All specified workspaces and roles must be part of this organization. Not relevant for standalone AWS accounts."`
 }
@@ -121,8 +123,8 @@ type IdsecSCACloudAccessElevateResponse struct {
 // Registered in ActionToSchemaMap so the framework generates cobra flags automatically.
 // The framework maps "elevate" → Elevate() by naming convention (same as list-targets → ListTargets()).
 type IdsecSCACloudAccessElevateActionRequest struct {
-	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS, AZURE)"`
-	WorkspaceID    string `json:"workspace_id" mapstructure:"workspace_id" validate:"required" flag:"workspace-id" desc:"The ID of the workspace (e.g. AWS account ID, Azure subscription ID)"`
+	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS, AZURE, GCP)"`
+	WorkspaceID    string `json:"workspace_id" mapstructure:"workspace_id" validate:"required" flag:"workspace-id" desc:"The ID of the workspace (e.g. AWS account ID, Azure subscription ID, GCP project/folder/org ID)"`
 	RoleIDs        string `json:"roleIds" mapstructure:"roleIds" validate:"required" flag:"roleIds" desc:"Comma-separated role IDs to elevate with (max 5)"`
-	OrganizationID string `json:"organization_id" mapstructure:"organization_id" flag:"organization-id" desc:"The ID of the organization/tenant. Required for Azure and AWS org accounts."`
+	OrganizationID string `json:"organization_id" mapstructure:"organization_id" flag:"organization-id" desc:"The ID of the organization/tenant. Required for Azure, GCP, and AWS org accounts."`
 }

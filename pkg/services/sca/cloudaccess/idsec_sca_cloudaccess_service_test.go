@@ -52,6 +52,7 @@ func TestListTargets_validation_table(t *testing.T) {
 		// All supported CSPs still fail here because the service is uninitialized (no HTTP client).
 		{name: "uninitialized_aws", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"}},
 		{name: "uninitialized_azure", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"}},
+		{name: "uninitialized_gcp", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "GCP"}},
 		{name: "uninitialized_aws_with_workspace_id", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", WorkspaceID: "ws-123"}},
 		{name: "uninitialized_aws_with_limit", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS", Limit: 10}},
 		{name: "uninitialized_azure_with_next_token", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE", NextToken: "tok123"}},
@@ -117,6 +118,69 @@ func TestListTargets_Success_AWS(t *testing.T) {
 	require.Equal(t, "ACCOUNT", target.WorkspaceType)
 }
 
+// TestListTargets_Success_GCP verifies a well-formed 200 response for GCP CSP is decoded correctly,
+// covering PROJECT, FOLDER, and GCP_ORGANIZATION workspace types with a required organizationId.
+func TestListTargets_Success_GCP(t *testing.T) {
+	responseJSON := `{
+		"response": [
+			{
+				"workspaceId": "gcp-proj-001",
+				"workspaceName": "My GCP Project",
+				"role": {"id": "role-gcp-1", "name": "Viewer"},
+				"organizationId": "gcp-org-123",
+				"workspaceType": "PROJECT"
+			},
+			{
+				"workspaceId": "gcp-folder-001",
+				"workspaceName": "My GCP Folder",
+				"role": {"id": "role-gcp-2", "name": "Editor"},
+				"organizationId": "gcp-org-123",
+				"workspaceType": "FOLDER"
+			},
+			{
+				"workspaceId": "gcp-org-001",
+				"workspaceName": "My GCP Organization",
+				"role": {"id": "role-gcp-3", "name": "Admin"},
+				"organizationId": "gcp-org-123",
+				"workspaceType": "GCP_ORGANIZATION"
+			}
+		],
+		"total": 3,
+		"nextToken": ""
+	}`
+
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "GCP"})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 3, resp.Total)
+	require.Len(t, resp.Response, 3)
+
+	project := resp.Response[0]
+	require.Equal(t, "gcp-proj-001", project.WorkspaceID)
+	require.Equal(t, "My GCP Project", project.WorkspaceName)
+	require.Equal(t, "gcp-org-123", project.OrganizationID)
+	require.Equal(t, "PROJECT", project.WorkspaceType)
+
+	folder := resp.Response[1]
+	require.Equal(t, "gcp-folder-001", folder.WorkspaceID)
+	require.Equal(t, "FOLDER", folder.WorkspaceType)
+
+	org := resp.Response[2]
+	require.Equal(t, "gcp-org-001", org.WorkspaceID)
+	require.Equal(t, "GCP_ORGANIZATION", org.WorkspaceType)
+}
+
 // TestListTargets_Success_MultipleTargets verifies multiple targets are decoded correctly.
 func TestListTargets_Success_MultipleTargets(t *testing.T) {
 	responseJSON := `{
@@ -165,7 +229,7 @@ func TestListTargets_EmptyResponse(t *testing.T) {
 	require.Empty(t, resp.Response)
 }
 
-func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
+func TestListTargets_AllFlag_AggregatesAllCSPs(t *testing.T) {
 	var capturedPaths []string
 	var capturedQueries []string
 	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
@@ -227,6 +291,20 @@ func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
 				capturedQueries = append(capturedQueries, r.URL.RawQuery)
 			},
 		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/api/access/GCP/eligibility"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "gcp-proj-001", "workspaceName": "GCP Project", "organizationId": "gcp-org-1", "workspaceType": "PROJECT"}],
+				"total": 1
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
 	})
 	defer cleanup()
 
@@ -235,16 +313,23 @@ func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, 4, resp.Total)
+	require.Equal(t, 5, resp.Total)
 	require.Empty(t, resp.Response)
-	require.Len(t, resp.Responses, 2)
+	require.Len(t, resp.Responses, 3)
 	require.Len(t, resp.Responses["aws"].Response, 2)
 	require.Equal(t, 2, resp.Responses["aws"].Total)
 	require.Len(t, resp.Responses["azure"].Response, 2)
 	require.Equal(t, 2, resp.Responses["azure"].Total)
+	require.Len(t, resp.Responses["gcp"].Response, 1)
+	require.Equal(t, 1, resp.Responses["gcp"].Total)
+	require.Equal(t, "PROJECT", resp.Responses["gcp"].Response[0].WorkspaceType)
 	require.Empty(t, resp.NextToken)
 	require.Empty(t, resp.Errors)
-	require.ElementsMatch(t, []string{"/api/access/AWS/eligibility", "/api/access/AWS/eligibility", "/api/access/AZURE/eligibility", "/api/access/AZURE/eligibility"}, capturedPaths)
+	require.ElementsMatch(t, []string{
+		"/api/access/AWS/eligibility", "/api/access/AWS/eligibility",
+		"/api/access/AZURE/eligibility", "/api/access/AZURE/eligibility",
+		"/api/access/GCP/eligibility",
+	}, capturedPaths)
 	require.Contains(t, capturedQueries, "nextToken=aws-page-2")
 	require.Contains(t, capturedQueries, "nextToken=azure-page-2")
 
@@ -252,6 +337,7 @@ func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(output), `"aws"`)
 	require.Contains(t, string(output), `"azure"`)
+	require.Contains(t, string(output), `"gcp"`)
 	require.NotContains(t, string(output), `"responses"`)
 	require.NotContains(t, string(output), `"response":null`)
 }
@@ -263,12 +349,16 @@ func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T
 		awsResponseBody     string
 		azureStatus         int
 		azureResponseBody   string
+		gcpStatus           int
+		gcpResponseBody     string
+		expectedTotal       int
+		expectedPrimaryCSP  string
 		expectedWorkspaceID string
 		expectedErrorCSP    string
-		expectedSuccessCSP  string
+		expectedSuccessCSPs []string
 	}{
 		{
-			name:            "aws_fails_azure_succeeds",
+			name:            "aws_fails_azure_succeeds_gcp_succeeds",
 			awsStatus:       http.StatusInternalServerError,
 			awsResponseBody: `{"message": "aws unavailable"}`,
 			azureStatus:     http.StatusOK,
@@ -276,12 +366,16 @@ func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T
 				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "SUBSCRIPTION"}],
 				"total": 1
 			}`,
+			gcpStatus:           http.StatusOK,
+			gcpResponseBody:     `{"response": [], "total": 0}`,
+			expectedTotal:       1,
+			expectedPrimaryCSP:  "azure",
 			expectedWorkspaceID: "azure-001",
 			expectedErrorCSP:    "aws",
-			expectedSuccessCSP:  "azure",
+			expectedSuccessCSPs: []string{"azure", "gcp"},
 		},
 		{
-			name:      "azure_fails_aws_succeeds",
+			name:      "azure_fails_aws_succeeds_gcp_succeeds",
 			awsStatus: http.StatusOK,
 			awsResponseBody: `{
 				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "ACCOUNT"}],
@@ -289,9 +383,33 @@ func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T
 			}`,
 			azureStatus:         http.StatusInternalServerError,
 			azureResponseBody:   `{"message": "azure unavailable"}`,
+			gcpStatus:           http.StatusOK,
+			gcpResponseBody:     `{"response": [], "total": 0}`,
+			expectedTotal:       1,
+			expectedPrimaryCSP:  "aws",
 			expectedWorkspaceID: "aws-001",
 			expectedErrorCSP:    "azure",
-			expectedSuccessCSP:  "aws",
+			expectedSuccessCSPs: []string{"aws", "gcp"},
+		},
+		{
+			name:      "gcp_fails_aws_succeeds_azure_succeeds",
+			awsStatus: http.StatusOK,
+			awsResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "ACCOUNT"}],
+				"total": 1
+			}`,
+			azureStatus: http.StatusOK,
+			azureResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "SUBSCRIPTION"}],
+				"total": 1
+			}`,
+			gcpStatus:           http.StatusInternalServerError,
+			gcpResponseBody:     `{"message": "gcp unavailable"}`,
+			expectedTotal:       2,
+			expectedPrimaryCSP:  "aws",
+			expectedWorkspaceID: "aws-001",
+			expectedErrorCSP:    "gcp",
+			expectedSuccessCSPs: []string{"aws", "azure"},
 		},
 	}
 
@@ -309,6 +427,11 @@ func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T
 					StatusCode:   tt.azureStatus,
 					ResponseBody: tt.azureResponseBody,
 				},
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == "/api/access/GCP/eligibility" },
+					StatusCode:   tt.gcpStatus,
+					ResponseBody: tt.gcpResponseBody,
+				},
 			})
 			defer cleanup()
 
@@ -317,18 +440,19 @@ func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T
 
 			require.NoError(t, err)
 			require.NotNil(t, resp)
-			require.Equal(t, 1, resp.Total)
+			require.Equal(t, tt.expectedTotal, resp.Total)
 			require.Empty(t, resp.Response)
-			require.Len(t, resp.Responses, 1)
-			require.Len(t, resp.Responses[tt.expectedSuccessCSP].Response, 1)
-			require.Equal(t, tt.expectedWorkspaceID, resp.Responses[tt.expectedSuccessCSP].Response[0].WorkspaceID)
+			require.Len(t, resp.Responses, len(tt.expectedSuccessCSPs))
+			require.Equal(t, tt.expectedWorkspaceID, resp.Responses[tt.expectedPrimaryCSP].Response[0].WorkspaceID)
 			require.Len(t, resp.Errors, 1)
 			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "API call failed: ")
 			require.Contains(t, resp.Errors[tt.expectedErrorCSP], "500")
 
 			output, err := json.Marshal(resp)
 			require.NoError(t, err)
-			require.Contains(t, string(output), `"`+tt.expectedSuccessCSP+`"`)
+			for _, csp := range tt.expectedSuccessCSPs {
+				require.Contains(t, string(output), `"`+csp+`"`)
+			}
 			require.Contains(t, string(output), `"`+tt.expectedErrorCSP+`"`)
 			require.NotContains(t, string(output), `"responses"`)
 			require.NotContains(t, string(output), `"errors"`)
@@ -354,11 +478,13 @@ func TestListTargets_EmptyCSP_AllCSPsFailReturnsErrorsInResponse(t *testing.T) {
 	require.Empty(t, resp.Response)
 	require.Empty(t, resp.Responses)
 	require.Equal(t, 0, resp.Total)
-	require.Len(t, resp.Errors, 2)
+	require.Len(t, resp.Errors, 3)
 	require.Contains(t, resp.Errors["aws"], "API call failed: ")
 	require.Contains(t, resp.Errors["aws"], "500")
 	require.Contains(t, resp.Errors["azure"], "API call failed: ")
 	require.Contains(t, resp.Errors["azure"], "500")
+	require.Contains(t, resp.Errors["gcp"], "API call failed: ")
+	require.Contains(t, resp.Errors["gcp"], "500")
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +502,8 @@ func TestListTargets_URLPath(t *testing.T) {
 		{inputCSP: "aws", expectedPath: "/api/access/AWS/eligibility"},
 		{inputCSP: "AZURE", expectedPath: "/api/access/AZURE/eligibility"},
 		{inputCSP: "azure", expectedPath: "/api/access/AZURE/eligibility"},
+		{inputCSP: "GCP", expectedPath: "/api/access/GCP/eligibility"},
+		{inputCSP: "gcp", expectedPath: "/api/access/GCP/eligibility"},
 	}
 
 	for _, tt := range tests {
@@ -582,7 +710,7 @@ func TestListTargets_UnsupportedCSP_ErrorMessage(t *testing.T) {
 	}
 }
 
-// TestListTargets_AllSupportedCSPs_HitCorrectPath verifies AWS and AZURE each
+// TestListTargets_AllSupportedCSPs_HitCorrectPath verifies AWS, AZURE and GCP each
 // produce a distinct and correct URL path when the service is initialized.
 func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 	tests := []struct {
@@ -591,6 +719,8 @@ func TestListTargets_AllSupportedCSPs_HitCorrectPath(t *testing.T) {
 	}{
 		{"AWS", "/api/access/AWS/eligibility"},
 		{"AZURE", "/api/access/AZURE/eligibility"},
+		{"GCP", "/api/access/GCP/eligibility"},
+		{"gcp", "/api/access/GCP/eligibility"},
 	}
 
 	for _, tt := range tests {
@@ -643,14 +773,14 @@ func TestElevate_validation_empty_csp(t *testing.T) {
 
 func TestElevate_validation_unsupported_csp(t *testing.T) {
 	svc := &IdsecSCACloudAccessService{}
-	for _, csp := range []string{"GCP", "ibm", "oracle"} {
+	for _, csp := range []string{"ibm", "oracle"} {
 		_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
 			CSP:         csp,
 			WorkspaceID: "ws-1",
 			RoleIDs:     "role-1",
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "Supported providers are: AWS, AZURE")
+		require.Contains(t, err.Error(), "Supported providers are: AWS, AZURE, GCP")
 	}
 }
 
@@ -1033,4 +1163,164 @@ func TestElevate_ErrorPropagation(t *testing.T) {
 		})
 		return err
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Elevate — GCP tests
+// ---------------------------------------------------------------------------
+
+func TestElevate_Success_GCP(t *testing.T) {
+	responseJSON := `{
+		"response": {
+			"organizationId": "gcp-org-123",
+			"csp": "GCP",
+			"results": [
+				{
+					"workspaceId": "gcp-project-001",
+					"roleId": "roles/viewer",
+					"sessionId": "gcp-session-abc",
+					"accessCredentials": "gcp-access-token"
+				}
+			]
+		}
+	}`
+
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	resp, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:            "GCP",
+		WorkspaceID:    "gcp-project-001",
+		RoleIDs:        "roles/viewer",
+		OrganizationID: "gcp-org-123",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "gcp-org-123", resp.Response.OrganizationID)
+	require.Equal(t, "GCP", resp.Response.CSP)
+	require.Len(t, resp.Response.Results, 1)
+	result := resp.Response.Results[0]
+	require.Equal(t, "gcp-project-001", result.WorkspaceID)
+	require.Equal(t, "roles/viewer", result.RoleID)
+	require.Equal(t, "gcp-session-abc", result.SessionID)
+	require.Equal(t, "gcp-access-token", result.AccessCredentials)
+	require.Nil(t, result.ErrorInfo)
+}
+
+func TestElevate_URL_Method_GCP(t *testing.T) {
+	var capturedPath, capturedMethod string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"response":{"organizationId":"","csp":"GCP","results":[]}}`,
+			OnRequest: func(r *http.Request) {
+				capturedPath = r.URL.Path
+				capturedMethod = r.Method
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:         "GCP",
+		WorkspaceID: "gcp-project-001",
+		RoleIDs:     "roles/viewer",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "/api/access/elevate", capturedPath)
+	require.Equal(t, http.MethodPost, capturedMethod)
+}
+
+func TestElevate_RequestBody_GCP(t *testing.T) {
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"response":{"organizationId":"gcp-org-123","csp":"GCP","results":[]}}`,
+			OnRequest: func(r *http.Request) {
+				capturedBody = make([]byte, r.ContentLength)
+				_, _ = r.Body.Read(capturedBody)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:            "GCP",
+		WorkspaceID:    "gcp-project-001",
+		RoleIDs:        "roles/viewer",
+		OrganizationID: "gcp-org-123",
+	})
+
+	require.NoError(t, err)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "GCP", body["csp"])
+	require.Equal(t, "gcp-org-123", body["organizationId"])
+	targets, ok := body["targets"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, targets, 1)
+	target := targets[0].(map[string]interface{})
+	require.Equal(t, "gcp-project-001", target["workspaceId"])
+	require.Equal(t, "roles/viewer", target["roleId"])
+}
+
+func TestElevate_CommaSeparatedRoleIDs_GCP(t *testing.T) {
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"response":{"organizationId":"gcp-org-123","csp":"GCP","results":[]}}`,
+			OnRequest: func(r *http.Request) {
+				capturedBody = make([]byte, r.ContentLength)
+				_, _ = r.Body.Read(capturedBody)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupCloudAccessService(client)
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:            "GCP",
+		WorkspaceID:    "gcp-project-001",
+		RoleIDs:        "roles/viewer,roles/editor,roles/owner",
+		OrganizationID: "gcp-org-123",
+	})
+
+	require.NoError(t, err)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	targets, ok := body["targets"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, targets, 3)
+	for i, expectedRole := range []string{"roles/viewer", "roles/editor", "roles/owner"} {
+		target := targets[i].(map[string]interface{})
+		require.Equal(t, "gcp-project-001", target["workspaceId"])
+		require.Equal(t, expectedRole, target["roleId"])
+	}
+}
+
+func TestElevate_ExceedsMaxRoleIDs_GCP(t *testing.T) {
+	svc := &IdsecSCACloudAccessService{}
+	_, err := svc.Elevate(&cloudaccessmodels.IdsecSCACloudAccessElevateActionRequest{
+		CSP:         "GCP",
+		WorkspaceID: "gcp-project-001",
+		RoleIDs:     "r1,r2,r3,r4,r5,r6",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maximum 5 role IDs allowed for GCP")
 }
