@@ -168,6 +168,14 @@ func (s *IdsecSCAK8sService) ListTargetsAllCSPs(req *k8smodels.IdsecSCAk8sListCl
 }
 
 func (s *IdsecSCAK8sService) listAllTargetsForCSP(req *k8smodels.IdsecSCAk8sListClustersRequest, cspUpper string) (*k8smodels.IdsecSCAk8sListClustersResponse, error) {
+	// When the caller explicitly requests a specific page (via limit or nextToken),
+	// return that single page as-is instead of auto-paginating. This honors --limit
+	// (e.g. --limit 1 yields one target per CSP) and preserves nextToken so callers
+	// can page manually. Without these flags, all pages are fetched (default behavior).
+	if req.Limit > 0 || req.NextToken != "" {
+		return s.listTargetsForCSP(req, cspUpper)
+	}
+
 	all := &k8smodels.IdsecSCAk8sListClustersResponse{}
 	nextToken := req.NextToken
 	totalSet := false
@@ -358,6 +366,7 @@ func (s *IdsecSCAK8sService) Elevate(req *k8smodels.IdsecSCAK8sElevateKubectlReq
 		CSP:            cspUpper,
 		Targets:        []k8smodels.IdsecSCAK8sElevateTarget{target},
 		OrganizationID: req.OrganizationID,
+		SessionID:      req.SessionID, // top-level; used by server to refresh the EKS token within an existing session
 	}
 
 	response, err := s.postWithCLISignature(elevateRelURL, apiReq)
@@ -411,24 +420,27 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 // short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
 // (DPA-K8S). Shared by AWS and Azure proxy providers.
 //
-// When ctx.K8sToken is set (Azure / AWS IDC), it is encrypted as JWE with
-// JSON keys "k8s_token" and "root_ca" (from ctx.RootCA) and sent as
-// jwe_extension_value. root_ca is required whenever K8sToken is set.
-// IAM-role AWS proxy leaves K8sToken empty.
+// JWE is built when any of ctx.K8sToken or ctx.ClusterToken is non-empty.
+// All three payload fields are independent: "k8s_token", "root_ca", and
+// "cluster_token" are each included when non-empty. root_ca is sent on every
+// flow where it is available — including AWS IAM proxy — aligning with the
+// future removal of the internal SIA proxy API path.
 func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClusterContext) (*k8smodels.IdsecSCAK8sExecCredential, error) {
 	diagnostics := clusterDiagnostics(ctx)
 	k8sToken := ""
 	rootCA := ""
+	clusterToken := ""
 	if ctx != nil {
 		k8sToken = strings.TrimSpace(ctx.K8sToken)
 		rootCA = strings.TrimSpace(ctx.RootCA)
+		clusterToken = strings.TrimSpace(ctx.ClusterToken)
 	}
-	jweSet := k8sToken != ""
+	jweSet := k8sToken != "" || clusterToken != ""
 	kubectlLoginDiagnostic(diagnostics,
-		"generateDPAProxyExecCredential: POST %s service=%s proxy_jwe=%v k8s_token_len=%d root_ca_len=%d",
-		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet, len(k8sToken), len(rootCA))
+		"generateDPAProxyExecCredential: POST %s service=%s proxy_jwe=%v k8s_token_len=%d root_ca_len=%d cluster_token_len=%d",
+		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet, len(k8sToken), len(rootCA), len(clusterToken))
 
-	if jweSet && rootCA == "" {
+	if k8sToken != "" && rootCA == "" {
 		return nil, fmt.Errorf("proxy client certificate generation failed: root_ca is required when k8s_token is set")
 	}
 
@@ -436,8 +448,8 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 		return nil, fmt.Errorf("proxy client certificate generation failed: dpa client not initialized")
 	}
 
-	// Azure / AWS IDC: fetch the DPA SSO public key and encrypt before /acquire so
-	// plaintext k8s token and cluster CA never travel over the wire.
+	// Fetch the DPA SSO public key and encrypt before /acquire so plaintext
+	// tokens never travel over the wire.
 	var jweExtensionValue string
 	if jweSet {
 		kid := dpaSsoJWKSKeyID()
@@ -445,13 +457,14 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 		if err != nil {
 			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to fetch DPA JWKS (kid=%s): %w", kid, err)
 		}
-		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA)
+		jweEncryptStart := time.Now()
+		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA, clusterToken)
 		if err != nil {
 			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to encrypt extension: %w", err)
 		}
 		kubectlLoginDiagnostic(diagnostics,
-			"proxy JWE encrypted (kid=%s encrypted_jwe_len=%d k8s_token_len=%d root_ca_len=%d)",
-			kid, len(jweExtensionValue), len(k8sToken), len(rootCA))
+			"proxy JWE encrypted in %s (kid=%s encrypted_jwe_len=%d k8s_token_len=%d root_ca_len=%d cluster_token_len=%d)",
+			time.Since(jweEncryptStart).Round(time.Millisecond), kid, len(jweExtensionValue), len(k8sToken), len(rootCA), len(clusterToken))
 	}
 
 	body := map[string]interface{}{
@@ -462,6 +475,7 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 		body["jwe_extension_value"] = jweExtensionValue
 	}
 
+	acquireStart := time.Now()
 	response, err := s.dpaISP.ISPClient().Post(context.Background(), acquireDpaSsoTokenURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("proxy client certificate generation failed: %w", err)
@@ -494,8 +508,8 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 	}
 
 	kubectlLoginDiagnostic(diagnostics,
-		"DPA SSO acquire returned cert=%d bytes key=%d bytes expires_at=%s — building ExecCredential",
-		len(certPEM), len(keyPEM), expiresAt.UTC().Format(time.RFC3339))
+		"DPA SSO acquire completed in %s: cert=%d bytes key=%d bytes expires_at=%s — building ExecCredential",
+		time.Since(acquireStart).Round(time.Millisecond), len(certPEM), len(keyPEM), expiresAt.UTC().Format(time.RFC3339))
 
 	// Bake the early-refresh buffer into status.expirationTimestamp here, the one
 	// place that knows the raw DPA expiry; downstream (kubectl cache, replay) treats

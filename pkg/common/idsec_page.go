@@ -21,9 +21,6 @@ package common
 //
 // Fields:
 //   - Items: Slice of pointers to items of type T, representing the paginated data
-//   - Err: When non-nil on a page emitted from a list channel, indicates pagination stopped
-//     with a failure after any prior pages (terminal error page). Omitted from JSON and
-//     mapstructure decoding for API payloads.
 //
 // Example:
 //
@@ -45,5 +42,4 @@ package common
 type IdsecPage[T any] struct {
 	Items             []*T   `json:"items" mapstructure:"items"`
 	ContinuationToken string `json:"continuation_token,omitempty" mapstructure:"continuation_token,omitempty"`
-	Err               error  `json:"-" mapstructure:"-"`
 }

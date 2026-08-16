@@ -51,7 +51,7 @@ func serviceUserProfile(config *framework.ISPProviderConfig, profileName string)
 		AuthMethodSettings: &authmodels.IdentityServiceUserIdsecAuthMethodSettings{
 			IdentityURL:                      config.IdentityURL,
 			IdentityTenantSubdomain:          config.IdentityTenantSubdomain,
-			IdentityAuthorizationApplication: "",
+			IdentityAuthorizationApplication: "__idaptive_cybr_user_oidc",
 		},
 	}
 	return &models.IdsecProfile{

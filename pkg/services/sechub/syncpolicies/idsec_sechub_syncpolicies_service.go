@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	syncpoliciesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/syncpolicies/models"
 )
@@ -88,36 +88,27 @@ func (s *IdsecSecHubSyncPoliciesService) getSyncPoliciesWithFilters(
 	if filter != "" {
 		query["filter"] = filter
 	}
-	results := make(chan *IdsecSecHubSyncPoliciesPage)
-	go func() {
-		defer close(results)
-		for {
-			response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
-			if err != nil {
-				s.Logger.Error("Failed to list Sync Policies: %v", err)
-				return
-			}
-			page, err := validateAndDecodeHTTPResponse[syncpoliciesmodels.IdsecSecHubSyncPoliciesListResponse](response, http.StatusOK, "failed to list sync policies")
-			if err != nil {
-				s.Logger.Error("Failed to list Sync Policies: %v", err)
-				return
-			}
-			results <- &IdsecSecHubSyncPoliciesPage{Items: page.Policies}
-			if page.NextLink != "" {
-				nextQuery, _ := url.Parse(page.NextLink)
-				queryValues := nextQuery.Query()
-				query = make(map[string]string)
-				for key, values := range queryValues {
-					if len(values) > 0 {
-						query[key] = values[0]
-					}
+	return pagination.ListAllPaginated[syncpoliciesmodels.IdsecSecHubPolicy](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), sechubURL, query),
+		pagination.ListPaginatedConfig[syncpoliciesmodels.IdsecSecHubPolicy]{
+			ResourceName: "sync policies",
+			Decode: func(resultMap map[string]interface{}) ([]*syncpoliciesmodels.IdsecSecHubPolicy, error) {
+				items, err := pagination.ExtractItemsFromResult(resultMap, "sync policies", "policies")
+				if err != nil {
+					return nil, err
 				}
-			} else {
-				break
-			}
-		}
-	}()
-	return results, nil
+				var policies []*syncpoliciesmodels.IdsecSecHubPolicy
+				if err := mapstructure.Decode(items, &policies); err != nil {
+					return nil, fmt.Errorf("failed to decode sync policies: %w", err)
+				}
+				return policies, nil
+			},
+			// NextQuery is left nil: the response's "next_link" field is picked up by the
+			// engine's default OData handling (NextLinkFromResultMap + QueryFromNextLink),
+			// which is equivalent to the previous inline url.Parse(page.NextLink) logic.
+		},
+	)
 }
 
 // closeResponseBody closes an HTTP response body and logs a warning if the close fails.

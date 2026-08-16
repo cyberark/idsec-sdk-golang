@@ -5,10 +5,13 @@
 package api
 
 import (
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/access"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/access/assets"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/connectors"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolcomponents"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolidentifiers"

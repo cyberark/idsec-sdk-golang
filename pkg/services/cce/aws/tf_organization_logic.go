@@ -163,7 +163,9 @@ func (s *IdsecCCEAWSService) tfDeleteOrganization(input *awsmodels.TfIdsecCCEAWS
 	s.Logger.Info("Deleting AWS organization with ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathOrganizationGetOrDeleteURL, input.ID)
-	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
+	// Explicitly set the onboarding type to terraform_provider so the API enforces that this organization was onboarded via Terraform.
+	params := map[string][]string{"onboarding_type": {ccemodels.TerraformProvider}}
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, params)
 	if err != nil {
 		return err
 	}
@@ -299,6 +301,8 @@ func (s *IdsecCCEAWSService) addOrganizationServices(input *awsmodels.TfIdsecCCE
 	// Create request body with services array
 	requestBody := map[string]interface{}{
 		"services": input.Services,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this organization was onboarded via Terraform.
+		"onboardingType": ccemodels.TerraformProvider,
 	}
 
 	// Add serviceParameters if provided
@@ -331,6 +335,8 @@ func (s *IdsecCCEAWSService) deleteOrganizationServices(input *awsmodels.TfIdsec
 	// The API expects: services_names=dpa&services_names=sca
 	params := map[string][]string{
 		"services_names": input.ServiceNames,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this organization was onboarded via Terraform.
+		"onboarding_type": {ccemodels.TerraformProvider},
 	}
 
 	s.Logger.Info("Deleting services: %v from organization [%s]", input.ServiceNames, input.ID)

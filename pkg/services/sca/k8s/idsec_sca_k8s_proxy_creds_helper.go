@@ -56,6 +56,7 @@ func (s *IdsecSCAK8sService) fetchDPASSOPublicKey(kid string, diagnostics bool) 
 
 	kubectlLoginDiagnostic(diagnostics, "fetching DPA SSO public key GET %s kid=%q", acquireDpaJwksURL, kid)
 
+	jwksFetchStart := time.Now()
 	params := map[string]string{"kid": kid}
 	resp, err := s.dpaISP.ISPClient().Get(context.Background(), acquireDpaJwksURL, params)
 	if err != nil {
@@ -101,20 +102,25 @@ func (s *IdsecSCAK8sService) fetchDPASSOPublicKey(kid string, diagnostics bool) 
 	}
 
 	kubectlLoginDiagnostic(diagnostics,
-		"DPA SSO public key API response: keys=%d kid=%q n=%d bytes",
-		len(jwksResp.Keys), selected.KeyID, len(pub.N.Bytes()))
+		"DPA SSO public key fetch completed in %s: keys=%d kid=%q n=%d bytes",
+		time.Since(jwksFetchStart).Round(time.Millisecond), len(jwksResp.Keys), selected.KeyID, len(pub.N.Bytes()))
 	return pub, nil
 }
 
-// encryptProxyJWEExtension encrypts the proxy JWE plaintext as a compact JWE
-// (RSA-OAEP-256 key-wrap, A256GCM content encryption). Plaintext is always
-// {"k8s_token": <token>} and, when rootCA is non-empty, also "root_ca" (cluster
-// CA for SIA proxy → cluster mTLS). kid is set in the JWE header so SSO can
-// select the matching private key.
-func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA string) (string, error) {
-	payloadMap := map[string]string{"k8s_token": k8sToken}
+// encryptProxyJWEExtension builds a compact JWE (RSA-OAEP-256 / A256GCM).
+// Payload fields included when non-empty: "k8s_token", "root_ca", "cluster_token".
+// All three are independent — root_ca is sent on every flow where it is available,
+// including AWS IAM proxy (aligning with the future removal of the internal API path).
+func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA, clusterToken string) (string, error) {
+	payloadMap := map[string]string{}
+	if k8sToken != "" {
+		payloadMap["k8s_token"] = k8sToken
+	}
 	if ca := strings.TrimSpace(rootCA); ca != "" {
 		payloadMap["root_ca"] = ca
+	}
+	if ct := strings.TrimSpace(clusterToken); ct != "" {
+		payloadMap["cluster_token"] = ct
 	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {

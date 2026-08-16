@@ -121,7 +121,7 @@ func newISPProvider() *AuthProvider {
 				authMethodSettings = &authmodels.IdentityServiceUserIdsecAuthMethodSettings{
 					IdentityURL:                      cfg.IdentityURL,
 					IdentityTenantSubdomain:          cfg.IdentityTenantSubdomain,
-					IdentityAuthorizationApplication: "",
+					IdentityAuthorizationApplication: "__idaptive_cybr_user_oidc",
 				}
 				t.Logf("ISP: Authenticating as %s using IdentityServiceUser method", cfg.Username)
 			default:

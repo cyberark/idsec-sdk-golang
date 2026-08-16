@@ -10,6 +10,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	filtersmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters/models"
 )
@@ -100,8 +101,23 @@ func (s *IdsecSecHubFiltersService) Get(getFilters *filtersmodels.IdsecSecHubGet
 	return &filter, nil
 }
 
+func decodeFiltersFromResultMap(resultMap map[string]interface{}) ([]*filtersmodels.IdsecSecHubFilter, error) {
+	items, err := pagination.ExtractItemsFromResult(resultMap, "Secret Store filters", "filters")
+	if err != nil {
+		return nil, err
+	}
+	var filters []*filtersmodels.IdsecSecHubFilter
+	if err := mapstructure.Decode(items, &filters); err != nil {
+		return nil, fmt.Errorf("failed to validate Secret Store filters: %w", err)
+	}
+	return filters, nil
+}
+
 // List retrieves the filters info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/punr36gz4tuqe-get-all-secrets-filters
+//
+// This endpoint is not OData-paginated: it returns every filter for the secret store in a
+// single response, so NextQuery always stops after the first page.
 func (s *IdsecSecHubFiltersService) List(getFilters *filtersmodels.IdsecSecHubGetFilters) (<-chan *IdsecSecHubFiltersPage, error) {
 	if getFilters.StoreID == "" {
 		s.Logger.Info("Setting Secret Store ID to default")
@@ -109,53 +125,17 @@ func (s *IdsecSecHubFiltersService) List(getFilters *filtersmodels.IdsecSecHubGe
 	}
 	s.Logger.Info("Getting filters")
 
-	results := make(chan *IdsecSecHubFiltersPage)
-	go func() {
-		defer close(results)
-		response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(sechubURL, getFilters.StoreID), nil)
-		if err != nil {
-			s.Logger.Error("Failed to list filters: %v", err)
-			return
-		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				common.GlobalLogger.Warning("Error closing response body")
-			}
-		}(response.Body)
-		if response.StatusCode != http.StatusOK {
-			s.Logger.Error("Failed to list Secret Store Filters - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-			return
-		}
-		result, err := common.DeserializeJSONSnake(response.Body)
-		if err != nil {
-			s.Logger.Error("Failed to decode response: %v", err)
-			return
-		}
-		resultMap := result.(map[string]interface{})
-		var filtersJSON []interface{}
-		if filters, ok := resultMap["filters"]; ok {
-			filtersJSON = filters.([]interface{})
-		} else {
-			s.Logger.Error("Failed to list Secret Store filters, unexpected result")
-			return
-		}
-		for i, filtersMember := range filtersJSON {
-			if filtersMemberMap, ok := filtersMember.(map[string]interface{}); ok {
-				if ID, ok := filtersMemberMap["id"]; ok {
-					filtersJSON[i].(map[string]interface{})["id"] = ID
-				}
-			}
-		}
-		var filters []*filtersmodels.IdsecSecHubFilter
-		if err := mapstructure.Decode(filtersJSON, &filters); err != nil {
-			s.Logger.Error("Failed to validate Secret Store filters: %v", err)
-			return
-		}
-
-		results <- &IdsecSecHubFiltersPage{Items: filters}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[filtersmodels.IdsecSecHubFilter](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), fmt.Sprintf(sechubURL, getFilters.StoreID), nil),
+		pagination.ListPaginatedConfig[filtersmodels.IdsecSecHubFilter]{
+			ResourceName: "Secret Store filters",
+			Decode:       decodeFiltersFromResultMap,
+			NextQuery: func(_ map[string]interface{}, _ map[string]string) (map[string]string, bool) {
+				return nil, false
+			},
+		},
+	)
 }
 
 // Create adds a new filter for a specific secret store id

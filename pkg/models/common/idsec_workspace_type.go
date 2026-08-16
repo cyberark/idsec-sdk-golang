@@ -3,7 +3,7 @@ package common
 // Possible workspace types
 const (
 	WorkspaceTypeAWS    = "AWS"
-	WorkspaceTypeAzure  = "AZURE"
+	WorkspaceTypeAzure  = "Azure"
 	WorkspaceTypeOnPrem = "ON-PREMISE"
 	WorkspaceTypeGCP    = "GCP"
 	WorkspaceTypeFQDNIP = "FQDN/IP"

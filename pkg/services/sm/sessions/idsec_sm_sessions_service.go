@@ -12,6 +12,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	sessionsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessions/models"
 )
@@ -99,34 +100,66 @@ func (s *IdsecSMSessionsService) callListSessions(params map[string]string) (*se
 	return &sessions, nil
 }
 
+// returnedCountFromResultMap reads the "returned_count" field the SM list endpoints use to
+// report how many items were returned on the current page (0 signals the last page).
+func returnedCountFromResultMap(resultMap map[string]interface{}) (int, bool) {
+	switch v := resultMap["returned_count"].(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+// nextOffsetQuery builds the next page's query by advancing the "offset" param in current by
+// returnedCount, preserving every other filter/search param already present.
+func nextOffsetQuery(current map[string]string, returnedCount int) map[string]string {
+	offset := 0
+	if v, ok := current["offset"]; ok {
+		offset, _ = strconv.Atoi(v)
+	}
+	next := make(map[string]string, len(current)+1)
+	for k, v := range current {
+		next[k] = v
+	}
+	next["offset"] = strconv.Itoa(offset + returnedCount)
+	return next
+}
+
+func decodeSessionsFromResultMap(resultMap map[string]interface{}) ([]*sessionsmodels.IdsecSMSession, error) {
+	items, err := pagination.ExtractItemsFromResult(resultMap, "sessions", "sessions")
+	if err != nil {
+		return nil, err
+	}
+	var sessions []*sessionsmodels.IdsecSMSession
+	if err := mapstructure.Decode(items, &sessions); err != nil {
+		return nil, fmt.Errorf("failed to decode sessions: %w", err)
+	}
+	return sessions, nil
+}
+
 // listPagedSessions retrieves a list of sessions, parameters can be passed to filter the results.
 func (s *IdsecSMSessionsService) listPagedSessions(params map[string]string) (<-chan *IdsecSMSessionsPage, error) {
-	results := make(chan *IdsecSMSessionsPage)
 	if params == nil {
 		params = make(map[string]string)
 	}
-	offset := 0
-	go func() {
-		defer close(results)
-		for {
-			sessionsResponse, err := s.callListSessions(params)
-			if err != nil {
-				s.Logger.Error("failed to list sessions: %v", err)
-				return
-			}
-			if sessionsResponse.ReturnedCount == 0 {
-				break
-			}
-			sessions := make([]*sessionsmodels.IdsecSMSession, len(sessionsResponse.Sessions))
-			for i := range sessionsResponse.Sessions {
-				sessions[i] = &sessionsResponse.Sessions[i]
-			}
-			results <- &IdsecSMSessionsPage{Items: sessions}
-			offset += sessionsResponse.ReturnedCount
-			params["offset"] = strconv.Itoa(offset)
-		}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[sessionsmodels.IdsecSMSession](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), sessionsURL, params),
+		pagination.ListPaginatedConfig[sessionsmodels.IdsecSMSession]{
+			ResourceName: "sessions",
+			Decode:       decodeSessionsFromResultMap,
+			NextQuery: func(resultMap map[string]interface{}, current map[string]string) (map[string]string, bool) {
+				returnedCount, ok := returnedCountFromResultMap(resultMap)
+				if !ok || returnedCount == 0 {
+					return nil, false
+				}
+				return nextOffsetQuery(current, returnedCount), true
+			},
+		},
+	)
 }
 
 // List retrieves a list of sessions.

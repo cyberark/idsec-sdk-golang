@@ -57,8 +57,8 @@ func TestSafesListPageFromResultMapInvalidShapes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, _, err := safesListPageFromResultMap(tt.resultMap); err == nil {
-				t.Fatal("safesListPageFromResultMap expected error")
+			if _, err := decodeSafesFromResultMap(tt.resultMap); err == nil {
+				t.Fatal("decodeSafesFromResultMap expected error")
 			}
 		})
 	}

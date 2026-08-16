@@ -2,18 +2,17 @@ package safes
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
 	rolesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles/models"
 	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
-	pcloudinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/internal"
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
 
 	"io"
@@ -201,73 +200,14 @@ func (s *IdsecPCloudSafesService) enrichMembersWithRoleType(members []*safesmode
 	wg.Wait()
 }
 
-func safesListPageFromResultMap(resultMap map[string]interface{}) (safes []*safesmodels.IdsecPCloudSafe, nextQuery map[string]string, err error) {
-	var safesJSON []interface{}
-	if value, ok := resultMap["value"]; ok {
-		safesJSON, ok = value.([]interface{})
-		if !ok {
-			return nil, nil, fmt.Errorf("failed to list safes: %w", pcloudinternal.ErrUnexpectedListResult)
-		}
-	} else if safesData, ok := resultMap["Safes"]; ok {
-		safesJSON, ok = safesData.([]interface{})
-		if !ok {
-			return nil, nil, fmt.Errorf("failed to list safes: %w", pcloudinternal.ErrUnexpectedListResult)
-		}
-	} else {
-		return nil, nil, fmt.Errorf("failed to list safes: %w", pcloudinternal.ErrUnexpectedListResult)
-	}
-	safes, err = decodeSafesFromListJSON(safesJSON)
+// decodeSafesFromResultMap decodes one page of the safes list response, accepting either the
+// OData-style "value" key or the legacy "Safes" key.
+func decodeSafesFromResultMap(resultMap map[string]interface{}) ([]*safesmodels.IdsecPCloudSafe, error) {
+	safesJSON, err := pagination.ExtractItemsFromResult(resultMap, "safes", "Safes")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if nextLink, ok := pcloudinternal.NextLinkFromResultMap(resultMap); ok {
-		nextQuery, err := pcloudinternal.QueryFromNextLink(nextLink)
-		if err != nil {
-			return nil, nil, err
-		}
-		return safes, nextQuery, nil
-	}
-	return safes, nil, nil
-}
-
-// fetchSafesListPage performs a single list-safes request.
-// A nil nextQuery means there are no further pages.
-func (s *IdsecPCloudSafesService) fetchSafesListPage(ctx context.Context, query map[string]string) (safes []*safesmodels.IdsecPCloudSafe, nextQuery map[string]string, err error) {
-	response, err := s.ISPClient().Get(ctx, safesURL, query)
-	if err != nil {
-		s.Logger.Error("Failed to list safes: %v", err)
-		return nil, nil, err
-	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
-			common.GlobalLogger.Warning("Error closing response body")
-		}
-	}()
-	if response.StatusCode != http.StatusOK {
-		body := common.SerializeResponseToJSON(response.Body)
-		s.Logger.Error("Failed to list safes - [%d] - [%s]", response.StatusCode, body)
-		return nil, nil, fmt.Errorf("list safes: HTTP %d: %s", response.StatusCode, body)
-	}
-	result, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		s.Logger.Error("Failed to decode response: %v", err)
-		return nil, nil, err
-	}
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		s.Logger.Error("Failed to list safes, unexpected result")
-		return nil, nil, fmt.Errorf("failed to list safes: %w", pcloudinternal.ErrUnexpectedListResult)
-	}
-	safes, nextQuery, err = safesListPageFromResultMap(resultMap)
-	if err != nil {
-		if errors.Is(err, pcloudinternal.ErrUnexpectedListResult) {
-			s.Logger.Error("Failed to list safes, unexpected result")
-		} else {
-			s.Logger.Error("Failed to validate safes: %v", err)
-		}
-		return nil, nil, err
-	}
-	return safes, nextQuery, nil
+	return decodeSafesFromListJSON(safesJSON)
 }
 
 func (s *IdsecPCloudSafesService) listSafesWithFilters(
@@ -277,83 +217,35 @@ func (s *IdsecPCloudSafesService) listSafesWithFilters(
 	offset int,
 	limit int,
 ) (<-chan *IdsecPCloudSafesPage, error) {
-	query := map[string]string{}
+	initialQuery := map[string]string{}
 	if search != "" {
-		query["search"] = search
+		initialQuery["search"] = search
 	}
 	if sort != "" {
-		query["sort"] = sort
+		initialQuery["sort"] = sort
 	}
 	if offset > 0 {
-		query["offset"] = fmt.Sprintf("%d", offset)
+		initialQuery["offset"] = fmt.Sprintf("%d", offset)
 	}
 	if limit > 0 {
-		query["limit"] = fmt.Sprintf("%d", limit)
+		initialQuery["limit"] = fmt.Sprintf("%d", limit)
 	}
-	results := make(chan *IdsecPCloudSafesPage)
-	go func() {
-		defer close(results)
-		for {
-			items, nextQuery, err := s.fetchSafesListPage(ctx, query)
-			if err != nil {
-				select {
-				case results <- &IdsecPCloudSafesPage{Err: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			select {
-			case results <- &IdsecPCloudSafesPage{Items: items}:
-			case <-ctx.Done():
-				return
-			}
-			if nextQuery == nil {
-				return
-			}
-			query = nextQuery
-		}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[safesmodels.IdsecPCloudSafe](
+		ctx,
+		pagination.HTTPGetFetch(s.ISPClient(), safesURL, initialQuery),
+		pagination.ListPaginatedConfig[safesmodels.IdsecPCloudSafe]{
+			ResourceName: "safes",
+			Decode:       decodeSafesFromResultMap,
+		},
+	)
 }
 
-// fetchSafeMembersListPage performs a single list-safe-members request for safeID.
-// A nil nextQuery means there are no further pages.
-func (s *IdsecPCloudSafesService) fetchSafeMembersListPage(ctx context.Context, safeID string, query map[string]string) (members []*safesmodels.IdsecPCloudSafeMember, nextQuery map[string]string, err error) {
-	response, err := s.ISPClient().Get(ctx, fmt.Sprintf(safeMembersURL, safeID), query)
+// decodeSafeMembersFromResultMap decodes one page of the safe-members list response and applies
+// the permission-set classification to each member.
+func decodeSafeMembersFromResultMap(resultMap map[string]interface{}) ([]*safesmodels.IdsecPCloudSafeMember, error) {
+	membersJSON, err := pagination.ExtractItemsFromResult(resultMap, "safe members")
 	if err != nil {
-		s.Logger.Error("Failed to list safe members: %v", err)
-		return nil, nil, err
-	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
-			common.GlobalLogger.Warning("Error closing response body")
-		}
-	}()
-	if response.StatusCode != http.StatusOK {
-		body := common.SerializeResponseToJSON(response.Body)
-		s.Logger.Error("Failed to list safe members - [%d] - [%s]", response.StatusCode, body)
-		return nil, nil, fmt.Errorf("list safe members (safe %q): HTTP %d: %s", safeID, response.StatusCode, body)
-	}
-	result, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		s.Logger.Error("Failed to decode response: %v", err)
-		return nil, nil, err
-	}
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		s.Logger.Error("Failed to list safe members, unexpected result")
-		return nil, nil, fmt.Errorf("failed to list safe members: unexpected result")
-	}
-	var membersJSON []interface{}
-	if value, ok := resultMap["value"]; ok {
-		membersJSON, ok = value.([]interface{})
-		if !ok {
-			s.Logger.Error("Failed to list safe members, unexpected result")
-			return nil, nil, fmt.Errorf("failed to list safe members: unexpected result")
-		}
-	} else {
-		s.Logger.Error("Failed to list safe members, unexpected result")
-		return nil, nil, fmt.Errorf("failed to list safe members: unexpected result")
+		return nil, err
 	}
 	for i, safeMember := range membersJSON {
 		if safeMemberMap, ok := safeMember.(map[string]interface{}); ok {
@@ -362,9 +254,9 @@ func (s *IdsecPCloudSafesService) fetchSafeMembersListPage(ctx context.Context, 
 			}
 		}
 	}
+	var members []*safesmodels.IdsecPCloudSafeMember
 	if err := mapstructure.Decode(membersJSON, &members); err != nil {
-		s.Logger.Error("Failed to validate safe members: %v", err)
-		return nil, nil, err
+		return nil, fmt.Errorf("failed to validate safe members: %w", err)
 	}
 	for _, member := range members {
 		member.PermissionSet = safesmodels.Custom
@@ -375,14 +267,7 @@ func (s *IdsecPCloudSafesService) fetchSafeMembersListPage(ctx context.Context, 
 			}
 		}
 	}
-	if nextLink, ok := pcloudinternal.NextLinkFromResultMap(resultMap); ok {
-		nextQuery, err := pcloudinternal.QueryFromNextLink(nextLink)
-		if err != nil {
-			return nil, nil, err
-		}
-		return members, nextQuery, nil
-	}
-	return members, nil, nil
+	return members, nil
 }
 
 func (s *IdsecPCloudSafesService) listSafeMembersWithFilters(
@@ -394,47 +279,37 @@ func (s *IdsecPCloudSafesService) listSafeMembersWithFilters(
 	limit int,
 	memberType string,
 ) (<-chan *IdsecPCloudSafeMembersPage, error) {
-	query := map[string]string{}
+	initialQuery := map[string]string{}
 	if search != "" {
-		query["search"] = search
+		initialQuery["search"] = search
 	}
 	if sort != "" {
-		query["sort"] = sort
+		initialQuery["sort"] = sort
 	}
 	if offset > 0 {
-		query["offset"] = fmt.Sprintf("%d", offset)
+		initialQuery["offset"] = fmt.Sprintf("%d", offset)
 	}
 	if limit > 0 {
-		query["limit"] = fmt.Sprintf("%d", limit)
+		initialQuery["limit"] = fmt.Sprintf("%d", limit)
 	}
 	if memberType != "" {
-		query["filter"] = fmt.Sprintf("memberType eq %s", memberType)
+		initialQuery["filter"] = fmt.Sprintf("memberType eq %s", memberType)
 	}
-	results := make(chan *IdsecPCloudSafeMembersPage)
-	go func() {
-		defer close(results)
-		for {
-			items, nextQuery, err := s.fetchSafeMembersListPage(ctx, safeID, query)
-			if err != nil {
-				select {
-				case results <- &IdsecPCloudSafeMembersPage{Err: err}:
-				case <-ctx.Done():
+	return pagination.ListAllPaginated[safesmodels.IdsecPCloudSafeMember](
+		ctx,
+		pagination.HTTPGetFetch(s.ISPClient(), fmt.Sprintf(safeMembersURL, safeID), initialQuery),
+		pagination.ListPaginatedConfig[safesmodels.IdsecPCloudSafeMember]{
+			ResourceName: "safe members",
+			Decode: func(resultMap map[string]interface{}) ([]*safesmodels.IdsecPCloudSafeMember, error) {
+				members, err := decodeSafeMembersFromResultMap(resultMap)
+				if err != nil {
+					return nil, err
 				}
-				return
-			}
-			s.enrichMembersWithRoleType(items)
-			select {
-			case results <- &IdsecPCloudSafeMembersPage{Items: items}:
-			case <-ctx.Done():
-				return
-			}
-			if nextQuery == nil {
-				return
-			}
-			query = nextQuery
-		}
-	}()
-	return results, nil
+				s.enrichMembersWithRoleType(members)
+				return members, nil
+			},
+		},
+	)
 }
 
 func (s *IdsecPCloudSafesService) parseSafeResponse(responseBody io.ReadCloser) (*safesmodels.IdsecPCloudSafe, error) {
@@ -455,7 +330,7 @@ func (s *IdsecPCloudSafesService) parseSafeResponse(responseBody io.ReadCloser) 
 }
 
 // List returns a channel of IdsecPCloudSafesPage containing all safes.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20List%20Safes.htm?
 func (s *IdsecPCloudSafesService) List() (<-chan *IdsecPCloudSafesPage, error) {
 	return s.ListContext(context.Background())
@@ -476,7 +351,7 @@ func (s *IdsecPCloudSafesService) ListContext(ctx context.Context) (<-chan *Idse
 }
 
 // ListBy returns a channel of IdsecPCloudSafesPage containing safes filtered by the given filters.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20List%20Safes.htm?
 func (s *IdsecPCloudSafesService) ListBy(safesFilters *safesmodels.IdsecPCloudSafesFilters) (<-chan *IdsecPCloudSafesPage, error) {
 	return s.ListByContext(context.Background(), safesFilters)
@@ -497,7 +372,7 @@ func (s *IdsecPCloudSafesService) ListByContext(ctx context.Context, safesFilter
 }
 
 // ListMembers returns a channel of IdsecPCloudSafeMembersPage containing all safe members.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Members.htm
 func (s *IdsecPCloudSafesService) ListMembers(listSafeMembers *safesmodels.IdsecPCloudListSafeMembers) (<-chan *IdsecPCloudSafeMembersPage, error) {
 	return s.ListMembersContext(context.Background(), listSafeMembers)
@@ -520,7 +395,7 @@ func (s *IdsecPCloudSafesService) ListMembersContext(ctx context.Context, listSa
 }
 
 // ListMembersBy returns a channel of IdsecPCloudSafeMembersPage containing safe members filtered by the given filters.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Members.htm
 func (s *IdsecPCloudSafesService) ListMembersBy(safeMembersFilters *safesmodels.IdsecPCloudSafeMembersFilters) (<-chan *IdsecPCloudSafeMembersPage, error) {
 	return s.ListMembersByContext(context.Background(), safeMembersFilters)

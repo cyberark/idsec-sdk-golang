@@ -811,7 +811,9 @@ func (s *IdsecCCEAWSService) TfDeleteAccount(input *awsmodels.TfIdsecCCEAWSDelet
 	s.Logger.Info("Deleting AWS account with ID [%s]", input.ID)
 
 	url := fmt.Sprintf(pathAccountGetOrDeleteURL, input.ID)
-	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
+	// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
+	params := map[string][]string{"onboarding_type": {ccemodels.TerraformProvider}}
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, params)
 	if err != nil {
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
@@ -837,6 +839,8 @@ func (s *IdsecCCEAWSService) TfAddAccountServices(input *awsmodels.TfIdsecCCEAWS
 	// Create request body with services array
 	requestBody := map[string]interface{}{
 		"services": input.Services,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
+		"onboardingType": ccemodels.TerraformProvider,
 	}
 
 	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
@@ -866,6 +870,8 @@ func (s *IdsecCCEAWSService) DeleteAccountServices(input *awsmodels.TfIdsecCCEAW
 	// The API expects: services_names=dpa&services_names=sca
 	params := map[string][]string{
 		"services_names": input.ServiceNames,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
+		"onboarding_type": {ccemodels.TerraformProvider},
 	}
 
 	s.Logger.Info("Deleting services: %v from account [%s]", input.ServiceNames, input.ID)

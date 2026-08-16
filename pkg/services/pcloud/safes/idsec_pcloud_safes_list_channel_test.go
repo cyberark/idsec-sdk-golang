@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -14,27 +15,10 @@ import (
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
 )
 
-// requireProducerExits drains ch until it is closed, failing if that does not happen promptly
-// (which would indicate the producer goroutine is leaked, blocked forever on a send).
-func requireProducerExits[T any](t *testing.T, ch <-chan T) {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		for range ch {
-		}
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("producer goroutine did not exit after context cancellation (leak)")
-	}
-}
-
-// List channel regression tests (minimal set):
-//   - mid-pagination HTTP error after a good first page → terminal page with Err (not silent close);
-//   - first request fails → single terminal Err page (not confused with empty list);
-//   - two OK pages → no Err on any page (next_link success path).
+// List error-propagation and pagination regression tests (minimal set):
+//   - mid-pagination HTTP error after a good first page -> returned error, no channel;
+//   - first request fails -> returned error, no channel;
+//   - two OK pages -> single combined page with items from both requests, no error.
 //
 // ListMembers: one mid-pagination case for the distinct /members route and member decode path.
 func newTestPCloudSafesService(parts *pcloudint.MockISPServiceParts) *safes.IdsecPCloudSafesService {
@@ -44,27 +28,7 @@ func newTestPCloudSafesService(parts *pcloudint.MockISPServiceParts) *safes.Idse
 	}
 }
 
-func drainSafesListPages(t *testing.T, svc *safes.IdsecPCloudSafesService) []*safes.IdsecPCloudSafesPage {
-	t.Helper()
-	ch, err := svc.ListBy(&safesmodels.IdsecPCloudSafesFilters{})
-	require.NoError(t, err)
-	var pages []*safes.IdsecPCloudSafesPage
-	for p := range ch {
-		pages = append(pages, p)
-	}
-	return pages
-}
-
-func requireSafesListPropagatesPage2Failure(t *testing.T, listGETs int, pages []*safes.IdsecPCloudSafesPage) {
-	t.Helper()
-	require.GreaterOrEqual(t, listGETs, 2,
-		"pagination must issue a second GET when the API returns nextLink (decoded map key is next_link)")
-	require.GreaterOrEqual(t, len(pages), 2, "expect at least one data page and a terminal error page")
-	require.NoError(t, pages[0].Err, "data pages must not set Err")
-	require.Error(t, pages[len(pages)-1].Err, "last page must carry Err after a page-2+ failure")
-}
-
-func TestSafesList_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) {
+func TestSafesList_midPaginationHTTPError_returnsErr(t *testing.T) {
 	t.Parallel()
 	var listGETs int
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,8 +51,11 @@ func TestSafesList_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) {
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainSafesListPages(t, newTestPCloudSafesService(parts))
-	requireSafesListPropagatesPage2Failure(t, listGETs, pages)
+	ch, err := newTestPCloudSafesService(parts).ListBy(&safesmodels.IdsecPCloudSafesFilters{})
+	require.Error(t, err)
+	require.Nil(t, ch) // partial results from page 1 must NOT leak through
+	require.GreaterOrEqual(t, listGETs, 2,
+		"pagination must issue a second GET when the API returns nextLink (decoded map key is next_link)")
 }
 
 func TestSafesList_channelPropagatesFirstPageFailure(t *testing.T) {
@@ -106,13 +73,13 @@ func TestSafesList_channelPropagatesFirstPageFailure(t *testing.T) {
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainSafesListPages(t, newTestPCloudSafesService(parts))
+	ch, err := newTestPCloudSafesService(parts).ListBy(&safesmodels.IdsecPCloudSafesFilters{})
+	require.Error(t, err)
+	require.Nil(t, ch)
 	require.Equal(t, 1, listGETs)
-	require.Len(t, pages, 1)
-	require.Error(t, pages[0].Err)
 }
 
-func TestSafesList_happyMultiPageNoTerminalErr(t *testing.T) {
+func TestSafesList_happyMultiPageCombinedIntoSinglePage(t *testing.T) {
 	t.Parallel()
 	var listGETs int
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -135,21 +102,24 @@ func TestSafesList_happyMultiPageNoTerminalErr(t *testing.T) {
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainSafesListPages(t, newTestPCloudSafesService(parts))
+	ch, err := newTestPCloudSafesService(parts).ListBy(&safesmodels.IdsecPCloudSafesFilters{})
+	require.NoError(t, err)
 	require.Equal(t, 2, listGETs)
-	require.Len(t, pages, 2)
-	for i, p := range pages {
-		require.NoError(t, p.Err, "page %d", i)
+
+	var pages []*safes.IdsecPCloudSafesPage
+	for p := range ch {
+		pages = append(pages, p)
 	}
-	require.Len(t, pages[0].Items, 1)
-	require.Len(t, pages[1].Items, 1)
+	require.Len(t, pages, 1, "ListAllPaginated collapses all pages into a single page")
+	require.Len(t, pages[0].Items, 2)
 	require.Equal(t, "sid-1", pages[0].Items[0].SafeID)
-	require.Equal(t, "sid-2", pages[1].Items[0].SafeID)
+	require.Equal(t, "sid-2", pages[0].Items[1].SafeID)
 }
 
-// TestSafesListContext_cancelReleasesProducer verifies the goroutine-leak fix for the safes
-// list producer: cancelling the context after abandoning iteration releases the goroutine.
-func TestSafesListContext_cancelReleasesProducer(t *testing.T) {
+// TestSafesListContext_cancelStopsPagination verifies that cancelling ctx while pagination is
+// in flight against an endpoint that advertises another page forever unblocks the call (via the
+// underlying HTTP request failing with context.Canceled) instead of hanging indefinitely.
+func TestSafesListContext_cancelStopsPagination(t *testing.T) {
 	t.Parallel()
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/safes" {
@@ -165,20 +135,26 @@ func TestSafesListContext_cancelReleasesProducer(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := newTestPCloudSafesService(parts).ListByContext(ctx, &safesmodels.IdsecPCloudSafesFilters{})
-	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := newTestPCloudSafesService(parts).ListByContext(ctx, &safesmodels.IdsecPCloudSafesFilters{})
+		done <- err
+	}()
 
-	first, ok := <-ch
-	require.True(t, ok, "expected at least one page before abandoning iteration")
-	require.NoError(t, first.Err)
-
+	time.Sleep(50 * time.Millisecond)
 	cancel()
-	requireProducerExits(t, ch)
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "cancelled pagination must surface an error instead of an empty success")
+	case <-time.After(3 * time.Second):
+		t.Fatal("ListByContext did not return after context cancellation (possible hang)")
+	}
 }
 
-// TestSafesListMembersContext_cancelReleasesProducer verifies the goroutine-leak fix for the
-// distinct safe-members producer (which enriches members before sending).
-func TestSafesListMembersContext_cancelReleasesProducer(t *testing.T) {
+// TestSafesListMembersContext_cancelStopsPagination mirrors the safes-list cancellation test for
+// the distinct safe-members producer (which enriches members before returning).
+func TestSafesListMembersContext_cancelStopsPagination(t *testing.T) {
 	t.Parallel()
 	const safeID = "safe1"
 	wantPath := "/api/safes/" + safeID + "/members"
@@ -196,18 +172,24 @@ func TestSafesListMembersContext_cancelReleasesProducer(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := newTestPCloudSafesService(parts).ListMembersByContext(ctx, &safesmodels.IdsecPCloudSafeMembersFilters{SafeID: safeID})
-	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := newTestPCloudSafesService(parts).ListMembersByContext(ctx, &safesmodels.IdsecPCloudSafeMembersFilters{SafeID: safeID})
+		done <- err
+	}()
 
-	first, ok := <-ch
-	require.True(t, ok, "expected at least one page before abandoning iteration")
-	require.NoError(t, first.Err)
-
+	time.Sleep(50 * time.Millisecond)
 	cancel()
-	requireProducerExits(t, ch)
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "cancelled pagination must surface an error instead of an empty success")
+	case <-time.After(3 * time.Second):
+		t.Fatal("ListMembersByContext did not return after context cancellation (possible hang)")
+	}
 }
 
-func TestSafesListMembers_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) {
+func TestSafesListMembers_midPaginationHTTPError_returnsErr(t *testing.T) {
 	t.Parallel()
 	const safeID = "safe1"
 	wantPath := "/api/safes/" + safeID + "/members"
@@ -234,13 +216,42 @@ func TestSafesListMembers_midPaginationHTTPError_emitsTerminalErrPage(t *testing
 
 	svc := newTestPCloudSafesService(parts)
 	ch, err := svc.ListMembers(&safesmodels.IdsecPCloudListSafeMembers{SafeID: safeID})
-	require.NoError(t, err)
-	var pages []*safes.IdsecPCloudSafeMembersPage
-	for p := range ch {
-		pages = append(pages, p)
-	}
+	require.Error(t, err)
+	require.Nil(t, ch)
 	require.GreaterOrEqual(t, listGETs, 2)
-	require.GreaterOrEqual(t, len(pages), 2)
-	require.NoError(t, pages[0].Err)
-	require.Error(t, pages[len(pages)-1].Err)
+}
+
+// TestSafesListBy_appliesAllQueryParams verifies that a fully populated filter maps each field to
+// the correct outgoing query-param key/value (guards against a mis-keyed param going unnoticed).
+func TestSafesListBy_appliesAllQueryParams(t *testing.T) {
+	t.Parallel()
+	var gotQuery url.Values
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/safes" {
+			http.NotFound(w, r)
+			return
+		}
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"value":[{"safe_url_id":"sid-1","safe_name":"S1"}]}`)
+	})
+	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
+	t.Cleanup(cleanup)
+
+	ch, err := newTestPCloudSafesService(parts).ListBy(&safesmodels.IdsecPCloudSafesFilters{
+		Search: "prod",
+		Sort:   "safeName desc",
+		Offset: 10,
+		Limit:  25,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, ch)
+	for range ch {
+	}
+
+	require.Equal(t, "prod", gotQuery.Get("search"))
+	require.Equal(t, "safeName desc", gotQuery.Get("sort"))
+	require.Equal(t, "10", gotQuery.Get("offset"))
+	require.Equal(t, "25", gotQuery.Get("limit"))
 }

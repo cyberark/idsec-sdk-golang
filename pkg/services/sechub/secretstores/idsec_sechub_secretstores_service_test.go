@@ -103,6 +103,127 @@ func currentStoreJSON(id, name, description, state string) string {
 	}`
 }
 
+// TestIdsecSecHubSecretStoresService_List exercises the paginated List() two-channel contract:
+// multi-page next_link walking, single-page listing, and HTTP-error propagation via the error channel.
+func TestIdsecSecHubSecretStoresService_List(t *testing.T) {
+	t.Parallel()
+
+	store1 := currentStoreJSON("store-1", "store-one", "first store", "ENABLED")
+	store2 := currentStoreJSON("store-2", "store-two", "second store", "ENABLED")
+
+	tests := []struct {
+		name        string
+		configs     []mockEndpointConfig
+		expectError bool
+		expectedIDs []string
+	}{
+		{
+			name: "success_multi_page_walks_next_link",
+			configs: []mockEndpointConfig{
+				{
+					// page 1 — no offset yet
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL && r.URL.Query().Get("offset") == ""
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: `{"secret_stores": [` + store1 + `], "next_link": "https://example.com/api/secret-stores?offset=1"}`,
+				},
+				{
+					// page 2 — offset carried over from the parsed next_link
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL && r.URL.Query().Get("offset") == "1"
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: `{"secret_stores": [` + store2 + `]}`,
+				},
+			},
+			expectError: false,
+			expectedIDs: []string{"store-1", "store-2"},
+		},
+		{
+			name: "success_single_page",
+			configs: []mockEndpointConfig{
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: `{"secret_stores": [` + store1 + `]}`,
+				},
+			},
+			expectError: false,
+			expectedIDs: []string{"store-1"},
+		},
+		{
+			name: "error_http_500_propagates",
+			configs: []mockEndpointConfig{
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL
+					},
+					StatusCode:   http.StatusInternalServerError,
+					ResponseBody: `{"error": "internal server error"}`,
+				},
+			},
+			expectError: true,
+			expectedIDs: nil,
+		},
+		{
+			name: "error_second_page_fails_first_page_discarded",
+			configs: []mockEndpointConfig{
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL && r.URL.Query().Get("offset") == ""
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: `{"secret_stores": [` + store1 + `], "next_link": "https://example.com/api/secret-stores?offset=1"}`,
+				},
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == "GET" && r.URL.Path == sechubURL && r.URL.Query().Get("offset") == "1"
+					},
+					StatusCode:   http.StatusInternalServerError,
+					ResponseBody: `{"error": "second page boom"}`,
+				},
+			},
+			expectError: true,
+			expectedIDs: nil, // partial results from page 1 must NOT leak through
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, cleanup := setupMockSecretStoresService(t, tt.configs)
+			defer cleanup()
+
+			pagesChan, err := service.List()
+
+			if tt.expectError {
+				require.Error(t, err)
+				require.Nil(t, pagesChan)
+				return
+			}
+
+			require.NoError(t, err)
+
+			secretStores := make([]*secretstoresmodels.IdsecSecHubSecretStore, 0)
+			for page := range pagesChan {
+				secretStores = append(secretStores, page.Items...)
+			}
+
+			require.Len(t, secretStores, len(tt.expectedIDs))
+
+			actualIDs := make([]string, 0, len(secretStores))
+			for _, store := range secretStores {
+				actualIDs = append(actualIDs, store.ID)
+			}
+			require.ElementsMatch(t, tt.expectedIDs, actualIDs)
+		})
+	}
+}
+
 func TestIdsecSecHubSecretStoresService_UpdateTF_RollbackOnStateChangeFailed(t *testing.T) {
 	storeID := "store-abc-123"
 	storeName := "my-aws-store"
@@ -457,4 +578,52 @@ func TestStripImmutableFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIdsecSecHubSecretStoresService_ListBy_forwardsBehaviorQueryParam verifies that ListBy forwards
+// the Behavior filter as the "behavior" query param. All existing tests exercise List() only, so the
+// filter-to-query-param path had zero coverage.
+func TestIdsecSecHubSecretStoresService_ListBy_forwardsBehaviorQueryParam(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu          sync.Mutex
+		gotBehavior string
+	)
+	store1 := currentStoreJSON("store-1", "store-one", "first store", "ENABLED")
+
+	configs := []mockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == sechubURL
+			},
+			OnRequest: func(r *http.Request) {
+				mu.Lock()
+				gotBehavior = r.URL.Query().Get("behavior")
+				mu.Unlock()
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{"secret_stores": [` + store1 + `]}`,
+		},
+	}
+
+	service, cleanup := setupMockSecretStoresService(t, configs)
+	defer cleanup()
+
+	pagesChan, err := service.ListBy(&secretstoresmodels.IdsecSecHubSecretStoresFilters{
+		Behavior: "SECRETS_SOURCE",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, pagesChan)
+
+	stores := make([]*secretstoresmodels.IdsecSecHubSecretStore, 0)
+	for page := range pagesChan {
+		stores = append(stores, page.Items...)
+	}
+	require.Len(t, stores, 1)
+	require.Equal(t, "store-1", stores[0].ID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, "SECRETS_SOURCE", gotBehavior)
 }

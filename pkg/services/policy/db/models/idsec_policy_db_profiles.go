@@ -3,6 +3,8 @@ package models
 import (
 	"errors"
 	"strings"
+
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 )
 
 // Constants for validation
@@ -137,9 +139,9 @@ type IdsecPolicyDBMongoAuthProfile struct {
 // Serialize converts the MongoDB authentication profile to a map.
 func (s *IdsecPolicyDBMongoAuthProfile) Serialize() map[string]interface{} {
 	return map[string]interface{}{
-		"globalBuiltinRoles":   s.GlobalBuiltinRoles,
-		"databaseBuiltinRoles": s.DatabaseBuiltinRoles,
-		"databaseCustomRoles":  s.DatabaseCustomRoles,
+		"globalBuiltinRoles":   common.NilToEmptySlice(s.GlobalBuiltinRoles),
+		"databaseBuiltinRoles": common.NilToEmptyMap(s.DatabaseBuiltinRoles),
+		"databaseCustomRoles":  common.NilToEmptyMap(s.DatabaseCustomRoles),
 	}
 }
 
@@ -250,10 +252,10 @@ type IdsecPolicyDBSqlServerAuthProfile struct {
 // Serialize converts the SQL Server authentication profile to a map.
 func (s *IdsecPolicyDBSqlServerAuthProfile) Serialize() map[string]interface{} {
 	return map[string]interface{}{
-		"globalBuiltinRoles":   s.GlobalBuiltinRoles,
-		"globalCustomRoles":    s.GlobalCustomRoles,
-		"databaseBuiltinRoles": s.DatabaseBuiltinRoles,
-		"databaseCustomRoles":  s.DatabaseCustomRoles,
+		"globalBuiltinRoles":   common.NilToEmptySlice(s.GlobalBuiltinRoles),
+		"globalCustomRoles":    common.NilToEmptySlice(s.GlobalCustomRoles),
+		"databaseBuiltinRoles": common.NilToEmptyMap(s.DatabaseBuiltinRoles),
+		"databaseCustomRoles":  common.NilToEmptyMap(s.DatabaseCustomRoles),
 	}
 }
 

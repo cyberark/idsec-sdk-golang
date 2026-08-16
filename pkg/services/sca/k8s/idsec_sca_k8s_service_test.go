@@ -301,6 +301,102 @@ func TestListTargets_AllFlag_AggregatesAWSAndAzure(t *testing.T) {
 	require.NotContains(t, string(output), `"response":null`)
 }
 
+// TestListTargets_SingleCSP_WithLimitAndNextToken verifies that when limit and/or
+// nextToken are explicitly provided for a single CSP, list-targets returns exactly
+// one page as-is: the request forwards limit and nextToken as query params, a single
+// API call is made, and the response's nextToken is preserved so the caller can page
+// manually (no auto-pagination).
+func TestListTargets_SingleCSP_WithLimitAndNextToken(t *testing.T) {
+	var capturedQueries []string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.URL.Path == "/access/AWS/eligibility/clusters" && r.URL.Query().Get("nextToken") == "prev-token"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "account"}],
+				"total": 8,
+				"nextToken": "next-page-token"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sListTargetsService(client)
+	resp, err := svc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{
+		CSP:       "AWS",
+		Limit:     1,
+		NextToken: "prev-token",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 8, resp.Total)
+	require.Len(t, resp.Response, 1)
+	require.Equal(t, "aws-001", resp.Response[0].WorkspaceID)
+	require.NotNil(t, resp.NextToken)
+	require.Equal(t, "next-page-token", *resp.NextToken)
+	require.Len(t, capturedQueries, 1)
+	require.Contains(t, capturedQueries[0], "limit=1")
+	require.Contains(t, capturedQueries[0], "nextToken=prev-token")
+}
+
+// TestListTargets_EmptyCSP_WithLimit_OnePerCSP verifies that when no CSP is given
+// but a limit is set, the multi-CSP aggregation returns a single page per CSP
+// (one API call per CSP) instead of auto-paginating through all pages.
+func TestListTargets_EmptyCSP_WithLimit_OnePerCSP(t *testing.T) {
+	var capturedPaths []string
+	var capturedQueries []string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:    func(r *http.Request) bool { return r.URL.Path == "/access/AWS/eligibility/clusters" },
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "aws-001", "workspaceName": "AWS Account", "workspaceType": "account"}],
+				"total": 5,
+				"nextToken": "aws-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+		{
+			Matcher:    func(r *http.Request) bool { return r.URL.Path == "/access/AZURE/eligibility/clusters" },
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"response": [{"workspaceId": "azure-001", "workspaceName": "Azure Subscription", "workspaceType": "subscription"}],
+				"total": 3,
+				"nextToken": "azure-page-2"
+			}`,
+			OnRequest: func(r *http.Request) {
+				capturedPaths = append(capturedPaths, r.URL.Path)
+				capturedQueries = append(capturedQueries, r.URL.RawQuery)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupK8sListTargetsService(client)
+	resp, err := svc.ListTargets(&k8smodels.IdsecSCAk8sListClustersRequest{Limit: 1})
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Responses, 2)
+	require.Len(t, resp.Responses["aws"].Response, 1)
+	require.Len(t, resp.Responses["azure"].Response, 1)
+	require.Empty(t, resp.Errors)
+	// Exactly one API call per CSP (no auto-pagination to page 2).
+	require.ElementsMatch(t, []string{"/access/AWS/eligibility/clusters", "/access/AZURE/eligibility/clusters"}, capturedPaths)
+	for _, q := range capturedQueries {
+		require.Contains(t, q, "limit=1")
+	}
+}
+
 func TestListTargets_EmptyCSP_PartialSuccessReturnsErrorsInResponse(t *testing.T) {
 	tests := []struct {
 		name                string

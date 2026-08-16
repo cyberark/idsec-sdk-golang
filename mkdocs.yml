@@ -14,9 +14,10 @@ nav:
       - Work with Idsec cache: howto/working_with_idsec_cache.md
       - Simple SDK workflow: howto/simple_sdk_workflow.md
       - Policy:
-          - DB Policy SDK workflow: howto/policy/db_policy_sdk_workflow.md
-          - VM Policy SDK workflow: howto/policy/vm_policy_sdk_workflow.md
-          - Cloud Access Policy SDK workflow: howto/policy/cloud_access_policy_sdk_workflow.md
+          - Database access policy SDK workflow: howto/policy/db_policy_sdk_workflow.md
+          - Virtual machine access policy SDK workflow: howto/policy/vm_policy_sdk_workflow.md
+          - Cloud console access policy SDK workflow: howto/policy/cloud_access_policy_sdk_workflow.md
+          - Kubernetes cluster access policy SDK workflow: howto/policy/k8s_policy_sdk_workflow.md
   - Examples:
       - SDK examples: examples/sdk_examples.md
   - SDK overview:

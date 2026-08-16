@@ -14,37 +14,45 @@ import (
 func TestAccountsListActivities_happyPath(t *testing.T) {
 	t.Parallel()
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts/123_4/activities" {
+		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{
-			"Activities": [
-				{
-					"Alert": false,
-					"Date": 1698947376,
-					"User": "John Doe",
-					"Action": "Add File Category",
-					"ActionID": 105,
-					"ClientID": "XYZ",
-					"MoreInfo": "CreationMethod",
-					"Reason": "Value=[1234]"
-				},
-				{
-					"Alert": false,
-					"Date": 1698947376,
-					"User": "Administrator",
-					"Action": "Add File Category",
-					"ActionID": 105,
-					"ClientID": "PVWA",
-					"MoreInfo": "UserName",
-					"Reason": "Value=[2121]"
-				}
-			],
-			"Total": 2
-		}`)
+		switch r.URL.Path {
+		case "/PasswordVault/api/accounts/123_4/":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"id":"123_4","safeName":"TestSafe"}`)
+		case "/api/accounts/123_4/activities":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{
+				"Activities": [
+					{
+						"Alert": false,
+						"Date": 1698947376,
+						"User": "John Doe",
+						"Action": "Add File Category",
+						"ActionID": 105,
+						"ClientID": "XYZ",
+						"MoreInfo": "CreationMethod",
+						"Reason": "Value=[1234]"
+					},
+					{
+						"Alert": false,
+						"Date": 1698947376,
+						"User": "Administrator",
+						"Action": "Add File Category",
+						"ActionID": 105,
+						"ClientID": "PVWA",
+						"MoreInfo": "UserName",
+						"Reason": "Value=[2121]"
+					}
+				],
+				"Total": 2
+			}`)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
@@ -79,37 +87,45 @@ func TestAccountsListActivities_httpError(t *testing.T) {
 func activitiesHandler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts/123_4/activities" {
+		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `{
-			"Activities": [
-				{
-					"Alert": false,
-					"Date": 1698947376,
-					"User": "John Doe",
-					"Action": "Add File Category",
-					"ActionID": 105,
-					"ClientID": "XYZ",
-					"MoreInfo": "CreationMethod",
-					"Reason": "Value=[1234]"
-				},
-				{
-					"Alert": true,
-					"Date": 1698947999,
-					"User": "Administrator",
-					"Action": "Remove File Category",
-					"ActionID": 106,
-					"ClientID": "PVWA",
-					"MoreInfo": "UserName",
-					"Reason": "Value=[2121]"
-				}
-			],
-			"Total": 2
-		}`)
+		switch r.URL.Path {
+		case "/PasswordVault/api/accounts/123_4/":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"id":"123_4","safeName":"TestSafe"}`)
+		case "/api/accounts/123_4/activities":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{
+				"Activities": [
+					{
+						"Alert": false,
+						"Date": 1698947376,
+						"User": "John Doe",
+						"Action": "Add File Category",
+						"ActionID": 105,
+						"ClientID": "XYZ",
+						"MoreInfo": "CreationMethod",
+						"Reason": "Value=[1234]"
+					},
+					{
+						"Alert": true,
+						"Date": 1698947999,
+						"User": "Administrator",
+						"Action": "Remove File Category",
+						"ActionID": 106,
+						"ClientID": "PVWA",
+						"MoreInfo": "UserName",
+						"Reason": "Value=[2121]"
+					}
+				],
+				"Total": 2
+			}`)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 }
 

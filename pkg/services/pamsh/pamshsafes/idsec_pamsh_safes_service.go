@@ -9,8 +9,8 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	pamshinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/internal"
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshsafes/models"
 )
 
@@ -70,6 +70,26 @@ func normalizePamshSafeListItem(safeMap map[string]interface{}) {
 	}
 }
 
+func decodePamshSafesFromResultMap(resultMap map[string]interface{}) ([]*safesmodels.IdsecPamshSafe, error) {
+	rawItems, err := pagination.ExtractItemsFromResult(resultMap, "safes", "Safes")
+	if err != nil {
+		return nil, err
+	}
+	for i, raw := range rawItems {
+		itemMap, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("failed to list safes: unexpected entry type %T", raw)
+		}
+		normalizePamshSafeListItem(itemMap)
+		rawItems[i] = itemMap
+	}
+	var safes []*safesmodels.IdsecPamshSafe
+	if err := mapstructure.Decode(rawItems, &safes); err != nil {
+		return nil, fmt.Errorf("failed to validate safes: %w", err)
+	}
+	return safes, nil
+}
+
 func (s *IdsecPamshSafesService) listSafesWithFilters(
 	search string,
 	sort string,
@@ -89,17 +109,12 @@ func (s *IdsecPamshSafesService) listSafesWithFilters(
 	if limit > 0 {
 		query["limit"] = fmt.Sprintf("%d", limit)
 	}
-	return pamshinternal.ListPaginated(
-		s.PVWAClient(),
-		safesURL,
-		query,
-		pamshinternal.ListPaginatedConfig[safesmodels.IdsecPamshSafe]{
-			Logger:       s.Logger,
+	return pagination.ListPaginated[safesmodels.IdsecPamshSafe](
+		context.Background(),
+		pagination.HTTPGetFetch(s.PVWAClient(), safesURL, query),
+		pagination.ListPaginatedConfig[safesmodels.IdsecPamshSafe]{
 			ResourceName: "safes",
-			ExtractItems: func(resultMap map[string]interface{}) ([]interface{}, error) {
-				return pamshinternal.ExtractItemsFromResult(resultMap, "safes", "Safes")
-			},
-			NormalizeItem: normalizePamshSafeListItem,
+			Decode:       decodePamshSafesFromResultMap,
 		},
 	)
 }
@@ -113,7 +128,7 @@ func (s *IdsecPamshSafesService) Get(getSafe *safesmodels.IdsecPamshGetSafe) (*s
 	}
 	if getSafe.SafeID == "" && getSafe.SafeName != "" {
 		safesPages, errCh := s.listSafesWithFilters(getSafe.SafeName, "", 0, 1)
-		safes, err := pamshinternal.DrainPages(safesPages, errCh)
+		safes, err := pagination.DrainPages(safesPages, errCh)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +234,7 @@ func (s *IdsecPamshSafesService) Create(addSafe *safesmodels.IdsecPamshAddSafe) 
 		return nil, err
 	}
 	if response.StatusCode == http.StatusConflict {
-		pamshinternal.ClosePVWAResponse(response)
+		pagination.CloseResponse(response)
 		s.Logger.Info("Safe [%s] already exists, retrieving existing safe", addSafe.SafeName)
 		safe, err := s.Get(&safesmodels.IdsecPamshGetSafe{
 			SafeName: addSafe.SafeName,
@@ -238,11 +253,11 @@ func (s *IdsecPamshSafesService) Create(addSafe *safesmodels.IdsecPamshAddSafe) 
 	}
 	if response.StatusCode != http.StatusCreated {
 		createErr := fmt.Errorf("failed to add safe - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-		pamshinternal.ClosePVWAResponse(response)
+		pagination.CloseResponse(response)
 		return nil, createErr
 	}
 	safeJSON, err := common.DeserializeJSONSnake(response.Body)
-	pamshinternal.ClosePVWAResponse(response)
+	pagination.CloseResponse(response)
 	if err != nil {
 		return nil, err
 	}

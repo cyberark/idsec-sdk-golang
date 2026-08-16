@@ -58,29 +58,60 @@ func TestEncryptProxyJWEExtension_RSA_RoundTrip(t *testing.T) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
+	const testClusterToken = "eyJjbHVzdGVySWQiOiJhYmMxMjMiLCJyZWdpb24iOiJ1cy1lYXN0LTEifQ==" // gitleaks:allow
+
 	tests := []struct {
-		name          string
-		token         string
-		rootCA        string
-		wantRootCA    string
-		omitRootCAKey bool
+		name              string
+		token             string
+		rootCA            string
+		clusterToken      string
+		wantRootCA        string
+		wantClusterToken  string
+		omitK8sTokenKey   bool
+		omitRootCAKey     bool
+		omitClusterTknKey bool
 	}{
 		{
-			name:          "token_only",
-			token:         "eyJhbGciOiJSUzI1NiJ9.test-k8s-jwt-payload.sig",
-			omitRootCAKey: true,
+			name:              "token_only",
+			token:             "eyJhbGciOiJSUzI1NiJ9.test-k8s-jwt-payload.sig",
+			omitRootCAKey:     true,
+			omitClusterTknKey: true,
 		},
 		{
-			name:       "token_and_root_ca",
-			token:      "k8s-bearer-token",
-			rootCA:     testProxyJWERootCA,
-			wantRootCA: testProxyJWERootCA,
+			name:              "token_and_root_ca",
+			token:             "k8s-bearer-token",
+			rootCA:            testProxyJWERootCA,
+			wantRootCA:        testProxyJWERootCA,
+			omitClusterTknKey: true,
+		},
+		{
+			name:             "cluster_token_only",
+			clusterToken:     testClusterToken,
+			wantClusterToken: testClusterToken,
+			omitK8sTokenKey:  true,
+			omitRootCAKey:    true,
+		},
+		{
+			name:             "cluster_token_with_root_ca_but_no_k8s_token",
+			rootCA:           testProxyJWERootCA,
+			clusterToken:     testClusterToken,
+			wantRootCA:       testProxyJWERootCA,
+			wantClusterToken: testClusterToken,
+			omitK8sTokenKey:  true,
+		},
+		{
+			name:             "all_three",
+			token:            "k8s-bearer-token",
+			rootCA:           testProxyJWERootCA,
+			clusterToken:     testClusterToken,
+			wantRootCA:       testProxyJWERootCA,
+			wantClusterToken: testClusterToken,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kid := dpaSsoJWKSKeyID()
-			jweCompact, err := encryptProxyJWEExtension(&privKey.PublicKey, kid, tt.token, tt.rootCA)
+			jweCompact, err := encryptProxyJWEExtension(&privKey.PublicKey, kid, tt.token, tt.rootCA, tt.clusterToken)
 			require.NoError(t, err)
 			require.NotEmpty(t, jweCompact)
 			require.Len(t, strings.Split(jweCompact, "."), 5, "JWE compact must have 5 segments")
@@ -92,13 +123,25 @@ func TestEncryptProxyJWEExtension_RSA_RoundTrip(t *testing.T) {
 			require.Equal(t, kid, jweObj.Header.KeyID, "kid must be embedded in the JWE protected header")
 
 			payload := decryptProxyJWEPayload(t, jweCompact, privKey)
-			require.Equal(t, tt.token, payload["k8s_token"])
-			if tt.omitRootCAKey {
-				_, hasRootCA := payload["root_ca"]
-				require.False(t, hasRootCA, "root_ca must be omitted when empty")
-				return
+
+			if tt.omitK8sTokenKey {
+				_, has := payload["k8s_token"]
+				require.False(t, has, "k8s_token must be omitted when empty")
+			} else {
+				require.Equal(t, tt.token, payload["k8s_token"])
 			}
-			require.Equal(t, tt.wantRootCA, payload["root_ca"])
+			if tt.omitRootCAKey {
+				_, has := payload["root_ca"]
+				require.False(t, has, "root_ca must be omitted when empty")
+			} else {
+				require.Equal(t, tt.wantRootCA, payload["root_ca"])
+			}
+			if tt.omitClusterTknKey {
+				_, has := payload["cluster_token"]
+				require.False(t, has, "cluster_token must be omitted when empty")
+			} else {
+				require.Equal(t, tt.wantClusterToken, payload["cluster_token"])
+			}
 		})
 	}
 }

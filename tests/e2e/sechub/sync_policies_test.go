@@ -246,6 +246,7 @@ func getSourceStoreID(t *testing.T, ctx *framework.TestContext, st string) strin
 		Behavior: "SECRETS_SOURCE",
 		Filters:  fmt.Sprintf("type EQ %s", st),
 	})
+	require.NoError(t, err)
 
 	// Read only the first page from the channel
 	firstPage, ok := <-srcStoresChan

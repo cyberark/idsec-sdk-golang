@@ -3,14 +3,12 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	secretsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secrets/models"
 )
@@ -87,66 +85,24 @@ func (s *IdsecSecHubSecretsService) getSecretsWithFilters(
 	if sort != "" {
 		query["sort"] = sort
 	}
-	results := make(chan *IdsecSecHubSecretsPage)
-	go func() {
-		defer close(results)
-		for {
-			response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
-			if err != nil {
-				s.Logger.Error("Failed to list Secrets %v", err)
-				return
-			}
-			defer func(Body io.ReadCloser) {
-				err := Body.Close()
+	return pagination.ListAllPaginated[secretsmodels.IdsecSecHubSecret](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), sechubURL, query),
+		pagination.ListPaginatedConfig[secretsmodels.IdsecSecHubSecret]{
+			ResourceName: "Secrets",
+			Decode: func(resultMap map[string]interface{}) ([]*secretsmodels.IdsecSecHubSecret, error) {
+				items, err := pagination.ExtractItemsFromResult(resultMap, "Secrets", "secrets")
 				if err != nil {
-					common.GlobalLogger.Warning("Error closing response body")
+					return nil, err
 				}
-			}(response.Body)
-			if response.StatusCode != http.StatusOK {
-				s.Logger.Error("Failed to list Secrets - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-				return
-			}
-			result, err := common.DeserializeJSONSnake(response.Body)
-			if err != nil {
-				s.Logger.Error("Failed to decode response: %v", err)
-				return
-			}
-			resultMap := result.(map[string]interface{})
-			var secretsJSON []interface{}
-			if secrets, ok := resultMap["secrets"]; ok {
-				secretsJSON = secrets.([]interface{})
-			} else {
-				s.Logger.Error("Failed to list Secrets, unexpected result")
-				return
-			}
-			for i, secrets := range secretsJSON {
-				if secretsMap, ok := secrets.(map[string]interface{}); ok {
-					if secretStoreID, ok := secretsMap["id"]; ok {
-						secretsJSON[i].(map[string]interface{})["id"] = secretStoreID
-					}
+				var secrets []*secretsmodels.IdsecSecHubSecret
+				if err := mapstructure.Decode(items, &secrets); err != nil {
+					return nil, fmt.Errorf("failed to validate Secrets: %w", err)
 				}
-			}
-			var secrets []*secretsmodels.IdsecSecHubSecret
-			if err := mapstructure.Decode(secretsJSON, &secrets); err != nil {
-				s.Logger.Error("Failed to validate Secrets: %v", err)
-				return
-			}
-			results <- &IdsecSecHubSecretsPage{Items: secrets}
-			if nextLink, ok := resultMap["nextLink"].(string); ok {
-				nextQuery, _ := url.Parse(nextLink)
-				queryValues := nextQuery.Query()
-				query = make(map[string]string)
-				for key, values := range queryValues {
-					if len(values) > 0 {
-						query[key] = values[0]
-					}
-				}
-			} else {
-				break
-			}
-		}
-	}()
-	return results, nil
+				return secrets, nil
+			},
+		},
+	)
 }
 
 // Get returns a channel of IdsecSecHubSecretsPage containing all Secret Stores.

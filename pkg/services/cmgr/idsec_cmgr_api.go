@@ -2,6 +2,7 @@ package cmgr
 
 import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/connectors"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolcomponents"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolidentifiers"
@@ -14,6 +15,7 @@ type IdsecCmgrAPI struct {
 	poolsService           *pools.IdsecCmgrPoolsService
 	poolIdentifiersService *poolidentifiers.IdsecCmgrPoolIdentifiersService
 	poolComponentsService  *poolcomponents.IdsecCmgrPoolComponentsService
+	connectorsService      *connectors.IdsecCmgrConnectorsService
 }
 
 // NewIdsecCmgrAPI creates a new instance of IdsecCmgrAPI with the provided IdsecISPAuth.
@@ -35,11 +37,16 @@ func NewIdsecCmgrAPI(ispAuth *auth.IdsecISPAuth) (*IdsecCmgrAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	connectorsService, err := connectors.NewIdsecCmgrConnectorsService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	return &IdsecCmgrAPI{
 		networksService:        networksService,
 		poolsService:           poolsService,
 		poolIdentifiersService: poolIdentifiersService,
 		poolComponentsService:  poolComponentsService,
+		connectorsService:      connectorsService,
 	}, nil
 }
 
@@ -61,4 +68,9 @@ func (api *IdsecCmgrAPI) PoolIdentifiers() *poolidentifiers.IdsecCmgrPoolIdentif
 // PoolComponents returns the Pool Components service of the IdsecCmgrAPI instance.
 func (api *IdsecCmgrAPI) PoolComponents() *poolcomponents.IdsecCmgrPoolComponentsService {
 	return api.poolComponentsService
+}
+
+// Connectors returns the Connectors service of the IdsecCmgrAPI instance.
+func (api *IdsecCmgrAPI) Connectors() *connectors.IdsecCmgrConnectorsService {
+	return api.connectorsService
 }

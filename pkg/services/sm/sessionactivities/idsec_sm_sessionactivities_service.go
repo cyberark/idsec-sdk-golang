@@ -12,6 +12,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	sessionactivitiesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessionactivities/models"
 )
@@ -92,32 +93,63 @@ func (s *IdsecSMSessionActivitiesService) callListSessionActivities(sessionID st
 	return &sessionActivities, nil
 }
 
+// returnedCountFromResultMap reads the "returned_count" field the SM list endpoints use to
+// report how many items were returned on the current page (0 signals the last page).
+func returnedCountFromResultMap(resultMap map[string]interface{}) (int, bool) {
+	switch v := resultMap["returned_count"].(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+// nextOffsetQuery builds the next page's query by advancing the "offset" param in current by
+// returnedCount, preserving every other filter/search param already present.
+func nextOffsetQuery(current map[string]string, returnedCount int) map[string]string {
+	offset := 0
+	if v, ok := current["offset"]; ok {
+		offset, _ = strconv.Atoi(v)
+	}
+	next := make(map[string]string, len(current)+1)
+	for k, v := range current {
+		next[k] = v
+	}
+	next["offset"] = strconv.Itoa(offset + returnedCount)
+	return next
+}
+
+func decodeSessionActivitiesFromResultMap(resultMap map[string]interface{}) ([]*sessionactivitiesmodels.IdsecSMSessionActivity, error) {
+	items, err := pagination.ExtractItemsFromResult(resultMap, "session activities", "activities")
+	if err != nil {
+		return nil, err
+	}
+	var activities []*sessionactivitiesmodels.IdsecSMSessionActivity
+	if err := mapstructure.Decode(items, &activities); err != nil {
+		return nil, fmt.Errorf("failed to decode session activities: %w", err)
+	}
+	return activities, nil
+}
+
 // listPagedSessionActivities retrieves the activities by session ID.
 func (s *IdsecSMSessionActivitiesService) listPagedSessionActivities(sessionID string) (<-chan *IdsecSMSessionActivitiesPage, error) {
-	results := make(chan *IdsecSMSessionActivitiesPage)
-	params := make(map[string]string)
-	offset := 0
-	go func() {
-		defer close(results)
-		for {
-			sessionActivitiesResponse, err := s.callListSessionActivities(sessionID, params)
-			if err != nil {
-				s.Logger.Error("failed to list session activities: %v", err)
-				return
-			}
-			if sessionActivitiesResponse.ReturnedCount == 0 {
-				break
-			}
-			activities := make([]*sessionactivitiesmodels.IdsecSMSessionActivity, len(sessionActivitiesResponse.Activities))
-			for i := range sessionActivitiesResponse.Activities {
-				activities[i] = &sessionActivitiesResponse.Activities[i]
-			}
-			results <- &IdsecSMSessionActivitiesPage{Items: activities}
-			offset += sessionActivitiesResponse.ReturnedCount
-			params["offset"] = strconv.Itoa(offset)
-		}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[sessionactivitiesmodels.IdsecSMSessionActivity](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), fmt.Sprintf(sessionActivitiesURL, sessionID), map[string]string{}),
+		pagination.ListPaginatedConfig[sessionactivitiesmodels.IdsecSMSessionActivity]{
+			ResourceName: "session activities",
+			Decode:       decodeSessionActivitiesFromResultMap,
+			NextQuery: func(resultMap map[string]interface{}, current map[string]string) (map[string]string, bool) {
+				returnedCount, ok := returnedCountFromResultMap(resultMap)
+				if !ok || returnedCount == 0 {
+					return nil, false
+				}
+				return nextOffsetQuery(current, returnedCount), true
+			},
+		},
+	)
 }
 
 // List retrieves the activities of a session by its ID.
@@ -142,26 +174,19 @@ func (s *IdsecSMSessionActivitiesService) ListBy(filter *sessionactivitiesmodels
 		s.Logger.Error("failed to list session activities: %v", err)
 		return nil, err
 	}
-	out := make(chan *IdsecSMSessionActivitiesPage)
 
-	go func() {
-		defer close(out)
-
-		for page := range pagedSessionActivities {
-			filteredItems := make([]*sessionactivitiesmodels.IdsecSMSessionActivity, 0, len(page.Items))
-
-			for _, activity := range page.Items {
-				if filter.CommandContains == "" || strings.Contains(activity.Command, filter.CommandContains) {
-					filteredItems = append(filteredItems, activity)
-				}
-			}
-
-			out <- &IdsecSMSessionActivitiesPage{
-				Items: filteredItems,
+	filteredItems := make([]*sessionactivitiesmodels.IdsecSMSessionActivity, 0)
+	for page := range pagedSessionActivities {
+		for _, activity := range page.Items {
+			if filter.CommandContains == "" || strings.Contains(activity.Command, filter.CommandContains) {
+				filteredItems = append(filteredItems, activity)
 			}
 		}
-	}()
+	}
 
+	out := make(chan *IdsecSMSessionActivitiesPage, 1)
+	out <- &IdsecSMSessionActivitiesPage{Items: filteredItems}
+	close(out)
 	return out, nil
 }
 

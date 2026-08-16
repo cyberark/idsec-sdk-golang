@@ -372,6 +372,67 @@ func TestSecretStoreLifecycleGCP(t *testing.T) {
 	}, secretstores.ServiceConfig)
 }
 
+// TestSecretStoreUpdateAuthenticationMethodAWS tests that the AuthenticationMethod field
+// can be updated from TENANT_ROLE to GLOBAL_ROLE_EXTERNAL_ID on an AWS secret store.
+func TestSecretStoreUpdateAuthenticationMethodAWS(t *testing.T) {
+	framework.Run(t, func(ctx *framework.TestContext) {
+		framework.LogSection(t, "Test: Update AuthenticationMethod TENANT_ROLE -> GLOBAL_ROLE_EXTERNAL_ID (AWS)")
+
+		// Get the SecHub SecretStores service
+		secretStoresSvc, err := ctx.API.SechubSecretstores()
+		require.NoError(t, err)
+
+		// 1. CREATE
+		secretStore := creteSecretStoreResourceForTest(t, ctx,
+			e2eSecretStoreNamePrefix,
+			"AuthMethod transition test",
+			"AWS_ASM",
+			secretstoresmodels.IdsecSecHubSecretStoreData{
+				AccountAlias:         "test-account-alias",
+				AccountID:            randomAWSAccountID(),
+				RegionID:             "eu-north-1",
+				RoleName:             "TestSecretsAccessRole",
+				AuthenticationMethod: "TENANT_ROLE",
+			})
+
+		t.Logf("SecretStore created successfully: %s (ID: %s)", secretStore.Name, secretStore.ID)
+
+		// 2. READ
+		t.Logf("Step 2: Reading secret store: %s", secretStore.ID)
+		retrievedSecretStore, err := secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
+			ID: secretStore.ID,
+		})
+		require.NoError(t, err, "Failed to retrieve secret store")
+		assert.Equal(t, secretStore.Name, retrievedSecretStore.Name)
+		assert.Equal(t, "TENANT_ROLE", retrievedSecretStore.Data.AuthenticationMethod)
+
+		// 3. UPDATE - change AuthenticationMethod from TENANT_ROLE to GLOBAL_ROLE_EXTERNAL_ID
+		t.Logf("Step 3: Updating secret store AuthenticationMethod to GLOBAL_ROLE_EXTERNAL_ID: %s", secretStore.ID)
+		updatedSecretStore, err := secretStoresSvc.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
+			ID:          secretStore.ID,
+			Name:        secretStore.Name,
+			Description: "AuthMethod transition test",
+			Data: &secretstoresmodels.IdsecSecHubSecretStoreData{
+				AccountAlias:         "test-account-alias",
+				RoleName:             "TestSecretsAccessRole",
+				AuthenticationMethod: "GLOBAL_ROLE_EXTERNAL_ID",
+			},
+		})
+		require.NoError(t, err, "Failed to update secret store AuthenticationMethod")
+		assert.Equal(t, "GLOBAL_ROLE_EXTERNAL_ID", updatedSecretStore.Data.AuthenticationMethod)
+
+		// Verify update
+		retrievedSecretStore, err = secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
+			ID: secretStore.ID,
+		})
+		require.NoError(t, err, "Failed to retrieve secret store after AuthenticationMethod update")
+		assert.Equal(t, "GLOBAL_ROLE_EXTERNAL_ID", retrievedSecretStore.Data.AuthenticationMethod)
+
+		t.Log("SecretStore AuthenticationMethod update completed successfully")
+		// 4. DELETE happens automatically via cleanup
+	}, secretstores.ServiceConfig)
+}
+
 func TestSecretStoreLifecycleHashi(t *testing.T) {
 	framework.Run(t, func(ctx *framework.TestContext) {
 		framework.LogSection(t, "Test: Secret Store Lifecycle HashiCorp Vault (CRUD)")
@@ -387,15 +448,17 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 			"HASHICORP_VAULT",
 			secretstoresmodels.IdsecSecHubSecretStoreData{
 				HashiVaultURL:      randomHashiVaultURL(),
-				MountPath:          "secret",
+				MountPath:          "secret/",
 				RoleName:           "secrets-hub-role",
-				AuthenticationPath: "auth/jwt/login",
+				AuthenticationPath: "auth/jwt/login/",
 				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
 					ConnectionType: "PUBLIC",
 				},
 			})
 
 		t.Logf("SecretStore created successfully: %s (ID: %s)", secretStore.Name, secretStore.ID)
+		assert.Equal(t, "secret/", secretStore.Data.MountPath)
+		assert.Equal(t, "auth/jwt/login/", secretStore.Data.AuthenticationPath)
 
 		// 2. READ
 		t.Logf("Step 2: Reading secret store: %s", secretStore.ID)
@@ -405,6 +468,8 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		require.NoError(t, err, "Failed to retrieve secret store")
 		assert.Equal(t, secretStore.Name, retrievedSecretStore.Name)
 		assert.Equal(t, "Initial description", retrievedSecretStore.Description)
+		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
+		assert.Equal(t, "auth/jwt/login/", retrievedSecretStore.Data.AuthenticationPath)
 
 		// 3. UPDATE
 		t.Logf("Step 3: Updating secret store: %s", secretStore.ID)
@@ -416,11 +481,13 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 			Description: updatedDescription,
 			Data: &secretstoresmodels.IdsecSecHubSecretStoreData{
 				RoleName:           updatedRoleName,
-				AuthenticationPath: "auth/jwt/login",
+				AuthenticationPath: "auth/jwt/login/",
 			},
 		})
 		require.NoError(t, err, "Failed to update secret store")
 		assert.Equal(t, updatedDescription, updatedSecretStore.Description)
+		assert.Equal(t, "secret/", updatedSecretStore.Data.MountPath)
+		assert.Equal(t, "auth/jwt/login/", updatedSecretStore.Data.AuthenticationPath)
 
 		// Verify update
 		retrievedSecretStore, err = secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
@@ -428,6 +495,8 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		})
 		require.NoError(t, err, "Failed to retrieve updated secret store")
 		assert.Equal(t, updatedDescription, retrievedSecretStore.Description)
+		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
+		assert.Equal(t, "auth/jwt/login/", retrievedSecretStore.Data.AuthenticationPath)
 
 		t.Log("SecretStore lifecycle completed successfully")
 		// 4. DELETE happens automatically via cleanup

@@ -3,6 +3,7 @@ package models
 // IdsecPCloudAccountActivitiesFilter represents the filter options for an account's activities.
 type IdsecPCloudAccountActivitiesFilter struct {
 	AccountID      string `json:"account_id" mapstructure:"account_id" flag:"account-id" desc:"The ID of the account for which to retrieve the activities" validate:"required"`
+	SafeName       string `json:"safe_name,omitempty" mapstructure:"safe_name,omitempty" flag:"safe-name" desc:"The name of the safe to retrieve the activities from, will be resolved automatically if omitted"`
 	User           string `json:"user,omitempty" mapstructure:"user,omitempty" flag:"user" desc:"Only return activities performed by this user"`
 	ActionContains string `json:"action_contains,omitempty" mapstructure:"action_contains,omitempty" flag:"action-contains" desc:"Only return activities whose action contains this string"`
 	ClientID       string `json:"client_id,omitempty" mapstructure:"client_id,omitempty" flag:"client-id" desc:"Only return activities performed from this CyberArk client ID"`

@@ -77,7 +77,7 @@ func buildPrincipalISPAuthenticator(
 		authMethodSettings = &authmodels.IdentityServiceUserIdsecAuthMethodSettings{
 			IdentityURL:                      strVal(authCfg, "identity_url"),
 			IdentityTenantSubdomain:          strVal(authCfg, "identity_tenant_subdomain"),
-			IdentityAuthorizationApplication: "",
+			IdentityAuthorizationApplication: "__idaptive_cybr_user_oidc",
 		}
 	}
 

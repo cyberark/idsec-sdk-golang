@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -14,27 +15,10 @@ import (
 	pcloudint "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/internal"
 )
 
-// List channel regression tests (minimal set):
-//   - mid-pagination HTTP error after a good first page → terminal page with Err (not silent close);
-//   - first request fails → single terminal Err page (not confused with empty list);
-//   - two OK pages → no Err on any page (next_link success path).
-
-// requireProducerExits drains ch until it is closed, failing if that does not happen promptly
-// (which would indicate the producer goroutine is leaked, blocked forever on a send).
-func requireProducerExits[T any](t *testing.T, ch <-chan T) {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		for range ch {
-		}
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("producer goroutine did not exit after context cancellation (leak)")
-	}
-}
+// List error-propagation and pagination regression tests (minimal set):
+//   - mid-pagination HTTP error after a good first page -> returned error, no channel;
+//   - first request fails -> returned error, no channel;
+//   - two OK pages -> single combined page with items from both requests, no error.
 
 func newTestPCloudAccountsService(parts *pcloudint.MockISPServiceParts) *accounts.IdsecPCloudAccountsService {
 	return &accounts.IdsecPCloudAccountsService{
@@ -43,31 +27,11 @@ func newTestPCloudAccountsService(parts *pcloudint.MockISPServiceParts) *account
 	}
 }
 
-func drainAccountsListPages(t *testing.T, svc *accounts.IdsecPCloudAccountsService) []*accounts.IdsecPCloudAccountsPage {
-	t.Helper()
-	ch, err := svc.ListBy(&accountsmodels.IdsecPCloudAccountsFilter{})
-	require.NoError(t, err)
-	var pages []*accounts.IdsecPCloudAccountsPage
-	for p := range ch {
-		pages = append(pages, p)
-	}
-	return pages
-}
-
-func requireAccountsListPropagatesPage2Failure(t *testing.T, listGETs int, pages []*accounts.IdsecPCloudAccountsPage) {
-	t.Helper()
-	require.GreaterOrEqual(t, listGETs, 2,
-		"pagination must issue a second GET when the API returns nextLink (decoded map key is next_link)")
-	require.GreaterOrEqual(t, len(pages), 2, "expect at least one data page and a terminal error page")
-	require.NoError(t, pages[0].Err, "data pages must not set Err")
-	require.Error(t, pages[len(pages)-1].Err, "last page must carry Err after a page-2+ failure")
-}
-
-func TestAccountsList_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) {
+func TestAccountsList_midPaginationHTTPError_returnsErr(t *testing.T) {
 	t.Parallel()
 	var listGETs int
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts" {
+		if r.Method != http.MethodGet || r.URL.Path != "/PasswordVault/api/accounts" {
 			http.NotFound(w, r)
 			return
 		}
@@ -75,7 +39,7 @@ func TestAccountsList_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) 
 		n := listGETs
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			next := "http://" + r.Host + "/api/accounts?page=2"
+			next := "http://" + r.Host + "/PasswordVault/api/accounts?page=2"
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprintf(w, `{"value":[{"id":"a1","name":"n1","user_name":"u1","safe_name":"S1"}],"nextLink":%q}`, next)
 			return
@@ -86,15 +50,18 @@ func TestAccountsList_midPaginationHTTPError_emitsTerminalErrPage(t *testing.T) 
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainAccountsListPages(t, newTestPCloudAccountsService(parts))
-	requireAccountsListPropagatesPage2Failure(t, listGETs, pages)
+	ch, err := newTestPCloudAccountsService(parts).ListBy(&accountsmodels.IdsecPCloudAccountsFilter{})
+	require.Error(t, err)
+	require.Nil(t, ch)
+	require.GreaterOrEqual(t, listGETs, 2,
+		"pagination must issue a second GET when the API returns nextLink (decoded map key is next_link)")
 }
 
 func TestAccountsList_channelPropagatesFirstPageFailure(t *testing.T) {
 	t.Parallel()
 	var listGETs int
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts" {
+		if r.Method != http.MethodGet || r.URL.Path != "/PasswordVault/api/accounts" {
 			http.NotFound(w, r)
 			return
 		}
@@ -105,23 +72,23 @@ func TestAccountsList_channelPropagatesFirstPageFailure(t *testing.T) {
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainAccountsListPages(t, newTestPCloudAccountsService(parts))
+	ch, err := newTestPCloudAccountsService(parts).ListBy(&accountsmodels.IdsecPCloudAccountsFilter{})
+	require.Error(t, err, "first and only page must surface as a returned error")
+	require.Nil(t, ch)
 	require.Equal(t, 1, listGETs, "only the first list GET before failure")
-	require.Len(t, pages, 1, "terminal error page only, not silent empty channel")
-	require.Error(t, pages[0].Err, "first and only page must carry Err")
 }
 
-// TestAccountsListContext_cancelReleasesProducer verifies the goroutine-leak fix: a consumer
-// that abandons iteration early and cancels the context must release the producer goroutine,
-// even though the API advertises another page forever.
-func TestAccountsListContext_cancelReleasesProducer(t *testing.T) {
+// TestAccountsListContext_cancelStopsPagination verifies that cancelling ctx while pagination is
+// in flight against an endpoint that advertises another page forever unblocks the call (via the
+// underlying HTTP request failing with context.Canceled) instead of hanging indefinitely.
+func TestAccountsListContext_cancelStopsPagination(t *testing.T) {
 	t.Parallel()
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts" {
+		if r.Method != http.MethodGet || r.URL.Path != "/PasswordVault/api/accounts" {
 			http.NotFound(w, r)
 			return
 		}
-		next := "http://" + r.Host + "/api/accounts?page=next"
+		next := "http://" + r.Host + "/PasswordVault/api/accounts?page=next"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"value":[{"id":"a1","name":"n1","user_name":"u1","safe_name":"S1"}],"nextLink":%q}`, next)
@@ -130,22 +97,28 @@ func TestAccountsListContext_cancelReleasesProducer(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := newTestPCloudAccountsService(parts).ListByContext(ctx, &accountsmodels.IdsecPCloudAccountsFilter{})
-	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := newTestPCloudAccountsService(parts).ListByContext(ctx, &accountsmodels.IdsecPCloudAccountsFilter{})
+		done <- err
+	}()
 
-	first, ok := <-ch
-	require.True(t, ok, "expected at least one page before abandoning iteration")
-	require.NoError(t, first.Err)
-
+	time.Sleep(50 * time.Millisecond)
 	cancel()
-	requireProducerExits(t, ch)
+
+	select {
+	case err := <-done:
+		require.Error(t, err, "cancelled pagination must surface an error instead of an empty success")
+	case <-time.After(3 * time.Second):
+		t.Fatal("ListByContext did not return after context cancellation (possible hang)")
+	}
 }
 
-func TestAccountsList_happyMultiPageNoTerminalErr(t *testing.T) {
+func TestAccountsList_happyMultiPageCombinedIntoSinglePage(t *testing.T) {
 	t.Parallel()
 	var listGETs int
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/accounts" {
+		if r.Method != http.MethodGet || r.URL.Path != "/PasswordVault/api/accounts" {
 			http.NotFound(w, r)
 			return
 		}
@@ -153,7 +126,7 @@ func TestAccountsList_happyMultiPageNoTerminalErr(t *testing.T) {
 		n := listGETs
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			next := "http://" + r.Host + "/api/accounts?page=2"
+			next := "http://" + r.Host + "/PasswordVault/api/accounts?page=2"
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprintf(w, `{"value":[{"id":"a1","name":"n1","user_name":"u1","safe_name":"S1"}],"nextLink":%q}`, next)
 			return
@@ -164,14 +137,56 @@ func TestAccountsList_happyMultiPageNoTerminalErr(t *testing.T) {
 	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
 	t.Cleanup(cleanup)
 
-	pages := drainAccountsListPages(t, newTestPCloudAccountsService(parts))
+	ch, err := newTestPCloudAccountsService(parts).ListBy(&accountsmodels.IdsecPCloudAccountsFilter{})
+	require.NoError(t, err)
 	require.Equal(t, 2, listGETs)
-	require.Len(t, pages, 2)
-	for i, p := range pages {
-		require.NoError(t, p.Err, "page %d must not be a terminal error page on full success", i)
+
+	var pages []*accounts.IdsecPCloudAccountsPage
+	for p := range ch {
+		pages = append(pages, p)
 	}
-	require.Len(t, pages[0].Items, 1)
-	require.Len(t, pages[1].Items, 1)
+	require.Len(t, pages, 1, "ListAllPaginated collapses all pages into a single page")
+	require.Len(t, pages[0].Items, 2)
 	require.Equal(t, "a1", pages[0].Items[0].AccountID)
-	require.Equal(t, "a2", pages[1].Items[0].AccountID)
+	require.Equal(t, "a2", pages[0].Items[1].AccountID)
+}
+
+// TestAccountsListBy_appliesAllQueryParams verifies that a fully populated filter maps each field to
+// the correct outgoing query-param key/value. In particular SafeName must become the OData-style
+// filter "safeName eq <value>" and not a "safe_name" param.
+func TestAccountsListBy_appliesAllQueryParams(t *testing.T) {
+	t.Parallel()
+	var gotQuery url.Values
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/PasswordVault/api/accounts" {
+			http.NotFound(w, r)
+			return
+		}
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"value":[{"id":"a1","name":"n1","user_name":"u1","safe_name":"S1"}]}`)
+	})
+	parts, cleanup := pcloudint.SetupMockISPServiceParts(t, h)
+	t.Cleanup(cleanup)
+
+	ch, err := newTestPCloudAccountsService(parts).ListBy(&accountsmodels.IdsecPCloudAccountsFilter{
+		Search:     "admin",
+		SearchType: "contains",
+		Sort:       "userName desc",
+		SafeName:   "MySafe",
+		Offset:     5,
+		Limit:      50,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, ch)
+	for range ch {
+	}
+
+	require.Equal(t, "admin", gotQuery.Get("search"))
+	require.Equal(t, "contains", gotQuery.Get("searchType"))
+	require.Equal(t, "userName desc", gotQuery.Get("sort"))
+	require.Equal(t, "5", gotQuery.Get("offset"))
+	require.Equal(t, "50", gotQuery.Get("limit"))
+	require.Equal(t, "safeName eq MySafe", gotQuery.Get("filter"))
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -42,17 +43,9 @@ type AWSTokenProvider struct{}
 // CSP returns the AWS CSP identifier.
 func (p *AWSTokenProvider) CSP() string { return k8smodels.CSPAWS }
 
-// GenerateToken creates an EKS bearer token by presigning a GetCallerIdentity
-// request using the AWS STS credentials from the Elevate API response.
-//
-// The x-k8s-aws-id header and X-Amz-Expires query parameter are both injected
-// via a Build-phase middleware so they are included in the SigV4 signature,
-// which EKS requires.
-//
-// status.expirationTimestamp is stamped at presignedAt + eksPresignDuration −
-// eksExecCredRefreshBuffer (UTC, RFC3339). This lets client-go and the unified
-// ExecCredential cache replay the same token until the early-refresh window,
-// after which a fresh kubectl invocation will trigger regeneration.
+// GenerateToken returns an ExecCredential for EKS.
+// Uses the server-provided eksToken when present (expiry decoded via ParseEKSTokenExpiry);
+// falls back to client-side STS presigning from accessCredentials (legacy path).
 func (p *AWSTokenProvider) GenerateToken(
 	result *k8smodels.IdsecSCAK8sElevateResult,
 	ctx *IdsecSCAK8sClusterContext,
@@ -60,6 +53,27 @@ func (p *AWSTokenProvider) GenerateToken(
 	if result == nil {
 		return nil, fmt.Errorf("elevate result cannot be nil")
 	}
+
+	// Server-side EKS token path: the Elevate API has already presigned the STS
+	// request and returned a ready-to-use bearer token. Parse the exact expiry
+	// from the embedded presigned URL parameters instead of approximating locally.
+	if strings.TrimSpace(result.EKSToken) != "" {
+		expiry, err := ParseEKSTokenExpiry(result.EKSToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse eksToken expiry: %w", err)
+		}
+		expiresAt := expiry.Add(-eksExecCredRefreshBuffer).UTC()
+		return &k8smodels.IdsecSCAK8sExecCredential{
+			APIVersion: eksExecCredAPIVersion,
+			Kind:       "ExecCredential",
+			Status: k8smodels.IdsecSCAK8sExecCredentialStatus{
+				Token:               result.EKSToken,
+				ExpirationTimestamp: expiresAt.Format(time.RFC3339),
+			},
+		}, nil
+	}
+
+	// Client-side fallback: presign GetCallerIdentity using accessCredentials.
 	if result.AccessCredentials == "" {
 		return nil, fmt.Errorf("accessCredentials is empty for AWS CSP")
 	}
@@ -155,6 +169,47 @@ func ParseEKSARN(arn string) (region, clusterName string, err error) {
 		return "", "", fmt.Errorf("cluster name is empty in EKS ARN: %q", arn)
 	}
 	return region, clusterName, nil
+}
+
+// ParseEKSTokenExpiry extracts the exact expiration time from a server-provided
+// EKS bearer token by decoding the embedded STS presigned URL.
+//
+// An EKS token is: k8s-aws-v1.<base64url-no-padding(presigned-URL)>
+// The presigned URL contains:
+//   - X-Amz-Date  — the STS request signing time  (format: 20060102T150405Z)
+//   - X-Amz-Expires — token lifetime in seconds
+//
+// The raw expiry is signingTime + X-Amz-Expires. Callers should subtract
+// eksExecCredRefreshBuffer before stamping status.expirationTimestamp.
+func ParseEKSTokenExpiry(eksToken string) (time.Time, error) {
+	tokenBody, ok := strings.CutPrefix(eksToken, eksTokenPrefix)
+	if !ok {
+		return time.Time{}, fmt.Errorf("eksToken missing required prefix %q", eksTokenPrefix)
+	}
+	urlBytes, err := base64.RawURLEncoding.DecodeString(tokenBody)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to base64-decode eksToken: %w", err)
+	}
+	// Skip full URL parsing — extract only the query string since that's all we need.
+	_, rawQuery, ok := strings.Cut(string(urlBytes), "?")
+	if !ok {
+		return time.Time{}, fmt.Errorf("presigned URL in eksToken has no query string")
+	}
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse query string from eksToken: %w", err)
+	}
+	amzDate := q.Get("X-Amz-Date")
+	signingTime, err := time.Parse("20060102T150405Z", amzDate)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid X-Amz-Date %q in eksToken: %w", amzDate, err)
+	}
+	amzExpires := q.Get("X-Amz-Expires")
+	expiresSecs, err := strconv.Atoi(amzExpires)
+	if err != nil || expiresSecs <= 0 {
+		return time.Time{}, fmt.Errorf("invalid X-Amz-Expires %q in eksToken: must be a positive integer", amzExpires)
+	}
+	return signingTime.Add(time.Duration(expiresSecs) * time.Second).UTC(), nil
 }
 
 // eksPresignMiddleware is a Build-phase middleware that:

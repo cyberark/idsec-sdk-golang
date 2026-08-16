@@ -10,6 +10,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	scansmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans/models"
 )
@@ -63,58 +64,37 @@ func (s *IdsecSecHubScansService) refreshSecHubAuth(client *common.IdsecClient) 
 	return nil
 }
 
+func decodeScansFromResultMap(resultMap map[string]interface{}) ([]*scansmodels.IdsecSecHubScan, error) {
+	items, err := pagination.ExtractItemsFromResult(resultMap, "Secret Store scans", "scans")
+	if err != nil {
+		return nil, err
+	}
+	var scans []*scansmodels.IdsecSecHubScan
+	if err := mapstructure.Decode(items, &scans); err != nil {
+		return nil, fmt.Errorf("failed to validate Secret Store scans: %w", err)
+	}
+	return scans, nil
+}
+
 // Get retrieves the scans info from the Secrets Hub service.
 // https://api-docs.cyberark.com/docs/secretshub-api/78cprz38emhrb-get-scans
+//
+// This endpoint is not OData-paginated: it returns every scan in a single response, so
+// NextQuery always stops after the first page (matching the previous non-looping behavior).
 func (s *IdsecSecHubScansService) Get() (<-chan *IdsecSecHubScansPage, error) {
 	s.Logger.Info("Getting scans")
 
-	results := make(chan *IdsecSecHubScansPage)
-	go func() {
-		defer close(results)
-		response, err := s.ISPClient().Get(context.Background(), sechubURL, nil)
-		if err != nil {
-			s.Logger.Error("Failed to list filters: %v", err)
-			return
-		}
-		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				common.GlobalLogger.Warning("Error closing response body")
-			}
-		}(response.Body)
-		if response.StatusCode != http.StatusOK {
-			s.Logger.Error("Failed to list Secret Store Scans - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-			return
-		}
-		result, err := common.DeserializeJSONSnake(response.Body)
-		if err != nil {
-			s.Logger.Error("Failed to decode response: %v", err)
-			return
-		}
-		resultMap := result.(map[string]interface{})
-		var scansJSON []interface{}
-		if scans, ok := resultMap["scans"]; ok {
-			scansJSON = scans.([]interface{})
-		} else {
-			s.Logger.Error("Failed to list Secret Store scans, unexpected result")
-			return
-		}
-		for i, scansMember := range scansJSON {
-			if scansMemberMap, ok := scansMember.(map[string]interface{}); ok {
-				if ID, ok := scansMemberMap["id"]; ok {
-					scansJSON[i].(map[string]interface{})["id"] = ID
-				}
-			}
-		}
-		var scans []*scansmodels.IdsecSecHubScan
-		if err := mapstructure.Decode(scansJSON, &scans); err != nil {
-			s.Logger.Error("Failed to validate Secret Store scans: %v", err)
-			return
-		}
-
-		results <- &IdsecSecHubScansPage{Items: scans}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[scansmodels.IdsecSecHubScan](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), sechubURL, nil),
+		pagination.ListPaginatedConfig[scansmodels.IdsecSecHubScan]{
+			ResourceName: "Secret Store scans",
+			Decode:       decodeScansFromResultMap,
+			NextQuery: func(_ map[string]interface{}, _ map[string]string) (map[string]string, bool) {
+				return nil, false
+			},
+		},
+	)
 }
 
 // Trigger triggers scans in the Secrets Hub service.

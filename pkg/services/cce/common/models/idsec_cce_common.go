@@ -132,6 +132,7 @@ type IdsecCCEPropertyOutput struct {
 // OPENAPI-CORRELATION: ServiceInput
 type IdsecCCEServiceInput struct {
 	ServiceName string                 `json:"serviceName" mapstructure:"service_name" choices:"dpa,sca,secrets_hub,cds" desc:"Name of the service to be onboarded"` //nolint:tagliatelle
+	Version     string                 `json:"version,omitempty" mapstructure:"version" desc:"Service version number"`
 	Resources   map[string]interface{} `json:"resources" mapstructure:"resources" desc:"Service-specific resource configuration"`
 }
 

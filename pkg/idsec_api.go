@@ -56,8 +56,10 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/profiles"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 
+	assets "github.com/cyberark/idsec-sdk-golang/pkg/services/access/assets"
 	aws "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	azure "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
+	connectors "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/connectors"
 	networks "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks"
 	poolcomponents "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolcomponents"
 	poolidentifiers "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolidentifiers"
@@ -262,6 +264,19 @@ func (api *IdsecAPI) Profile() *models.IdsecProfile {
 	return api.profile
 }
 
+func (api *IdsecAPI) AccessAssets() (*assets.IdsecAccessAssetsService, error) {
+	if serviceIfs, ok := api.services[assets.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*assets.IdsecAccessAssetsService), nil
+	}
+	service, err := assets.ServiceGenerator(api.loadServiceAuthenticators(assets.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[assets.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
 func (api *IdsecAPI) CceAws() (*aws.IdsecCCEAWSService, error) {
 	if serviceIfs, ok := api.services[aws.ServiceConfig.ServiceName]; ok {
 		return (*serviceIfs).(*aws.IdsecCCEAWSService), nil
@@ -285,6 +300,19 @@ func (api *IdsecAPI) CceAzure() (*azure.IdsecCCEAzureService, error) {
 	}
 	var baseService services.IdsecService = service
 	api.services[azure.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) CmgrConnectors() (*connectors.IdsecCmgrConnectorsService, error) {
+	if serviceIfs, ok := api.services[connectors.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*connectors.IdsecCmgrConnectorsService), nil
+	}
+	service, err := connectors.ServiceGenerator(api.loadServiceAuthenticators(connectors.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[connectors.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

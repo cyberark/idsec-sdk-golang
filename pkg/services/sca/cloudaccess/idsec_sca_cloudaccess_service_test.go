@@ -561,8 +561,10 @@ func TestListTargets_WorkspaceID(t *testing.T) {
 	require.Contains(t, capturedQuery, "workspaceId=ws-filter-123")
 }
 
-// TestListTargets_Pagination verifies limit and nextToken are forwarded as query params
-// and that single-CSP list-targets follows response nextToken values.
+// TestListTargets_Pagination verifies that when limit and/or nextToken are
+// explicitly provided, list-targets returns exactly one page as-is: the request
+// forwards limit and nextToken as query params, a single API call is made, and
+// the response's nextToken is preserved so the caller can page manually.
 func TestListTargets_Pagination(t *testing.T) {
 	var capturedQueries []string
 	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
@@ -570,14 +572,6 @@ func TestListTargets_Pagination(t *testing.T) {
 			Matcher:      func(r *http.Request) bool { return r.URL.Query().Get("nextToken") == "prev-token" },
 			StatusCode:   http.StatusOK,
 			ResponseBody: `{"response": [], "total": 50, "nextToken": "next-page-token"}`,
-			OnRequest: func(r *http.Request) {
-				capturedQueries = append(capturedQueries, r.URL.RawQuery)
-			},
-		},
-		{
-			Matcher:      func(r *http.Request) bool { return r.URL.Query().Get("nextToken") == "next-page-token" },
-			StatusCode:   http.StatusOK,
-			ResponseBody: `{"response": [], "total": 50}`,
 			OnRequest: func(r *http.Request) {
 				capturedQueries = append(capturedQueries, r.URL.RawQuery)
 			},
@@ -595,12 +589,10 @@ func TestListTargets_Pagination(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Equal(t, 50, resp.Total)
-	require.Empty(t, resp.NextToken)
-	require.Len(t, capturedQueries, 2)
+	require.Equal(t, "next-page-token", resp.NextToken)
+	require.Len(t, capturedQueries, 1)
 	require.Contains(t, capturedQueries[0], "limit=10")
 	require.Contains(t, capturedQueries[0], "nextToken=prev-token")
-	require.Contains(t, capturedQueries[1], "limit=10")
-	require.Contains(t, capturedQueries[1], "nextToken=next-page-token")
 }
 
 // TestListTargets_WorkspaceID_NotSentWhenEmpty verifies workspaceId is omitted

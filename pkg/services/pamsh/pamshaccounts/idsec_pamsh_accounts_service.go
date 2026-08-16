@@ -8,8 +8,8 @@ import (
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
-	pamshinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/internal"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshaccounts/models"
 )
 
@@ -89,17 +89,18 @@ func (s *IdsecPamshAccountsService) listAccountsWithFilters(
 	if safeName != "" {
 		query["filter"] = fmt.Sprintf("safeName eq %s", safeName)
 	}
-	return pamshinternal.ListPaginated(
-		s.PVWAClient(),
-		accountsURL,
-		query,
-		pamshinternal.ListPaginatedConfig[accountsmodels.IdsecPamshAccount]{
-			Logger:       s.Logger,
+	return pagination.ListPaginated[accountsmodels.IdsecPamshAccount](
+		context.Background(),
+		pagination.HTTPGetFetch(s.PVWAClient(), accountsURL, query),
+		pagination.ListPaginatedConfig[accountsmodels.IdsecPamshAccount]{
 			ResourceName: "accounts",
-			ExtractItems: func(resultMap map[string]interface{}) ([]interface{}, error) {
-				return pamshinternal.ExtractItemsFromResult(resultMap, "accounts")
+			Decode: func(resultMap map[string]interface{}) ([]*accountsmodels.IdsecPamshAccount, error) {
+				rawItems, err := pagination.ExtractItemsFromResult(resultMap, "accounts")
+				if err != nil {
+					return nil, err
+				}
+				return decodePamshAccountsFromMaps(rawItems)
 			},
-			DecodeItems: decodePamshAccountsFromMaps,
 		},
 	)
 }
@@ -161,7 +162,7 @@ func (s *IdsecPamshAccountsService) Get(getAccount *accountsmodels.IdsecPamshGet
 	}
 	if getAccount.AccountID == "" && getAccount.AccountName != "" {
 		accountsPages, errCh := s.listAccountsWithFilters(getAccount.AccountName, "", "", 0, 1, "")
-		accounts, err := pamshinternal.DrainPages(accountsPages, errCh)
+		accounts, err := pagination.DrainPages(accountsPages, errCh)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +209,7 @@ func (s *IdsecPamshAccountsService) Create(addAccount *accountsmodels.IdsecPamsh
 		return nil, err
 	}
 	if response.StatusCode == http.StatusConflict {
-		pamshinternal.ClosePVWAResponse(response)
+		pagination.CloseResponse(response)
 		s.Logger.Info("Account [%s] already exists, retrieving existing account", addAccount.Name)
 		account, err := s.Get(&accountsmodels.IdsecPamshGetAccount{
 			AccountName: addAccount.Name,
@@ -227,11 +228,11 @@ func (s *IdsecPamshAccountsService) Create(addAccount *accountsmodels.IdsecPamsh
 	}
 	if response.StatusCode != http.StatusCreated {
 		createErr := fmt.Errorf("failed to add account - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-		pamshinternal.ClosePVWAResponse(response)
+		pagination.CloseResponse(response)
 		return nil, createErr
 	}
 	account, err := s.parseAccountResponse(response.Body)
-	pamshinternal.ClosePVWAResponse(response)
+	pagination.CloseResponse(response)
 	if err != nil {
 		return nil, err
 	}

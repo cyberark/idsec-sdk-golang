@@ -176,3 +176,36 @@ func TestGetMember_readOnlyPermissionSetWithExtraPermissionsResolvesToCustom(t *
 	require.NotEqual(t, readOnlyPerms, member.Permissions,
 		"extra permission flags must not be treated as read_only")
 }
+
+func TestDecodePamshSafesFromResultMap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy path", func(t *testing.T) {
+		t.Parallel()
+		resultMap := map[string]interface{}{
+			"Safes": []interface{}{
+				map[string]interface{}{"safe_id": "s1", "safe_name": "name1"},
+			},
+		}
+		safes, err := decodePamshSafesFromResultMap(resultMap)
+		require.NoError(t, err)
+		require.Len(t, safes, 1)
+		require.Equal(t, "s1", safes[0].SafeID)
+		require.Equal(t, "name1", safes[0].SafeName)
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		t.Parallel()
+		_, err := decodePamshSafesFromResultMap(map[string]interface{}{})
+		require.Error(t, err)
+	})
+
+	t.Run("unexpected item type", func(t *testing.T) {
+		t.Parallel()
+		resultMap := map[string]interface{}{
+			"Safes": []interface{}{"not-a-map"},
+		}
+		_, err := decodePamshSafesFromResultMap(resultMap)
+		require.Error(t, err)
+	})
+}

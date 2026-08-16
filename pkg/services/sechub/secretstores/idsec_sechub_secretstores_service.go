@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/mitchellh/mapstructure"
 	secretstoresmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretstores/models"
@@ -13,6 +12,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 )
 
@@ -89,73 +89,31 @@ func (s *IdsecSecHubSecretStoresService) getSecretStoresWithFilters(
 	behavior string,
 	filter string,
 ) (<-chan *IdsecSecHubSecretStoresPage, error) {
-	query := map[string]string{}
+	initialQuery := map[string]string{}
 	if behavior != "" {
-		query["behavior"] = behavior
+		initialQuery["behavior"] = behavior
 	}
 	/*if len(filter) != 0 {
-		query["filter"] = filter
+		initialQuery["filter"] = filter
 	}*/
-	results := make(chan *IdsecSecHubSecretStoresPage)
-	go func() {
-		defer close(results)
-		for {
-			response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
-			if err != nil {
-				s.Logger.Error("Failed to list Secret Stores: %v", err)
-				return
-			}
-			defer func(Body io.ReadCloser) {
-				err := Body.Close()
+	return pagination.ListAllPaginated[secretstoresmodels.IdsecSecHubSecretStore](
+		context.Background(),
+		pagination.HTTPGetFetch(s.ISPClient(), sechubURL, initialQuery),
+		pagination.ListPaginatedConfig[secretstoresmodels.IdsecSecHubSecretStore]{
+			ResourceName: "secret stores",
+			Decode: func(resultMap map[string]interface{}) ([]*secretstoresmodels.IdsecSecHubSecretStore, error) {
+				items, err := pagination.ExtractItemsFromResult(resultMap, "secret stores", "secret_stores")
 				if err != nil {
-					common.GlobalLogger.Warning("Error closing response body")
+					return nil, err
 				}
-			}(response.Body)
-			if response.StatusCode != http.StatusOK {
-				s.Logger.Error("Failed to list Secret Stores - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-				return
-			}
-			result, err := common.DeserializeJSONSnake(response.Body)
-			if err != nil {
-				s.Logger.Error("Failed to decode response: %v", err)
-				return
-			}
-			resultMap := result.(map[string]interface{})
-			var secretStoresJSON []interface{}
-			if secretStore, ok := resultMap["secret_stores"]; ok {
-				secretStoresJSON = secretStore.([]interface{})
-			} else {
-				s.Logger.Error("Failed to list Secret Stores, unexpected result")
-				return
-			}
-			for i, secretStore := range secretStoresJSON {
-				if secretStoresMap, ok := secretStore.(map[string]interface{}); ok {
-					if secretStoreID, ok := secretStoresMap["id"]; ok {
-						secretStoresJSON[i].(map[string]interface{})["id"] = secretStoreID
-					}
+				var secretStores []*secretstoresmodels.IdsecSecHubSecretStore
+				if err := mapstructure.Decode(items, &secretStores); err != nil {
+					return nil, fmt.Errorf("failed to validate secret stores: %w", err)
 				}
-			}
-			var secretStores []*secretstoresmodels.IdsecSecHubSecretStore
-			if err := mapstructure.Decode(secretStoresJSON, &secretStores); err != nil {
-				s.Logger.Error("Failed to validate Secret Stores: %v", err)
-				return
-			}
-			results <- &IdsecSecHubSecretStoresPage{Items: secretStores}
-			if nextLink, ok := resultMap["nextLink"].(string); ok {
-				nextQuery, _ := url.Parse(nextLink)
-				queryValues := nextQuery.Query()
-				query = make(map[string]string)
-				for key, values := range queryValues {
-					if len(values) > 0 {
-						query[key] = values[0]
-					}
-				}
-			} else {
-				break
-			}
-		}
-	}()
-	return results, nil
+				return secretStores, nil
+			},
+		},
+	)
 }
 
 // rollbackSecretStoreUpdate rolls back a secret store to its previous state after a failed TF update.
@@ -494,23 +452,21 @@ func (s *IdsecSecHubSecretStoresService) Stats() (*secretstoresmodels.IdsecSecHu
 	if err != nil {
 		return nil, err
 	}
-	secretStores := make([]*secretstoresmodels.IdsecSecHubSecretStore, 0)
-	for page := range secretStoresChan {
-		secretStores = append(secretStores, page.Items...)
-	}
 	var secretStoresStats secretstoresmodels.IdsecSecHubSecretStoresStats
-	secretStoresStats.SecretStoresCount = len(secretStores)
 	secretStoresStats.SecretStoresCountByType = make(map[string]int)
 	secretStoresStats.SecretStoresCountByCreator = make(map[string]int)
-	for _, secretStore := range secretStores {
-		if _, ok := secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy]; !ok {
-			secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy] = 0
+	for page := range secretStoresChan {
+		for _, secretStore := range page.Items {
+			secretStoresStats.SecretStoresCount++
+			if _, ok := secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy]; !ok {
+				secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy] = 0
+			}
+			if _, ok := secretStoresStats.SecretStoresCountByType[secretStore.Type]; !ok {
+				secretStoresStats.SecretStoresCountByType[secretStore.Type] = 0
+			}
+			secretStoresStats.SecretStoresCountByType[secretStore.Type]++
+			secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy]++
 		}
-		if _, ok := secretStoresStats.SecretStoresCountByType[secretStore.Type]; !ok {
-			secretStoresStats.SecretStoresCountByType[secretStore.Type] = 0
-		}
-		secretStoresStats.SecretStoresCountByType[secretStore.Type]++
-		secretStoresStats.SecretStoresCountByCreator[secretStore.CreatedBy]++
 	}
 	return &secretStoresStats, nil
 }

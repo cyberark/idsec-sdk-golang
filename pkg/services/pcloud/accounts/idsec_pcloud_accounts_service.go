@@ -9,14 +9,15 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/pagination"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 	commonpcloud "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/common"
-	pcloudinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/internal"
 
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -24,20 +25,22 @@ import (
 
 // API endpoint paths for account-related operations
 const (
-	accountsURL                        = "/api/accounts"
-	accountURL                         = "/api/accounts/%s/"
-	accountURLOld                      = "/WebServices/PIMServices.svc/Accounts/%s/"
-	accountSecretVersionsURL           = "/api/accounts/%s/secret/versions"   // #nosec G101
-	generateAccountCredentialsURL      = "/api/accounts/%s/secret/generate"   // #nosec G101
-	verifyAccountCredentialsURL        = "/api/accounts/%s/verify"            // #nosec G101
-	changeAccountCredentialsURL        = "/api/accounts/%s/change"            // #nosec G101
-	setAccountNextCredentialsURL       = "/api/accounts/%s/setnextpassword"   // #nosec G101
-	updateAccountCredentialsInVaultURL = "/api/accounts/%s/password/update"   // #nosec G101
-	retrieveAccountCredentialsURL      = "/api/accounts/%s/password/retrieve" // #nosec G101
-	reconcileAccountCredentialsURL     = "/api/accounts/%s/reconcile"         // #nosec G101
-	linkAccountURL                     = "/api/accounts/%s/linkaccount"
-	unlinkAccountURL                   = "/api/accounts/%s/linkaccount/%s/"
+	accountsURL                        = "/PasswordVault/api/accounts"
+	accountURL                         = "/PasswordVault/api/accounts/%s/"
+	accountURLOld                      = "/PasswordVault/WebServices/PIMServices.svc/Accounts/%s/"
+	accountSecretVersionsURL           = "/PasswordVault/api/accounts/%s/secret/versions"   // #nosec G101
+	generateAccountCredentialsURL      = "/PasswordVault/api/accounts/%s/secret/generate"   // #nosec G101
+	verifyAccountCredentialsURL        = "/PasswordVault/api/accounts/%s/verify"            // #nosec G101
+	changeAccountCredentialsURL        = "/PasswordVault/api/accounts/%s/change"            // #nosec G101
+	setAccountNextCredentialsURL       = "/PasswordVault/api/accounts/%s/setnextpassword"   // #nosec G101
+	updateAccountCredentialsInVaultURL = "/PasswordVault/api/accounts/%s/password/update"   // #nosec G101
+	retrieveAccountCredentialsURL      = "/PasswordVault/api/accounts/%s/password/retrieve" // #nosec G101
+	reconcileAccountCredentialsURL     = "/PasswordVault/api/accounts/%s/reconcile"         // #nosec G101
+	linkAccountURL                     = "/PasswordVault/api/accounts/%s/linkaccount"
+	unlinkAccountURL                   = "/PasswordVault/api/accounts/%s/linkaccount/%s/"
 	accountActivitiesURL               = "/api/accounts/%s/activities"
+	complianceInfoURL                  = "/api/rotation/accounts/%s/compliance-info"
+	accountOverviewURL                 = "/PasswordVault/api/ExtendedAccounts/%s/overview"
 )
 
 // IdsecPCloudAccountsPage is a paginated type for IdsecPCloudAccount
@@ -67,7 +70,7 @@ func NewIdsecPCloudAccountsService(authenticators ...auth.IdsecAuth) (*IdsecPClo
 		ispAuth,
 		"privilegecloud",
 		".",
-		"passwordvault",
+		"",
 		pcloudAccountsService.refreshPCloudAccountsAuth,
 		commonpcloud.DefaultPCloudRetryStrategy(),
 	)
@@ -146,68 +149,13 @@ func decodeAccountsFromListJSON(accountsJSON []interface{}) ([]*accountsmodels.I
 	return accounts, nil
 }
 
-func accountsListPageFromResultMap(resultMap map[string]interface{}) (accounts []*accountsmodels.IdsecPCloudAccount, nextQuery map[string]string, err error) {
-	var accountsJSON []interface{}
-	if value, ok := resultMap["value"]; ok {
-		accountsJSON, ok = value.([]interface{})
-		if !ok {
-			return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
-		}
-	} else {
-		return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
-	}
-	accounts, err = decodeAccountsFromListJSON(accountsJSON)
+// decodeAccountsFromResultMap decodes one page of the OData-style accounts list response.
+func decodeAccountsFromResultMap(resultMap map[string]interface{}) ([]*accountsmodels.IdsecPCloudAccount, error) {
+	accountsJSON, err := pagination.ExtractItemsFromResult(resultMap, "accounts")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if nextLink, ok := pcloudinternal.NextLinkFromResultMap(resultMap); ok {
-		nextQuery, err := pcloudinternal.QueryFromNextLink(nextLink)
-		if err != nil {
-			return nil, nil, err
-		}
-		return accounts, nextQuery, nil
-	}
-	return accounts, nil, nil
-}
-
-// fetchAccountsListPage performs a single list-accounts HTTP request and decodes one OData page.
-// A nil nextQuery means there are no further pages.
-func (s *IdsecPCloudAccountsService) fetchAccountsListPage(ctx context.Context, query map[string]string) (accounts []*accountsmodels.IdsecPCloudAccount, nextQuery map[string]string, err error) {
-	response, err := s.ISPClient().Get(ctx, accountsURL, query)
-	if err != nil {
-		s.Logger.Error("Failed to list accounts: %v", err)
-		return nil, nil, err
-	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
-			common.GlobalLogger.Warning("Error closing response body")
-		}
-	}()
-	if response.StatusCode != http.StatusOK {
-		body := common.SerializeResponseToJSON(response.Body)
-		s.Logger.Error("Failed to list accounts - [%d] - [%s]", response.StatusCode, body)
-		return nil, nil, fmt.Errorf("list accounts: HTTP %d: %s", response.StatusCode, body)
-	}
-	result, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		s.Logger.Error("Failed to decode response: %v", err)
-		return nil, nil, err
-	}
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		s.Logger.Error("Failed to list accounts, unexpected result")
-		return nil, nil, fmt.Errorf("failed to list accounts: unexpected result")
-	}
-	accounts, nextQuery, err = accountsListPageFromResultMap(resultMap)
-	if err != nil {
-		if strings.Contains(err.Error(), "unexpected result") {
-			s.Logger.Error("Failed to list accounts, unexpected result")
-		} else {
-			s.Logger.Error("Failed to validate accounts: %v", err)
-		}
-		return nil, nil, err
-	}
-	return accounts, nextQuery, nil
+	return decodeAccountsFromListJSON(accountsJSON)
 }
 
 func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
@@ -219,53 +167,37 @@ func (s *IdsecPCloudAccountsService) listAccountsWithFilters(
 	limit int,
 	safeName string,
 ) (<-chan *IdsecPCloudAccountsPage, error) {
-	query := map[string]string{}
+	initialQuery := map[string]string{}
 	if search != "" {
-		query["search"] = search
+		initialQuery["search"] = search
 	}
 	if searchType != "" {
-		query["searchType"] = searchType
+		initialQuery["searchType"] = searchType
 	}
 	if sort != "" {
-		query["sort"] = sort
+		initialQuery["sort"] = sort
 	}
 	if offset > 0 {
-		query["offset"] = fmt.Sprintf("%d", offset)
+		initialQuery["offset"] = fmt.Sprintf("%d", offset)
 	}
 	if limit > 0 {
-		query["limit"] = fmt.Sprintf("%d", limit)
+		initialQuery["limit"] = fmt.Sprintf("%d", limit)
 	}
 	if safeName != "" {
-		query["filter"] = fmt.Sprintf("safeName eq %s", safeName)
+		initialQuery["filter"] = fmt.Sprintf("safeName eq %s", safeName)
 	}
-	results := make(chan *IdsecPCloudAccountsPage)
-	go func() {
-		defer close(results)
-		for {
-			items, nextQuery, err := s.fetchAccountsListPage(ctx, query)
-			if err != nil {
-				select {
-				case results <- &IdsecPCloudAccountsPage{Err: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			select {
-			case results <- &IdsecPCloudAccountsPage{Items: items}:
-			case <-ctx.Done():
-				return
-			}
-			if nextQuery == nil {
-				return
-			}
-			query = nextQuery
-		}
-	}()
-	return results, nil
+	return pagination.ListAllPaginated[accountsmodels.IdsecPCloudAccount](
+		ctx,
+		pagination.HTTPGetFetch(s.ISPClient(), accountsURL, initialQuery),
+		pagination.ListPaginatedConfig[accountsmodels.IdsecPCloudAccount]{
+			ResourceName: "accounts",
+			Decode:       decodeAccountsFromResultMap,
+		},
+	)
 }
 
 // List retrieves a list of IdsecPCloudAccount pages.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
 func (s *IdsecPCloudAccountsService) List() (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.ListContext(context.Background())
@@ -288,7 +220,7 @@ func (s *IdsecPCloudAccountsService) ListContext(ctx context.Context) (<-chan *I
 }
 
 // ListBy retrieves a list of IdsecPCloudAccount pages with filters.
-// On failure during pagination, the channel emits a final page with Err set; otherwise Err is nil on every page.
+// On failure, returns a non-nil error and a nil channel. On success, returns a channel that yields the pages.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/GetAccounts.htm
 func (s *IdsecPCloudAccountsService) ListBy(accountsFilters *accountsmodels.IdsecPCloudAccountsFilter) (<-chan *IdsecPCloudAccountsPage, error) {
 	return s.ListByContext(context.Background(), accountsFilters)
@@ -344,7 +276,15 @@ func (s *IdsecPCloudAccountsService) ListSecretVersions(listAccountSecretVersion
 // https://docs.cyberark.com/privilege-cloud-standard/latest/en/content/sdk/files%20-%20get%20file%20activity%20by%20id.htm
 func (s *IdsecPCloudAccountsService) ListActivities(listAccountActivities *accountsmodels.IdsecPCloudListAccountActivities) ([]*accountsmodels.IdsecPCloudAccountActivity, error) {
 	s.Logger.Info("Retrieving account activities [%s]", listAccountActivities.AccountID)
-	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountActivitiesURL, listAccountActivities.AccountID), nil)
+	safeName := listAccountActivities.SafeName
+	if safeName == "" {
+		account, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountID: listAccountActivities.AccountID})
+		if err != nil {
+			return nil, err
+		}
+		safeName = account.SafeName
+	}
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountActivitiesURL, listAccountActivities.AccountID), map[string]string{"safeName": safeName})
 	if err != nil {
 		return nil, err
 	}
@@ -365,10 +305,16 @@ func (s *IdsecPCloudAccountsService) ListActivities(listAccountActivities *accou
 	if !ok {
 		return nil, fmt.Errorf("failed to list account activities: unexpected result")
 	}
+	raw := accountActivitiesJSONMap["activities"]
+	if raw == nil {
+		raw = accountActivitiesJSONMap["data"]
+	}
 	var accountActivities []*accountsmodels.IdsecPCloudAccountActivity
-	err = mapstructure.Decode(accountActivitiesJSONMap["activities"], &accountActivities)
-	if err != nil {
+	if err = mapstructure.Decode(raw, &accountActivities); err != nil {
 		return nil, err
+	}
+	if accountActivities == nil {
+		accountActivities = []*accountsmodels.IdsecPCloudAccountActivity{}
 	}
 	return accountActivities, nil
 }
@@ -377,7 +323,7 @@ func (s *IdsecPCloudAccountsService) ListActivities(listAccountActivities *accou
 // The underlying API does not support server-side filtering, so filtering is done client-side.
 // https://docs.cyberark.com/privilege-cloud-standard/latest/en/content/sdk/files%20-%20get%20file%20activity%20by%20id.htm
 func (s *IdsecPCloudAccountsService) ListActivitiesBy(activitiesFilter *accountsmodels.IdsecPCloudAccountActivitiesFilter) ([]*accountsmodels.IdsecPCloudAccountActivity, error) {
-	activities, err := s.ListActivities(&accountsmodels.IdsecPCloudListAccountActivities{AccountID: activitiesFilter.AccountID})
+	activities, err := s.ListActivities(&accountsmodels.IdsecPCloudListAccountActivities{AccountID: activitiesFilter.AccountID, SafeName: activitiesFilter.SafeName})
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +350,184 @@ func (s *IdsecPCloudAccountsService) ListActivitiesBy(activitiesFilter *accounts
 		filteredActivities = append(filteredActivities, activity)
 	}
 	return filteredActivities, nil
+}
+
+// GetComplianceInfo retrieves the compliance info of an account.
+func (s *IdsecPCloudAccountsService) GetComplianceInfo(getAccountComplianceInfo *accountsmodels.IdsecPCloudGetAccountComplianceInfo) (*accountsmodels.IdsecPCloudAccountComplianceInfo, error) {
+	s.Logger.Info("Retrieving account compliance info [%s]", getAccountComplianceInfo.AccountID)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(complianceInfoURL, getAccountComplianceInfo.AccountID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to retrieve account compliance info - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	complianceInfoJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	complianceInfoJSONMap, ok := complianceInfoJSON.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("failed to retrieve account compliance info: unexpected result")
+	}
+	var complianceInfo accountsmodels.IdsecPCloudAccountComplianceInfo
+	err = mapstructure.Decode(complianceInfoJSONMap, &complianceInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &complianceInfo, nil
+}
+
+// GetOverview retrieves the overview of an account.
+func (s *IdsecPCloudAccountsService) GetOverview(getAccountOverview *accountsmodels.IdsecPCloudGetAccountOverview) (*accountsmodels.IdsecPCloudAccountOverview, error) {
+	s.Logger.Info("Retrieving account overview [%s]", getAccountOverview.AccountID)
+	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountOverviewURL, getAccountOverview.AccountID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to retrieve account overview - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	overviewJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	overviewJSONMap, ok := overviewJSON.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("failed to retrieve account overview: unexpected result")
+	}
+	var overview accountsmodels.IdsecPCloudAccountOverview
+	err = mapstructure.Decode(overviewJSONMap, &overview)
+	if err != nil {
+		return nil, err
+	}
+	return &overview, nil
+}
+
+// defaultBulkMaxConcurrency is the number of accounts processed concurrently when no explicit limit is provided.
+const defaultBulkMaxConcurrency = 32
+
+// bulkFetchResult holds the outcome of a single per-account fetch in a bulk operation.
+type bulkFetchResult[T any] struct {
+	value T
+	err   error
+}
+
+// runBulkAccountFetch runs fetch for each account ID concurrently using a bounded worker pool.
+// Results are returned in the same order as accountIDs.
+func runBulkAccountFetch[T any](accountIDs []string, maxConcurrency int, fetch func(accountID string) (T, error)) []bulkFetchResult[T] {
+	results := make([]bulkFetchResult[T], len(accountIDs))
+	if len(accountIDs) == 0 {
+		return results
+	}
+	if maxConcurrency <= 0 {
+		maxConcurrency = defaultBulkMaxConcurrency
+	}
+	if maxConcurrency > len(accountIDs) {
+		maxConcurrency = len(accountIDs)
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for i := 0; i < maxConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				value, err := fetch(accountIDs[idx])
+				results[idx] = bulkFetchResult[T]{value: value, err: err}
+			}
+		}()
+	}
+	for i := range accountIDs {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+// BulkGetComplianceInfo retrieves the compliance info of multiple accounts in parallel.
+// Failures for individual accounts are reported per-result and do not fail the whole operation.
+func (s *IdsecPCloudAccountsService) BulkGetComplianceInfo(bulkGetAccounts *accountsmodels.IdsecPCloudBulkGetAccountComplianceInfo) ([]*accountsmodels.IdsecPCloudBulkAccountComplianceInfoResult, error) {
+	if len(bulkGetAccounts.AccountIDs) == 0 {
+		return nil, fmt.Errorf("at least one account ID is required")
+	}
+	s.Logger.Info("Bulk retrieving compliance info for [%d] accounts", len(bulkGetAccounts.AccountIDs))
+	fetched := runBulkAccountFetch(bulkGetAccounts.AccountIDs, bulkGetAccounts.MaxConcurrency, func(accountID string) (*accountsmodels.IdsecPCloudAccountComplianceInfo, error) {
+		return s.GetComplianceInfo(&accountsmodels.IdsecPCloudGetAccountComplianceInfo{AccountID: accountID})
+	})
+	results := make([]*accountsmodels.IdsecPCloudBulkAccountComplianceInfoResult, len(fetched))
+	for i, item := range fetched {
+		result := &accountsmodels.IdsecPCloudBulkAccountComplianceInfoResult{
+			AccountID:      bulkGetAccounts.AccountIDs[i],
+			ComplianceInfo: item.value,
+		}
+		if item.err != nil {
+			result.Error = item.err.Error()
+		}
+		results[i] = result
+	}
+	return results, nil
+}
+
+// BulkGetOverview retrieves the overview of multiple accounts in parallel.
+// Failures for individual accounts are reported per-result and do not fail the whole operation.
+func (s *IdsecPCloudAccountsService) BulkGetOverview(bulkGetAccounts *accountsmodels.IdsecPCloudBulkGetAccountOverview) ([]*accountsmodels.IdsecPCloudBulkAccountOverviewResult, error) {
+	if len(bulkGetAccounts.AccountIDs) == 0 {
+		return nil, fmt.Errorf("at least one account ID is required")
+	}
+	s.Logger.Info("Bulk retrieving overview for [%d] accounts", len(bulkGetAccounts.AccountIDs))
+	fetched := runBulkAccountFetch(bulkGetAccounts.AccountIDs, bulkGetAccounts.MaxConcurrency, func(accountID string) (*accountsmodels.IdsecPCloudAccountOverview, error) {
+		return s.GetOverview(&accountsmodels.IdsecPCloudGetAccountOverview{AccountID: accountID})
+	})
+	results := make([]*accountsmodels.IdsecPCloudBulkAccountOverviewResult, len(fetched))
+	for i, item := range fetched {
+		result := &accountsmodels.IdsecPCloudBulkAccountOverviewResult{
+			AccountID: bulkGetAccounts.AccountIDs[i],
+			Overview:  item.value,
+		}
+		if item.err != nil {
+			result.Error = item.err.Error()
+		}
+		results[i] = result
+	}
+	return results, nil
+}
+
+// BulkListActivities retrieves the activities of multiple accounts in parallel.
+// Failures for individual accounts are reported per-result and do not fail the whole operation.
+func (s *IdsecPCloudAccountsService) BulkListActivities(bulkListAccounts *accountsmodels.IdsecPCloudBulkListAccountActivities) ([]*accountsmodels.IdsecPCloudBulkAccountActivitiesResult, error) {
+	if len(bulkListAccounts.AccountIDs) == 0 {
+		return nil, fmt.Errorf("at least one account ID is required")
+	}
+	s.Logger.Info("Bulk retrieving activities for [%d] accounts", len(bulkListAccounts.AccountIDs))
+	fetched := runBulkAccountFetch(bulkListAccounts.AccountIDs, bulkListAccounts.MaxConcurrency, func(accountID string) ([]*accountsmodels.IdsecPCloudAccountActivity, error) {
+		return s.ListActivities(&accountsmodels.IdsecPCloudListAccountActivities{AccountID: accountID, SafeName: bulkListAccounts.SafeName})
+	})
+	results := make([]*accountsmodels.IdsecPCloudBulkAccountActivitiesResult, len(fetched))
+	for i, item := range fetched {
+		result := &accountsmodels.IdsecPCloudBulkAccountActivitiesResult{
+			AccountID:  bulkListAccounts.AccountIDs[i],
+			Activities: item.value,
+		}
+		if item.err != nil {
+			result.Error = item.err.Error()
+		}
+		results[i] = result
+	}
+	return results, nil
 }
 
 // GenerateCredentials generate a new random password for an existing account with policy restrictions.

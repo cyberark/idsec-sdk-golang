@@ -149,6 +149,14 @@ func (s *IdsecSCACloudAccessService) ListTargetsAllCSPs(req *scamodels.IdsecSCAL
 }
 
 func (s *IdsecSCACloudAccessService) listAllTargetsForCSP(req *scamodels.IdsecSCAListTargetsRequest, cspUpper string) (*cloudaccessmodels.IdsecSCAListTargetsResponse, error) {
+	// When the caller explicitly requests a specific page (via limit or nextToken),
+	// return that single page as-is instead of auto-paginating. This honors --limit
+	// (e.g. --limit 1 yields one target per CSP) and preserves nextToken so callers
+	// can page manually. Without these flags, all pages are fetched (default behavior).
+	if req.Limit > 0 || req.NextToken != "" {
+		return s.listTargetsForCSP(req, cspUpper)
+	}
+
 	all := &cloudaccessmodels.IdsecSCAListTargetsResponse{}
 	nextToken := req.NextToken
 	totalSet := false

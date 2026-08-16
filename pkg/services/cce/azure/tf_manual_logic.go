@@ -23,11 +23,12 @@ const (
 )
 
 const (
-	requestKeyDeploymentType   = "deploymentType"
-	requestKeyOnboardingType   = "onboardingType"
-	deploymentTypeOrganization = "organization"
-	deploymentTypeFolder       = "folder"
-	deploymentTypeStandalone   = "standalone"
+	requestKeyDeploymentType           = "deploymentType"
+	requestKeyOnboardingType           = "onboardingType"
+	requestKeyOnboardingTypeQueryParam = "onboarding_type"
+	deploymentTypeOrganization         = "organization"
+	deploymentTypeFolder               = "folder"
+	deploymentTypeStandalone           = "standalone"
 )
 
 // extractServiceNames extracts the list of service names from an entity JSON response.
@@ -558,6 +559,8 @@ func (s *IdsecCCEAzureService) addManualServices(id string, services []ccemodels
 	url := fmt.Sprintf(pathManualServicesURL, id)
 	requestBody := map[string]interface{}{
 		"services": services,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this entity was onboarded via Terraform.
+		requestKeyOnboardingType: ccemodels.TerraformProvider,
 	}
 
 	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
@@ -585,6 +588,8 @@ func (s *IdsecCCEAzureService) deleteManualServices(id string, serviceNames []st
 	// The API expects multiple services_names query params like: services_names=dpa&services_names=epm
 	params := map[string][]string{
 		"services_names": serviceNames,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this entity was onboarded via Terraform.
+		requestKeyOnboardingTypeQueryParam: {ccemodels.TerraformProvider},
 	}
 
 	s.Logger.Info("Deleting services: %v from Azure entity [%s]", serviceNames, id)
@@ -609,7 +614,9 @@ func (s *IdsecCCEAzureService) deleteManual(id string) error {
 	s.Logger.Info("Deleting Azure manual onboarding [%s]", id)
 
 	url := fmt.Sprintf(pathManualDeleteURL, id)
-	response, err := s.ISPClient().Delete(context.Background(), url, nil, nil)
+	// Explicitly set the onboarding type to terraform_provider so the API enforces that this entity was onboarded via Terraform.
+	params := map[string][]string{requestKeyOnboardingTypeQueryParam: {ccemodels.TerraformProvider}}
+	response, err := s.ISPClient().Delete(context.Background(), url, nil, params)
 	if err != nil {
 		return err
 	}

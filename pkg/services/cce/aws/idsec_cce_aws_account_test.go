@@ -1,6 +1,8 @@
 package aws
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -152,6 +154,115 @@ func TestTfAddAccount_EmptyServicesArray_Returns400(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "400")
 	require.Contains(t, err.Error(), "Bad Request")
+}
+
+// firstServiceVersion reads the request body and returns the version of the first
+// service in the "services" array of the JSON payload.
+func firstServiceVersion(t *testing.T, r *http.Request) string {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	require.NoError(t, err)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(body, &payload))
+
+	services, ok := payload["services"].([]interface{})
+	require.True(t, ok, "request body must contain a services array")
+	require.NotEmpty(t, services)
+
+	service, ok := services[0].(map[string]interface{})
+	require.True(t, ok)
+
+	version, _ := service["version"].(string)
+	return version
+}
+
+func TestTfAddAccount_IncludesServiceVersion(t *testing.T) {
+	createResponseJSON := `{"id": "1111aaaa2222bbbb3333cccc"}`
+	readResponseJSON := `{
+		"id": "1111aaaa2222bbbb3333cccc",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["sca"],
+		"displayName": "Test Account",
+		"status": "Completely added"
+	}`
+
+	var capturedVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/api/aws/programmatic/account")
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest: func(r *http.Request) {
+				capturedVersion = firstServiceVersion(t, r)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "1111aaaa2222bbbb3333cccc")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: readResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfAddAccount(&awsmodels.TfIdsecCCEAWSAddAccount{
+		AccountID: "123456789012",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Version:     "2.1.0",
+				Resources: map[string]any{
+					"ScaRoleArn": "arn:aws:iam::123456789012:role/SCARole",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "2.1.0", capturedVersion, "service version must be included in the create account request payload")
+}
+
+func TestTfAddAccountServices_IncludesServiceVersion(t *testing.T) {
+	var capturedVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				capturedVersion = firstServiceVersion(t, r)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	err := service.TfAddAccountServices(&awsmodels.TfIdsecCCEAWSAddAccountServices{
+		ID: "1111aaaa2222bbbb3333cccc",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.CDS,
+				Version:     "4.0.1",
+				Resources: map[string]any{
+					"CdsRoleArn": "arn:aws:iam::123456789012:role/CDSRole",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "4.0.1", capturedVersion, "service version must be included in the add services request payload")
 }
 
 func TestAccount_Success(t *testing.T) {

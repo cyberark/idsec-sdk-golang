@@ -137,6 +137,11 @@ The Session Monitoring (sm) service requires the IdsecISPAuth authenticator, and
 - **IdsecSMSessionsService** (sessions) - Session monitoring and management operations
 - **IdsecSMSessionActivitiesService** (session-activities) - Session activity monitoring and filtering operations
 
+## Access service
+The Access (access) service requires the IdsecISPAuth authenticator, and exposes those service classes:
+
+- **IdsecAccessAssetsService** (assets) - Access assets listing and secret retrieval
+
 ## Policy
 The Access Control Policies (policy) service requires the IdsecISPAuth authenticator, and exposes those service classes:
 - **IdsecPolicyService** - Access Control Policies service

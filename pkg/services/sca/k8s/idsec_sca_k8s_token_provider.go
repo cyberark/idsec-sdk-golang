@@ -56,6 +56,12 @@ type IdsecSCAK8sClusterContext struct {
 	// Unused on direct and AWS IAM-role proxy paths.
 	RootCA string
 
+	// ClusterToken is the base64-encoded cluster token injected by SIA into the
+	// kubeconfig exec block via --cluster-token. When non-empty it is passed
+	// as-is into the DPA JWE payload as "cluster_token" (SIA decodes it after
+	// decrypting the JWE). Optional; absence preserves previous behavior on all flows.
+	ClusterToken string
+
 	// Diagnostics enables kubectl-login stderr diagnostics from token providers.
 	Diagnostics bool
 }
