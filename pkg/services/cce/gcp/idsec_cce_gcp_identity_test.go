@@ -1,0 +1,130 @@
+package gcp
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
+	gcpmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/gcp/models"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/cce/internal"
+)
+
+func TestTfIdentityParams_Success(t *testing.T) {
+	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b",
+		"dpa": {
+			"identity_user_id": "user-123",
+			"identity_app_id": "app-456",
+			"identity_app_issuer": "https://issuer.example.com",
+			"identity_app_audience": "api://default"
+		},
+		"sca": {
+			"identity_user_id": "user-789",
+			"identity_app_id": "app-012",
+			"identity_app_issuer": "https://issuer.example.com",
+			"identity_app_audience": "api://default"
+		}
+	}`
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/gcp/identity-params"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupGCPService(client)
+
+	result, err := service.TfIdentityParams(&gcpmodels.TfIdsecCCEGCPGetIdentityParams{})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
+	require.NotNil(t, result.IdentityParams)
+	require.Contains(t, result.IdentityParams, "dpa")
+	require.Contains(t, result.IdentityParams, "sca")
+
+	dpaInfo := result.IdentityParams["dpa"]
+	require.Equal(t, "user-123", dpaInfo.IdentityUserID)
+	require.Equal(t, "app-456", dpaInfo.IdentityAppID)
+	require.Equal(t, "https://issuer.example.com", dpaInfo.IdentityAppIssuer)
+	require.Equal(t, "api://default", dpaInfo.IdentityAppAudience)
+
+	scaInfo := result.IdentityParams["sca"]
+	require.Equal(t, "user-789", scaInfo.IdentityUserID)
+	require.Equal(t, "app-012", scaInfo.IdentityAppID)
+}
+
+func TestTfIdentityParams_EmptyResult(t *testing.T) {
+	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b"
+	}`
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/gcp/identity-params"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupGCPService(client)
+
+	result, err := service.TfIdentityParams(&gcpmodels.TfIdsecCCEGCPGetIdentityParams{})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
+	require.NotNil(t, result.IdentityParams)
+	require.Len(t, result.IdentityParams, 0)
+}
+
+func TestTfIdentityParams_SingleService(t *testing.T) {
+	responseJSON := `{
+		"tenantId": "2c089e94-0062-4316-a0d2-1c01ab2eda4b",
+		"dpa": {
+			"identity_user_id": "user-123",
+			"identity_app_id": "app-456",
+			"identity_app_issuer": "https://issuer.example.com",
+			"identity_app_audience": "api://default"
+		}
+	}`
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/gcp/identity-params"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupGCPService(client)
+
+	result, err := service.TfIdentityParams(&gcpmodels.TfIdsecCCEGCPGetIdentityParams{})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "2c089e94-0062-4316-a0d2-1c01ab2eda4b", result.TenantID)
+	require.NotNil(t, result.IdentityParams)
+	require.Len(t, result.IdentityParams, 1)
+	require.Contains(t, result.IdentityParams, "dpa")
+}
+
+func TestTfIdentityParams_ErrorPropagation(t *testing.T) {
+	internal.TestServiceErrorPropagation(t, func(client *isp.IdsecISPServiceClient) error {
+		service := setupGCPService(client)
+		_, err := service.TfIdentityParams(&gcpmodels.TfIdsecCCEGCPGetIdentityParams{})
+		return err
+	})
+}

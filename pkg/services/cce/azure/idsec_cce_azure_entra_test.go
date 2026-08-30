@@ -92,6 +92,55 @@ func TestTfAddEntra_Success(t *testing.T) {
 	require.Equal(t, "12345678-1234-1234-1234-123456789012", result.EntraID)
 }
 
+func TestTfAddEntra_IncludesServiceVersion(t *testing.T) {
+	createResponseJSON := `{"id": "entra-123"}`
+	getResponseJSON := `{
+		"id": "entra-123",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"displayName": "Test Entra Tenant",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012"
+	}`
+
+	var capturedVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest:    captureFirstServiceVersion(&capturedVersion),
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/entra/entra-123"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfAddEntra(&azuremodels.TfIdsecCCEAzureAddEntra{
+		EntraID: "12345678-1234-1234-1234-123456789012",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Version:     "1.5.0",
+				Resources:   map[string]interface{}{"appId": "app-123"},
+			},
+		},
+		CCEResources: map[string]interface{}{},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "1.5.0", capturedVersion, "service version must be included in the create entra request payload")
+}
+
 func TestTfEntra_Success(t *testing.T) {
 	responseJSON := `{
 		"id": "entra-123",

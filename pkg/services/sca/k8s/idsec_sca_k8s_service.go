@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -416,6 +417,28 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 	return provider.GenerateExecCredential(s, ctx)
 }
 
+// GenerateProxyExecCredentialWithPrefetch is the parallel variant of
+// GenerateProxyExecCredential for JWE-path flows (AWS IDC, Azure) where
+// K8sToken is set. keyFuture must come from BeginProxyKeyPrefetch, called
+// before the Elevate/token-acquisition step so the JWKS round-trip overlaps.
+// The existing GenerateProxyExecCredential is unchanged for all other callers.
+func (s *IdsecSCAK8sService) GenerateProxyExecCredentialWithPrefetch(
+	csp string,
+	ctx *IdsecSCAK8sClusterContext,
+	keyFuture *ProxyKeyFuture,
+) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
+		return nil, fmt.Errorf("sca k8s service not initialized")
+	}
+	if _, err := GetProxyProvider(csp); err != nil {
+		return nil, err
+	}
+	if ctx == nil || strings.TrimSpace(ctx.K8sToken) == "" {
+		return nil, fmt.Errorf("%s proxy: K8sToken required for JWE proxy flow", strings.ToLower(csp))
+	}
+	return s.generateDPAProxyExecCredential(ctx, keyFuture)
+}
+
 // generateDPAProxyExecCredential issues a kubectl ExecCredential containing a
 // short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
 // (DPA-K8S). Shared by AWS and Azure proxy providers.
@@ -425,7 +448,11 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredential(
 // "cluster_token" are each included when non-empty. root_ca is sent on every
 // flow where it is available — including AWS IAM proxy — aligning with the
 // future removal of the internal SIA proxy API path.
-func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClusterContext) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+//
+// keyFuture, when non-nil, supplies a key pre-fetched by BeginProxyKeyPrefetch
+// so the JWKS round-trip overlaps with the caller's token-acquisition step.
+// Passing nil falls back to the original synchronous fetch.
+func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClusterContext, keyFuture *ProxyKeyFuture) (*k8smodels.IdsecSCAK8sExecCredential, error) {
 	diagnostics := clusterDiagnostics(ctx)
 	k8sToken := ""
 	rootCA := ""
@@ -448,14 +475,39 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 		return nil, fmt.Errorf("proxy client certificate generation failed: dpa client not initialized")
 	}
 
-	// Fetch the DPA SSO public key and encrypt before /acquire so plaintext
-	// tokens never travel over the wire.
+	// Obtain the DPA SSO public key and encrypt before /acquire so plaintext
+	// tokens never travel over the wire. When keyFuture is non-nil the key was
+	// already fetched concurrently with token acquisition; Wait() is effectively
+	// a non-blocking channel read at this point.
 	var jweExtensionValue string
 	if jweSet {
-		kid := dpaSsoJWKSKeyID()
-		pubKey, err := s.fetchDPASSOPublicKey(kid, diagnostics)
-		if err != nil {
-			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to fetch DPA JWKS (kid=%s): %w", kid, err)
+		var pubKey *rsa.PublicKey
+		var kid string
+		var err error
+		if keyFuture != nil {
+			pubKey, kid, err = keyFuture.Wait()
+			if err != nil {
+				return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: DPA JWKS prefetch failed (kid=%s): %w", kid, err)
+			}
+			kubectlLoginDiagnostic(diagnostics, "proxy JWKS key obtained from prefetch (kid=%s elapsed=%s)", kid, keyFuture.JWKSElapsed().Round(time.Millisecond))
+			// kid is a UTC calendar date; a long Elevate/token-acquisition wait
+			// (e.g. AWS IDC device auth) can span midnight UTC and leave the
+			// prefetched key stale. Refresh synchronously rather than encrypt
+			// with a kid the DPA server may have already rotated away from.
+			if freshKid := dpaSsoJWKSKeyID(); freshKid != kid {
+				kubectlLoginDiagnostic(diagnostics, "prefetched JWKS kid=%q is stale (current=%q) — refetching before JWE encryption", kid, freshKid)
+				kid = freshKid
+				pubKey, err = s.fetchDPASSOPublicKey(kid, diagnostics)
+				if err != nil {
+					return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to refresh stale DPA JWKS (kid=%s): %w", kid, err)
+				}
+			}
+		} else {
+			kid = dpaSsoJWKSKeyID()
+			pubKey, err = s.fetchDPASSOPublicKey(kid, diagnostics)
+			if err != nil {
+				return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to fetch DPA JWKS (kid=%s): %w", kid, err)
+			}
 		}
 		jweEncryptStart := time.Now()
 		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA, clusterToken)
@@ -692,6 +744,19 @@ func (s *IdsecSCAK8sService) generateKubeconfigViaDpa(req *k8smodels.IdsecSCAK8s
 	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read generate-kubeconfig response body: %w", err)
+	}
+
+	if response.StatusCode == http.StatusNotFound {
+		// 404 means no eligible K8s clusters for this CSP. Treat it as a
+		// no-targets response (not an error) so the caller can detect it and
+		// write an empty kubeconfig to clear any stale file on disk.
+		key := csp
+		if key == "" {
+			key = "all"
+		}
+		noTargetsMsg := strings.TrimSpace(string(bodyBytes))
+		s.Logger.Info("generate-kubeconfig [%s]: no eligible clusters — %s", cspDisplay, noTargetsMsg)
+		return k8smodels.IdsecSCAK8sGenerateKubeconfigResponse{key: noTargetsMsg}, nil
 	}
 
 	if response.StatusCode != http.StatusOK {

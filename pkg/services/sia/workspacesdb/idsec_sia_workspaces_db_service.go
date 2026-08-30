@@ -490,6 +490,11 @@ func (s *IdsecSIAWorkspacesDBService) ListFamilyTypes() ([]string, error) {
 	return workspacesdbmodels.DatabaseFamilyTypes, nil
 }
 
+// ListTargetFamilyTypes returns the database family types supported by the database-onboarding new API.
+func (s *IdsecSIAWorkspacesDBService) ListTargetFamilyTypes() ([]string, error) {
+	return workspacesdbmodels.DatabaseTargetFamilyTypes, nil
+}
+
 // ServiceConfig returns the service configuration for the IdsecSIATargetSetsWorkspaceService.
 func (s *IdsecSIAWorkspacesDBService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
@@ -741,6 +746,9 @@ func (s *IdsecSIAWorkspacesDBService) ListTargets() (*workspacesdbmodels.IdsecSI
 func (s *IdsecSIAWorkspacesDBService) ListTargetsBy(databasesFilter *workspacesdbmodels.IdsecSIADBDatabaseTargetsFilter) (*workspacesdbmodels.IdsecSIADBDatabaseTargetInfoList, error) {
 	if databasesFilter.ProviderEngine != "" && !slices.Contains(workspacesdbmodels.DatabaseEngineTypes, databasesFilter.ProviderEngine) {
 		return nil, fmt.Errorf("invalid provider engine: %s", databasesFilter.ProviderEngine)
+	}
+	if databasesFilter.ProviderFamily != "" && !slices.Contains(workspacesdbmodels.DatabaseTargetFamilyTypes, databasesFilter.ProviderFamily) {
+		return nil, fmt.Errorf("invalid provider family: %s", databasesFilter.ProviderFamily)
 	}
 	s.Logger.Info("Listing databases by filters [%+v]", databasesFilter)
 	databases, err := s.listDatabaseTargetsWithFilters(databasesFilter.ProviderFamily, databasesFilter.Limit, databasesFilter.Cursor)

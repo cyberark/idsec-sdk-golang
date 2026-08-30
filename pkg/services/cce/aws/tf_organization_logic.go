@@ -180,8 +180,12 @@ func (s *IdsecCCEAWSService) tfDeleteOrganization(input *awsmodels.TfIdsecCCEAWS
 }
 
 // tfUpdateOrganization updates an AWS organization programmatically by reconciling service changes.
-// Compares the desired services in the input with the current services on the organization,
-// then adds new services and removes services that are no longer desired.
+// It compares the desired services in the input with the current services on the organization, then
+// adds brand-new services, applies partial updates to already-onboarded services whose version or
+// user-controlled parameters (resources + terraform service_parameters) changed, and removes services
+// that are no longer desired. Unchanged already-onboarded services are omitted from the request so the
+// (idempotent) endpoint leaves them untouched and does not reject the request with a 501 for a service
+// that is not update-enabled.
 func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWSUpdateOrganization) (*awsmodels.TfIdsecCCEAWSOrganization, error) {
 	s.Logger.Info("Updating AWS organization [%s]", input.ID)
 	// Step 1: Get current organization details to determine existing services
@@ -202,8 +206,10 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 		return nil, fmt.Errorf("failed to deserialize organization response: %w", err)
 	}
 
-	// Extract current services from raw JSON
+	// Extract current services (names + per-service version + per-service parameters) from raw JSON.
 	var currentServiceNames []string
+	currentServiceVersions := map[string]string{}
+	currentServiceParams := map[string]map[string]interface{}{}
 	if orgMap, ok := organizationJSON.(map[string]interface{}); ok {
 		if servicesRaw, exists := orgMap["services"]; exists {
 			if servicesList, ok := servicesRaw.([]interface{}); ok {
@@ -214,58 +220,60 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 				}
 			}
 		}
+		currentServiceVersions = extractCurrentServiceVersions(orgMap)
+		currentServiceParams = extractCurrentServiceParameters(orgMap)
 	}
 
-	// Step 2: Compare services to determine what to add and what to remove
-	// Build maps for efficient lookup
-	desiredServicesMap := make(map[string]ccemodels.IdsecCCEServiceInput)
+	// Step 2: Reconcile services.
+	// The org add/update-services endpoint adds a brand-new service and applies partial updates to an
+	// already-onboarded service (version upgrade and/or a service_parameters change). It is idempotent
+	// (a payload matching the deployed state is a no-op) but rejects (501 FEATURE_NOT_IMPLEMENTED) an
+	// already-onboarded service that is not update-enabled - and it validates every already-onboarded
+	// service in the request, changed or not. So we send ONLY the services that are new or whose
+	// version/parameters actually changed; unchanged services must be omitted (they are left untouched).
+	// Services no longer desired are removed below.
+	desiredServices := make(map[string]bool)
 	for _, service := range input.Services {
-		desiredServicesMap[service.ServiceName] = service
+		desiredServices[service.ServiceName] = true
 	}
 
-	currentServices := make(map[string]bool)
+	// Whether a service is already onboarded is determined by the authoritative "services" name
+	// list, NOT by the presence of a version in "services_data": the API may omit the version for
+	// an onboarded service, and keying off the version map would then misclassify it as NEW and
+	// re-send it, triggering the very 501 we are trying to avoid.
+	currentServiceNamesSet := make(map[string]bool, len(currentServiceNames))
 	for _, serviceName := range currentServiceNames {
-		currentServices[serviceName] = true
+		currentServiceNamesSet[serviceName] = true
 	}
 
 	s.Logger.Info("Current organization services: %v", currentServiceNames)
-	s.Logger.Info("Desired organization services after update: %v", func() []string {
-		names := make([]string, 0, len(desiredServicesMap))
-		for name := range desiredServicesMap {
-			names = append(names, name)
-		}
-		return names
-	}())
 
-	// Determine services to add (in desired but not in current)
-	var servicesToAdd []ccemodels.IdsecCCEServiceInput
-	for serviceName, service := range desiredServicesMap {
-		if !currentServices[serviceName] {
-			servicesToAdd = append(servicesToAdd, service)
-			s.Logger.Info("Service '%s' will be ADDED", serviceName)
-		}
-	}
+	// Determine services to send: brand-new services, already-onboarded services whose desired version
+	// differs from the version currently deployed, or already-onboarded services whose user-controlled
+	// parameters (resources + terraform service_parameters, e.g. secrets_hub's SecretsManagerRegions)
+	// differ from what is currently deployed.
+	servicesToSend := s.reconcileDesiredServices(input.Services, currentServiceNamesSet, currentServiceVersions, currentServiceParams, input.ServiceParameters)
 
-	// Determine services to remove (in current but not in desired)
+	// Determine services to remove (present on the organization but no longer desired).
 	var servicesToRemove []string
-	for serviceName := range currentServices {
-		if _, exists := desiredServicesMap[serviceName]; !exists {
+	for _, serviceName := range currentServiceNames {
+		if !desiredServices[serviceName] {
 			servicesToRemove = append(servicesToRemove, serviceName)
 			s.Logger.Info("Service '%s' will be REMOVED", serviceName)
 		}
 	}
 
-	s.Logger.Info("Services to add: %d, Services to remove: %d\n", len(servicesToAdd), len(servicesToRemove))
-	// Step 3: Add new services if any
-	if len(servicesToAdd) > 0 {
-		s.Logger.Info("Adding %d services to organization [%s]", len(servicesToAdd), input.ID)
+	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d\n", len(servicesToSend), len(servicesToRemove))
+	// Step 3: Add new services and push version upgrades (if any).
+	if len(servicesToSend) > 0 {
+		s.Logger.Info("Sending %d service(s) to organization [%s]", len(servicesToSend), input.ID)
 		err = s.addOrganizationServices(&awsmodels.TfIdsecCCEAWSAddOrganizationServices{
 			ID:                input.ID,
-			Services:          servicesToAdd,
+			Services:          servicesToSend,
 			ServiceParameters: input.ServiceParameters,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to add services: %w", err)
+			return nil, fmt.Errorf("failed to add/update services: %w", err)
 		}
 	}
 

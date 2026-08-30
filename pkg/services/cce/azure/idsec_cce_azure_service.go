@@ -2,7 +2,6 @@ package azure
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -341,47 +340,19 @@ func (s *IdsecCCEAzureService) TfIdentityParams(input *azuremodels.TfIdsecCCEAzu
 		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get identity parameters")
 	}
 
-	// Read the raw response body
 	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Parse the response as a generic map first (tenant_id is at root level alongside service params)
-	var rawResponse map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &rawResponse); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal identity parameters: %w", err)
+	parsed, err := cceinternal.ParseIdentityParamsResponse(bodyBytes, s.Logger)
+	if err != nil {
+		return nil, err
 	}
 
-	// Extract tenantId if present (API uses camelCase "tenantId")
-	tenantID, _ := rawResponse["tenantId"].(string)
-
-	// Extract service identity params (all keys except tenantId)
-	paramsMap := make(map[string]azuremodels.IdsecCCEWorkloadFederation)
-	for key, value := range rawResponse {
-		if key == "tenantId" {
-			continue // Skip tenantId, it's handled separately
-		}
-
-		// Marshal and unmarshal to convert interface{} to IdsecCCEWorkloadFederation
-		valueBytes, err := json.Marshal(value)
-		if err != nil {
-			s.Logger.Warning("Failed to marshal identity param for service %s: %v", key, err)
-			continue
-		}
-
-		var identityParam azuremodels.IdsecCCEWorkloadFederation
-		if err := json.Unmarshal(valueBytes, &identityParam); err != nil {
-			s.Logger.Warning("Failed to unmarshal identity param for service %s: %v", key, err)
-			continue
-		}
-		paramsMap[key] = identityParam
-	}
-
-	// Wrap the map in the struct with tenant_id
 	identityParams := &azuremodels.TfIdsecCCEAzureIdentityParams{
-		TenantID:       tenantID,
-		IdentityParams: paramsMap,
+		TenantID:       parsed.TenantID,
+		IdentityParams: parsed.IdentityParams,
 	}
 
 	s.Logger.Info("Decoded identity parameters response: %+v", identityParams)

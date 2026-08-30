@@ -145,6 +145,53 @@ func TestValidateStruct_unwrapsToValidationErrors(t *testing.T) {
 	}
 }
 
+// TestValidateStruct_squashedEmbedPath asserts a rule on a field inside a
+// `mapstructure:",squash"` embed reports the promoted path, not the Go type
+// name of the embedded struct — the path consumers resolve against a schema.
+func TestValidateStruct_squashedEmbedPath(t *testing.T) {
+	type create struct {
+		Name string `mapstructure:"name" validate:"required"`
+	}
+	type update struct {
+		create `mapstructure:",squash"`
+		ID     string `mapstructure:"id"`
+	}
+	err := ValidateStruct(&update{})
+	msg := mustErrorMsg(t, err)
+	if !strings.Contains(msg, "name: required") {
+		t.Errorf("expected the promoted field path, got %q", msg)
+	}
+	if strings.Contains(msg, "create") {
+		t.Errorf("squashed embed leaked into message: %q", msg)
+	}
+	var verr *Error
+	if !errors.As(err, &verr) {
+		t.Fatalf("error did not unwrap to *Error: %v", err)
+	}
+	if got := FieldPath(verr.Fields()[0]); got != "name" {
+		t.Errorf("FieldPath() = %q, want %q", got, "name")
+	}
+}
+
+// TestValidateStruct_nonStringValueRendering asserts non-string offending
+// values render in their default form; %q would print a rune for an integer
+// and a verb error for a pointer.
+func TestValidateStruct_nonStringValueRendering(t *testing.T) {
+	type req struct {
+		Minutes  int     `mapstructure:"minutes" validate:"max=240"`
+		Optional *string `mapstructure:"optional" validate:"required_if=Minutes 999"`
+	}
+	msg := mustErrorMsg(t, ValidateStruct(&req{Minutes: 999}))
+	for _, want := range []string{"minutes: max=240 (got 999)", "optional: required_if=Minutes 999 (got <nil>)"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q in %q", want, msg)
+		}
+	}
+	if strings.Contains(msg, "%!q") {
+		t.Errorf("verb error leaked into message: %q", msg)
+	}
+}
+
 func mustErrorMsg(t *testing.T, err error) string {
 	t.Helper()
 	if err == nil {

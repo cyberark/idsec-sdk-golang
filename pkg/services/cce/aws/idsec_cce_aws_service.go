@@ -2,8 +2,10 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -355,8 +357,14 @@ func (s *IdsecCCEAWSService) TfAddAccount(input *awsmodels.TfIdsecCCEAWSAddAccou
 }
 
 // UpdateAccount updates an AWS account programmatically by reconciling service changes.
-// Compares the desired services in the input with the current services on the account,
-// then adds new services and removes services that are no longer desired.
+// It compares the desired services in the input with the current services on the account and, via the
+// add/update-services endpoint, adds brand-new services and applies partial updates to already-onboarded
+// services whose version or resources changed, then removes services that are no longer desired.
+//
+// Unchanged already-onboarded services are omitted from the request so the (idempotent) endpoint leaves
+// them untouched and does not reject the request with a 501 for a service that is not update-enabled.
+// A resources change on a service that is not update-enabled will surface the endpoint's 501 - which is
+// the correct, actionable error - only when that service's resources actually changed.
 // ⚠️  DEPRECATED: This function is deprecated and should not be used.
 // ⚠️  It exists only for compatibility with Terraform provider.
 func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdateAccount) (*awsmodels.TfIdsecCCEAWSAccount, error) {
@@ -380,8 +388,10 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 		return nil, err
 	}
 
-	// Extract current services from raw JSON
+	// Extract current services (names + per-service version + per-service parameters) from raw JSON.
 	var currentServiceNames []string
+	currentServiceVersions := map[string]string{}
+	currentServiceParams := map[string]map[string]interface{}{}
 	if orgMap, ok := accountJSON.(map[string]interface{}); ok {
 		if servicesRaw, exists := orgMap["services"]; exists {
 			if servicesList, ok := servicesRaw.([]interface{}); ok {
@@ -392,54 +402,63 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 				}
 			}
 		}
+		currentServiceVersions = extractCurrentServiceVersions(orgMap)
+		currentServiceParams = extractCurrentServiceParameters(orgMap)
 	}
 
-	// Step 2: Compare services to determine what to add and what to remove
-	// Build maps for efficient lookup
-	desiredServicesMap := make(map[string]ccemodels.IdsecCCEServiceInput)
+	// Step 2: Reconcile services.
+	// The account add/update-services endpoint adds a brand-new service and applies partial updates to an
+	// already-onboarded service (version upgrade and/or a resources change). It is idempotent (a payload
+	// matching the deployed state is a no-op) but rejects (501 FEATURE_NOT_IMPLEMENTED) an already-onboarded
+	// service that is not update-enabled - and it validates every already-onboarded service in the request,
+	// changed or not. So we send ONLY the services that are new or whose version/resources actually changed;
+	// unchanged services (e.g. a service left as-is while another one is updated) must be omitted. Services
+	// that are no longer desired are removed separately below.
+	desiredServices := make(map[string]bool)
 	for _, service := range input.Services {
-		desiredServicesMap[service.ServiceName] = service
+		desiredServices[service.ServiceName] = true
 	}
 
-	currentServices := make(map[string]bool)
+	// Whether a service is already onboarded is determined by the authoritative "services" name
+	// list, NOT by the presence of a version in "services_data": the API may omit the version for
+	// an onboarded service, and keying off the version map would then misclassify it as NEW and
+	// re-send it, triggering the very 501 we are trying to avoid.
+	currentServiceNamesSet := make(map[string]bool, len(currentServiceNames))
 	for _, serviceName := range currentServiceNames {
-		currentServices[serviceName] = true
+		currentServiceNamesSet[serviceName] = true
 	}
 
 	s.Logger.Info("Current account services: %v", currentServiceNames)
 
-	// Determine services to add (in desired but not in current)
-	var servicesToAdd []ccemodels.IdsecCCEServiceInput
-	for serviceName, service := range desiredServicesMap {
-		if !currentServices[serviceName] {
-			servicesToAdd = append(servicesToAdd, service)
-			s.Logger.Info("Service '%s' will be ADDED", serviceName)
-		}
-	}
+	// Determine services to send: brand-new services, already-onboarded services whose desired version
+	// differs from the version currently deployed, or already-onboarded services whose user-controlled
+	// resources differ from what is currently deployed. (A standalone account has no service_parameters,
+	// so the desired parameters are just the service resources.)
+	servicesToSend := s.reconcileDesiredServices(input.Services, currentServiceNamesSet, currentServiceVersions, currentServiceParams, nil)
 
-	// Determine services to remove (in current but not in desired)
+	// Determine services to remove (present on the account but no longer desired).
 	var servicesToRemove []string
-	for serviceName := range currentServices {
-		if _, exists := desiredServicesMap[serviceName]; !exists {
+	for _, serviceName := range currentServiceNames {
+		if !desiredServices[serviceName] {
 			servicesToRemove = append(servicesToRemove, serviceName)
 			s.Logger.Info("Service '%s' will be REMOVED", serviceName)
 		}
 	}
 
-	// Step 3: Add new services if any
-	s.Logger.Info("Services to add: %d, Services to remove: %d\n", len(servicesToAdd), len(servicesToRemove))
-	if len(servicesToAdd) > 0 {
-		s.Logger.Info("Adding %d services to account [%s]", len(servicesToAdd), input.ID)
+	// Step 3: Add new services and push version upgrades (if any).
+	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d\n", len(servicesToSend), len(servicesToRemove))
+	if len(servicesToSend) > 0 {
+		s.Logger.Info("Sending %d service(s) to account [%s]", len(servicesToSend), input.ID)
 		err = s.TfAddAccountServices(&awsmodels.TfIdsecCCEAWSAddAccountServices{
 			ID:       input.ID,
-			Services: servicesToAdd,
+			Services: servicesToSend,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to add services: %w", err)
+			return nil, fmt.Errorf("failed to add/update services: %w", err)
 		}
 	}
 
-	// Step 4: Remove services that are no longer desired
+	// Step 4: Remove services that are no longer desired.
 	if len(servicesToRemove) > 0 {
 		s.Logger.Info("Removing %d services from account [%s]", len(servicesToRemove), input.ID)
 		err = s.DeleteAccountServices(&awsmodels.TfIdsecCCEAWSDeleteAccountServices{
@@ -465,10 +484,164 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 
 // accountDetailsForUpdate contains the extracted account information needed for updating organization accounts.
 type accountDetailsForUpdate struct {
-	AccountID                    string   // AWS account ID (e.g., "575625562187")
-	CurrentServiceNames          []string // All service names from "services" field
-	CurrentFullyDeployedServices []string // Only services with status "Completely added"
-	ServicesWaitingForDeployment []string // Only services with status "Waiting for deployment"
+	AccountID                    string                            // AWS account ID (e.g., "575625562187")
+	CurrentServiceNames          []string                          // All service names from "services" field
+	CurrentFullyDeployedServices []string                          // Only services with status "Completely added"
+	ServicesWaitingForDeployment []string                          // Only services with status "Waiting for deployment"
+	CurrentServiceParams         map[string]map[string]interface{} // Currently-deployed parameters, keyed by service name
+}
+
+// extractCurrentServiceVersions builds a map of service name -> currently deployed version from
+// the account's "services_data" array. Services without a version entry are simply omitted.
+// It is used to decide which already-onboarded services represent a real version upgrade (the
+// only in-place change the add/update-services endpoint accepts) versus an unchanged service
+// that must be excluded from the request to avoid a 501 FEATURE_NOT_IMPLEMENTED response.
+func extractCurrentServiceVersions(accountMap map[string]interface{}) map[string]string {
+	versions := map[string]string{}
+	servicesDataRaw, exists := accountMap["services_data"]
+	if !exists {
+		return versions
+	}
+	servicesDataList, ok := servicesDataRaw.([]interface{})
+	if !ok {
+		return versions
+	}
+	for _, svcData := range servicesDataList {
+		svcMap, ok := svcData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, hasName := svcMap["name"].(string)
+		version, hasVersion := svcMap["version"].(string)
+		if hasName && hasVersion {
+			versions[name] = version
+		}
+	}
+	return versions
+}
+
+// extractCurrentServiceParameters builds a map of service name -> currently deployed parameters from the
+// onboarding's "parameters" object (keyed by service name). The API returns each service's stored parameters
+// (user resources merged with terraform service_parameters, e.g. secrets_hub's SecretsManagerRegions),
+// snake_cased on read. It is used to detect a real parameter change on an already-onboarded service: the
+// org add/update-services endpoint applies such partial updates, but rejects (501 FEATURE_NOT_IMPLEMENTED)
+// an already-onboarded service that is not update-enabled, so only genuinely-changed services must be sent.
+func extractCurrentServiceParameters(accountMap map[string]interface{}) map[string]map[string]interface{} {
+	params := map[string]map[string]interface{}{}
+	raw, exists := accountMap["parameters"]
+	if !exists {
+		return params
+	}
+	perService, ok := raw.(map[string]interface{})
+	if !ok {
+		return params
+	}
+	for name, val := range perService {
+		if svcParams, ok := val.(map[string]interface{}); ok {
+			params[name] = svcParams
+		}
+	}
+	return params
+}
+
+// reconcileDesiredServices determines which desired services must be sent to the account/organization
+// add-services endpoint: brand-new services (not yet onboarded), already-onboarded services whose desired
+// version differs from what is currently deployed, and already-onboarded services whose user-controlled
+// parameters (resources merged with any terraform service_parameters) changed. Unchanged services are
+// omitted so we never re-send an already-onboarded service that isn't update-enabled (which the API rejects
+// with 501 FEATURE_NOT_IMPLEMENTED).
+//
+// desiredServiceParameters is the terraform service_parameters map to merge into each desired service's
+// resources (pass nil for a standalone account, which has no service_parameters). This is the only thing
+// that differs between the account (TfUpdateAccount) and organization (tfUpdateOrganization) update paths,
+// which is why they share this helper.
+func (s *IdsecCCEAWSService) reconcileDesiredServices(
+	desiredServices []ccemodels.IdsecCCEServiceInput,
+	currentServiceNamesSet map[string]bool,
+	currentServiceVersions map[string]string,
+	currentServiceParams map[string]map[string]interface{},
+	desiredServiceParameters map[string]map[string]interface{},
+) []ccemodels.IdsecCCEServiceInput {
+	var servicesToSend []ccemodels.IdsecCCEServiceInput
+	for _, service := range desiredServices {
+		currentVersion := currentServiceVersions[service.ServiceName]
+		desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
+		switch {
+		case !currentServiceNamesSet[service.ServiceName]:
+			servicesToSend = append(servicesToSend, service)
+			s.Logger.Info("Service '%s' is NEW and will be ADDED", service.ServiceName)
+		case service.Version != "" && service.Version != currentVersion:
+			servicesToSend = append(servicesToSend, service)
+			s.Logger.Info("Service '%s' version changed (%s -> %s) and will be UPGRADED", service.ServiceName, currentVersion, service.Version)
+		case serviceParamsChanged(desiredParams, currentServiceParams[service.ServiceName]):
+			servicesToSend = append(servicesToSend, service)
+			s.Logger.Info("Service '%s' parameters changed and will be UPDATED", service.ServiceName)
+		default:
+			s.Logger.Info("Service '%s' is unchanged (version %s), skipping to avoid an unsupported update request", service.ServiceName, currentVersion)
+		}
+	}
+	return servicesToSend
+}
+
+// mergedDesiredServiceParams returns the user-controlled parameters for a desired service: its per-service
+// resources merged with any terraform service_parameters keyed by that service name. This mirrors how the
+// API stores parameters (resources + service_parameters together), so the result can be compared against
+// extractCurrentServiceParameters to decide whether the service actually changed.
+//
+// serviceParameters is optional. When there are no service_parameters for this service - either because the
+// caller has none at all (the standalone account path: TfIdsecCCEAWSUpdateAccount has no ServiceParameters
+// field) or simply none for this particular service - there is nothing to merge and the service's resources
+// are the desired parameters. In that case service.Resources is returned as-is (no throwaway copy). The
+// result is only ever read by callers (serviceParamsChanged), so this aliasing is safe; do not mutate it.
+func mergedDesiredServiceParams(service ccemodels.IdsecCCEServiceInput,
+	serviceParameters map[string]map[string]interface{}) map[string]interface{} {
+	extraParams := serviceParameters[service.ServiceName]
+	if len(extraParams) == 0 {
+		return service.Resources
+	}
+	merged := make(map[string]interface{}, len(service.Resources)+len(extraParams))
+	for key, value := range service.Resources {
+		merged[key] = value
+	}
+	for key, value := range extraParams {
+		merged[key] = value
+	}
+	return merged
+}
+
+// serviceParamsChanged reports whether the desired user-controlled parameters for an already-onboarded
+// service differ from what is currently deployed. Only keys present in `desired` are inspected, so
+// server-managed extras stored alongside the user's parameters (e.g. generated role ARNs) never produce a
+// false positive that would re-send an unchanged service and trigger a 501. `desired` uses the caller's key
+// casing (e.g. "SecretsManagerRegions") and is normalized to the snake_case form the API returns before
+// comparison. Returns true when any desired key is missing from `current` or holds a different value.
+func serviceParamsChanged(desired, current map[string]interface{}) bool {
+	if len(desired) == 0 {
+		return false
+	}
+	normalized, ok := common.ConvertToSnakeCase(desired, nil).(map[string]interface{})
+	if !ok {
+		return true
+	}
+	for key, desiredVal := range normalized {
+		currentVal, exists := current[key]
+		if !exists || !jsonValuesEqual(desiredVal, currentVal) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsonValuesEqual compares two decoded-JSON values for equality by marshaling them back to JSON. This
+// normalizes ordering-insensitive maps and typed slices (e.g. []interface{} vs []string) that
+// reflect.DeepEqual would otherwise report as different. Falls back to reflect.DeepEqual if marshaling fails.
+func jsonValuesEqual(a, b interface{}) bool {
+	aBytes, errA := json.Marshal(a)
+	bBytes, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		return reflect.DeepEqual(a, b)
+	}
+	return string(aBytes) == string(bBytes)
 }
 
 // parseAccountServices extracts service information from the account JSON response.
@@ -545,6 +718,7 @@ func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID stri
 
 		// Parse services from the account response
 		details.CurrentServiceNames, details.CurrentFullyDeployedServices, details.ServicesWaitingForDeployment = parseAccountServices(orgMap)
+		details.CurrentServiceParams = extractCurrentServiceParameters(orgMap)
 	}
 
 	// Validate we got the required information
@@ -558,17 +732,29 @@ func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID stri
 	return details, nil
 }
 
-// determineServicesToAddWithStatus determines which services to add based on their deployment status.
-// Only adds services that are either:
-// - Completely new (not in currentServiceNames at all)
-// - OR have status "Waiting for deployment" (in waitingForDeployment list)
-// Services with other statuses (like "In progress", "Failed", etc.) are skipped.
+// determineServicesToAddWithStatus decides which desired services to (re)send to the
+// organization add-account endpoint. It returns:
+//   - every service that is brand-new to the account (not onboarded yet), and
+//   - every already-onboarded service in a settled state ("Completely added" or "Waiting for
+//     deployment") whose user-controlled parameters (resources + terraform service_parameters)
+//     actually changed, so that an in-place resources/parameters change is pushed to the API.
+//
+// The add-account endpoint is an idempotent resource UPSERT: it diffs the requested resources
+// against what is stored and is a no-op when nothing changed. Sending only genuinely-changed
+// services keeps the request minimal and consistent with the account/organization update paths,
+// while still guaranteeing that a resources change on an already-deployed service reaches the API
+// (the original behavior skipped fully-deployed services entirely and dropped such changes).
+//
+// Services in any other, mid-operation state (e.g. "In progress"/"Failed") are skipped to
+// avoid the API rejecting the request while that service is still being processed.
 // This is Step 2 of the TfUpdateOrganizationAccount flow.
 func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 	currentServiceNames []string,
 	waitingForDeployment []string,
 	fullyDeployed []string,
 	desiredServices []ccemodels.IdsecCCEServiceInput,
+	currentServiceParams map[string]map[string]interface{},
+	desiredServiceParameters map[string]map[string]interface{},
 ) []ccemodels.IdsecCCEServiceInput {
 	// Build maps for efficient lookup
 	currentServicesMap := make(map[string]bool)
@@ -586,33 +772,39 @@ func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 		fullyDeployedMap[serviceName] = true
 	}
 
-	// Determine services to add
+	// Determine services to add or re-send
 	var servicesToAdd []ccemodels.IdsecCCEServiceInput
 	for _, service := range desiredServices {
 		serviceName := service.ServiceName
 
-		// Skip if already fully deployed
-		if fullyDeployedMap[serviceName] {
-			s.Logger.Info("Service '%s' is already fully deployed (status: 'Completely added'), skipping", serviceName)
-			continue
-		}
-
-		// Add if completely new (not in current services at all)
+		// Brand-new service (not onboarded on the account yet): add it.
 		if !currentServicesMap[serviceName] {
 			servicesToAdd = append(servicesToAdd, service)
 			s.Logger.Info("Service '%s' is NEW and will be ADDED", serviceName)
 			continue
 		}
 
-		// Add if waiting for deployment
-		if waitingMap[serviceName] {
-			servicesToAdd = append(servicesToAdd, service)
-			s.Logger.Info("Service '%s' is waiting for deployment and will be RE-ADDED", serviceName)
+		// Already-onboarded service in a settled state: re-send it only when its user-controlled
+		// parameters actually changed, so the endpoint's idempotent resource diff applies the change
+		// (and we avoid re-sending unchanged services).
+		//
+		// Note: unlike TfUpdateAccount/tfUpdateOrganization, we don't diff service.Version here —
+		// member-account services don't have an independently settable version; it's inherited
+		// from the parent organization. Version is technically still a field on IdsecCCEServiceInput
+		// (omitempty), but no caller of this path populates it, so it's never sent here in practice.
+		if fullyDeployedMap[serviceName] || waitingMap[serviceName] {
+			desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
+			if serviceParamsChanged(desiredParams, currentServiceParams[serviceName]) {
+				servicesToAdd = append(servicesToAdd, service)
+				s.Logger.Info("Service '%s' parameters changed and will be UPDATED", serviceName)
+			} else {
+				s.Logger.Info("Service '%s' is already onboarded and unchanged, skipping", serviceName)
+			}
 			continue
 		}
 
-		// Skip services with other statuses (In progress, Failed, etc.)
-		s.Logger.Info("Service '%s' has other status (not 'Completely added' or 'Waiting for deployment'), skipping", serviceName)
+		// Skip services in a transient/mid-operation status (In progress, Failed, etc.).
+		s.Logger.Info("Service '%s' has a transient status (not 'Completely added' or 'Waiting for deployment'), skipping", serviceName)
 	}
 
 	return servicesToAdd
@@ -662,8 +854,11 @@ func (s *IdsecCCEAWSService) addServicesToOrganizationAccount(
 }
 
 // TfUpdateOrganizationAccount updates services on an AWS account that's part of an organization.
-// It only adds new services to the account. Service removal is not needed because when a service
-// is removed from the organization, it is automatically removed from all accounts in that organization.
+// It adds new services to the account and re-sends already-onboarded services in a settled state whose
+// user-controlled parameters actually changed, so that in-place resources/parameters changes are applied
+// via the endpoint's idempotent resource diff (unchanged services are omitted). Service removal is not
+// needed because when a service is removed from the organization, it is automatically removed from all
+// accounts in that organization.
 // This method follows the same robust pattern as TfAddOrganizationAccountSync with proper error handling and retry logic.
 // API: POST /api/aws/programmatic/organization/{id}/account
 func (s *IdsecCCEAWSService) TfUpdateOrganizationAccount(input *awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount) (*awsmodels.TfIdsecCCEAWSAccount, error) {
@@ -675,33 +870,36 @@ func (s *IdsecCCEAWSService) TfUpdateOrganizationAccount(input *awsmodels.TfIdse
 		return nil, err
 	}
 
-	// Step 2: Determine which services need to be added
-	// Only add services that are either:
-	// - Completely new (not in current services at all)
-	// - OR have status "Waiting for deployment"
-	// Services with other statuses (like "In progress", "Failed", etc.) are skipped
+	// Step 2: Determine which services need to be sent. This includes:
+	// - Services completely new to the account (not onboarded yet)
+	// - Already-onboarded services in a settled state ("Completely added"/"Waiting for
+	//   deployment"), re-sent so in-place resources changes are applied by the API's diff
+	// Services in a transient/mid-operation status are skipped.
 	servicesToAdd := s.determineServicesToAddWithStatus(
 		accountDetails.CurrentServiceNames,
 		accountDetails.ServicesWaitingForDeployment,
 		accountDetails.CurrentFullyDeployedServices,
 		input.Services,
+		accountDetails.CurrentServiceParams,
+		input.ServiceParameters,
 	)
 
-	// Step 3: If no new services to add, skip the API call
+	// Step 3: If nothing to send, skip the API call
 	if len(servicesToAdd) == 0 {
-		s.Logger.Info("No new services to add, account is already up to date")
+		s.Logger.Info("No services to add or re-send, account is already up to date")
 		// Still fetch and return current account details for consistency
 		return s.accountWithRetry(&awsmodels.TfIdsecCCEAWSGetAccount{
 			ID: input.ID,
 		})
 	}
 
-	// Step 4: Add only the NEW services using the organization API endpoint
-	s.Logger.Info("Adding %d new service(s) to account", len(servicesToAdd))
+	// Step 4: Send the new + re-sent services using the organization API endpoint. The
+	// endpoint diffs resources server-side and no-ops services that are unchanged.
+	s.Logger.Info("Sending %d service(s) to account", len(servicesToAdd))
 	err = s.addServicesToOrganizationAccount(
 		input.ParentOrganizationID, // Use the org ID passed from Terraform
 		accountDetails.AccountID,
-		servicesToAdd, // Send only NEW services (delta)
+		servicesToAdd,
 		input.ServiceParameters,
 	)
 	if err != nil {

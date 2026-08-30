@@ -43,7 +43,7 @@ type TfIdsecCCEAzureGetManagementGroup struct {
 // OPENAPI-CORRELATION: Custom input combining multiple endpoints
 type TfIdsecCCEAzureUpdateManagementGroup struct {
 	// ID is the Management Group's onboarding ID.
-	ID string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"CCE management group onboarding ID."`
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE management group onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 }

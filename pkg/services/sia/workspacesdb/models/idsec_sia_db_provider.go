@@ -159,6 +159,17 @@ var DatabaseFamilyTypes = []string{
 	FamilyTypeUnknown,
 }
 
+// DatabaseTargetFamilyTypes is a list of the database family types supported by the database-onboarding new API.
+var DatabaseTargetFamilyTypes = []string{
+	FamilyTypeMySQL,
+	FamilyTypeMSSQL,
+	FamilyTypePostgres,
+	FamilyTypeMariaDB,
+	FamilyTypeDB2,
+	FamilyTypeOracle,
+	FamilyTypeMongo,
+}
+
 // Possible database engine types.
 const (
 	EngineTypeAuroraPostgres       string = "aurora-postgresql"

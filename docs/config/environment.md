@@ -13,6 +13,7 @@ The Idsec SDK uses environment variables to configure its behavior and settings.
 - `IDSEC_DISABLE_TELEMETRY_COLLECTION`: If set to `true`, disables telemetry data collection.
 - `IDSEC_BASIC_KEYRING`: If set to `true`, uses a basic keyring for storing sensitive information instead of the system's secure storage.
 - `IDSEC_KEYRING_FOLDER`: Specifies a custom folder path for the basic keyring storage when `IDSEC_BASIC_KEYRING` is enabled.
+- `IDSEC_KEYRING_KEY_FILE`: Specifies a custom path for the file holding the key material that protects the basic keyring storage. It defaults to `$HOME/.idsec/keys/keyring.key` and is set independently of `IDSEC_KEYRING_FOLDER`, which does not relocate this file.
 - `IDSEC_SUPPRESS_UPGRADE_CHECK`: If set to `true`, suppresses the automatic upgrade check when running Idsec commands.
 - `IDSEC_PROXY_ADDRESS`: Specifies the proxy address to be used by the SDK for all requests.
 - `IDSEC_PROXY_USERNAME`: Specifies the username for proxy authentication.

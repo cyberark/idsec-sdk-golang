@@ -24,6 +24,24 @@ const (
 	statesURL      = "/api/secret-stores/states"
 )
 
+const (
+	// scanInProgressStatus is the scan status that blocks enabling a secret store.
+	scanInProgressStatus = "IN_PROGRESS"
+
+	// scanWaitMaxRetries is the max number of poll retries before aborting.
+	// The API (SSMG0020E) says "wait a minute"; 7 retries × 15s cap = 90s budget.
+	scanWaitMaxRetries = 7
+
+	// scanWaitDelaySeconds is the initial poll interval in seconds.
+	scanWaitDelaySeconds = 5
+
+	// scanWaitBackoff doubles the delay after each retry until the cap is reached.
+	scanWaitBackoff = 2
+
+	// scanWaitMaxDelay caps the poll interval in seconds: 5s → 10s → 15s steady.
+	scanWaitMaxDelay = 15
+)
+
 // immutableFields defines the provider-specific fields that must be stripped from the
 // serialized secret store JSON map before sending an update request.
 var immutableFields = []string{
@@ -42,6 +60,8 @@ var immutableFields = []string{
 	// HashiCorp Vault
 	"hashiVaultUrl",
 	"mountPath",
+	// HashiCorp Vault Enterprise only
+	"namespace",
 }
 
 // IdsecSecHubSecretStoresPage is a page of IdsecSecHubSecretStore items.
@@ -363,12 +383,50 @@ func (s *IdsecSecHubSecretStoresService) UpdateTf(secretStore *secretstoresmodel
 	return updatedStore, nil
 }
 
+// waitForScanCompletion polls GET scan.status until it leaves IN_PROGRESS,
+// then returns nil so SetState can safely issue the enable PUT.
+// A GET failure is treated as non-retryable and aborts immediately.
+func (s *IdsecSecHubSecretStoresService) waitForScanCompletion(storeID string) error {
+	var nonRetryableErr error
+	maxDelay := scanWaitMaxDelay
+
+	err := common.RetryCall(func() error {
+		store, err := s.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{ID: storeID})
+		if err != nil {
+			nonRetryableErr = err
+			return nil
+		}
+		if store.Scan.Status != scanInProgressStatus {
+			return nil
+		}
+		return fmt.Errorf("scan still in progress for secret store [%s]", storeID)
+	}, scanWaitMaxRetries+1, scanWaitDelaySeconds, &maxDelay, scanWaitBackoff, 0,
+		func(err error, delay int) {
+			s.Logger.Warning("Waiting for scan to complete for [%s]: %v. Retrying in %ds...", storeID, err, delay)
+		})
+
+	if nonRetryableErr != nil {
+		return fmt.Errorf("failed to check scan status for secret store [%s]: %w", storeID, nonRetryableErr)
+	}
+	if err != nil {
+		return fmt.Errorf("scan did not complete for secret store [%s] after %d retries", storeID, scanWaitMaxRetries)
+	}
+	return nil
+}
+
 // This method is intended for Terraform use only
 // SetState sets the state of a secret store.
 // https://api-docs.cyberark.com/docs/secretshub-api/qb5o0s8br9nxg-set-secret-store-state
 func (s *IdsecSecHubSecretStoresService) SetState(
 	setSecretStoreState *secretstoresmodels.IdsecSecHubSetSecretStoreState) error {
 	s.Logger.Info("Setting secret store state [%s]", setSecretStoreState.ID)
+
+	if setSecretStoreState.Action == string(ActionEnable) {
+		if err := s.waitForScanCompletion(setSecretStoreState.ID); err != nil {
+			return err
+		}
+	}
+
 	bodyMap := map[string]string{
 		"action": setSecretStoreState.Action,
 	}

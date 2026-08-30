@@ -2,6 +2,7 @@ package keyring
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -264,6 +265,7 @@ func TestIdsecKeyring_GetKeyring(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			isolateKeyringEnvironment(t)
 			cleanup := tt.setupMock()
 			defer cleanup()
 
@@ -404,6 +406,7 @@ func TestIdsecKeyring_SaveToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			isolateKeyringEnvironment(t)
 			cleanup := tt.setupMock()
 			defer cleanup()
 
@@ -563,6 +566,7 @@ func TestIdsecKeyring_LoadToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			isolateKeyringEnvironment(t)
 			keyring := NewIdsecKeyring("test-service")
 			cleanup := tt.setupMock(keyring)
 			defer cleanup()
@@ -641,6 +645,7 @@ func TestIdsecKeyring_LoadToken_JsonParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			isolateKeyringEnvironment(t)
 			keyring := NewIdsecKeyring("test-service")
 			cleanup := tt.setupMock(keyring)
 			defer cleanup()
@@ -699,6 +704,7 @@ func TestIdsecKeyring_Integration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			isolateKeyringEnvironment(t)
 			keyring := NewIdsecKeyring("integration-test")
 
 			// Save the token
@@ -722,5 +728,71 @@ func TestIdsecKeyring_Integration(t *testing.T) {
 				t.Errorf("Loaded token doesn't match saved token.\nExpected: %+v\nGot: %+v", tt.token, loadedToken)
 			}
 		})
+	}
+}
+
+// TestIdsecKeyring_ReportsAnUnavailableKeyring verifies that when no keyring can be
+// built, GetKeyring reports it as an error and yields nothing usable, and that saving
+// and loading a token report the same failure to the caller.
+//
+// The check that the returned value is nil is the point of the test. An
+// implementation returned alongside the error would be a non-nil interface holding a
+// nil pointer, which no caller can tell apart from a working keyring, and which fails
+// on first use instead of at the call that could still handle it.
+func TestIdsecKeyring_ReportsAnUnavailableKeyring(t *testing.T) {
+	workingDirectory := t.TempDir()
+	t.Chdir(workingDirectory)
+	// The production code treats an empty value as unset, so clearing the variables
+	// leaves every keyring location to be derived from the home directory.
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv(IdsecBasicKeyringFolderEnvVar, "")
+	t.Setenv(IdsecBasicKeyringKeyFileEnvVar, "")
+
+	keyring := NewIdsecKeyring("test-service")
+	profile := &models.IdsecProfile{ProfileName: "test-profile"}
+	token := &auth.IdsecToken{
+		Token:     "test-access-token",
+		TokenType: auth.JWT,
+		ExpiresIn: commonmodels.IdsecRFC3339Time(time.Now().Add(1 * time.Hour)),
+	}
+
+	implementation, err := keyring.GetKeyring(false)
+
+	if err == nil {
+		t.Fatal("Expected GetKeyring to report an error, got none")
+	}
+	if !errors.Is(err, ErrKeyringUnavailable) {
+		t.Errorf("Expected ErrKeyringUnavailable, got %v", err)
+	}
+	if implementation != nil {
+		value := reflect.ValueOf(implementation)
+		nilPointer := value.Kind() == reflect.Ptr && value.IsNil()
+		t.Fatalf("Expected no keyring implementation, got %T holding a nil pointer: %t", implementation, nilPointer)
+	}
+
+	// Both calls reach the same construction, so a nil pointer behind a non-nil
+	// interface would surface here as a panic rather than as the error below.
+	if err := keyring.SaveToken(profile, token, "access", false); !errors.Is(err, ErrKeyringUnavailable) {
+		t.Errorf("Expected SaveToken to report ErrKeyringUnavailable, got %v", err)
+	}
+	loadedToken, err := keyring.LoadToken(profile, "access", false)
+	if !errors.Is(err, ErrKeyringUnavailable) {
+		t.Errorf("Expected LoadToken to report ErrKeyringUnavailable, got %v", err)
+	}
+	if loadedToken != nil {
+		t.Errorf("Expected no token, got %+v", loadedToken)
+	}
+
+	entries, err := os.ReadDir(workingDirectory)
+	if err != nil {
+		t.Fatalf("Failed to inspect the working directory: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Errorf("Expected nothing to be created in the working directory, got %v", names)
 	}
 }

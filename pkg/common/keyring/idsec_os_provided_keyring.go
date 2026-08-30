@@ -69,16 +69,35 @@ func (b *IdsecOSProvidedKeyring) keyringForService(serviceName string) (keyring.
 // NewIdsecOSProvidedKeyring initializes the OS-based keyring with a fallback keyring implementation.
 // The fallbackKeyring is used if the OS keyring is unavailable or encounters errors.
 //
+// An unusable fallback is rejected, because every error path in this type ends in the
+// fallback and a keyring that cannot fall back is worse than no keyring at all: the
+// failure would surface as a panic at the first platform-store error rather than as an
+// error the caller can act on. The documented way to build a fallback is
+// NewIdsecBasicKeyring, which reports failure by returning nil, and passing that result
+// straight through produces a *IdsecBasicKeyring nil that is not equal to nil once it is
+// held in an IdsecKeyringImpl. Both that case and a plainly nil interface are rejected
+// here, so a caller only has to check the one result this constructor returns.
+//
 // Parameters:
 //   - fallbackKeyring: IdsecKeyringImpl. The fallback keyring implementation to use.
 //
-// Returns a pointer to the initialized IdsecOSProvidedKeyring.
+// Returns a pointer to the initialized IdsecOSProvidedKeyring, or nil if fallbackKeyring
+// is nil or is a nil *IdsecBasicKeyring.
 //
 // Example:
 //
-//	fallback := NewBasicKeyring()
+//	fallback := NewIdsecBasicKeyring()
 //	keyring := NewIdsecOSProvidedKeyring(fallback)
+//	if keyring == nil {
+//	    // Handle keyring initialization failure
+//	}
 func NewIdsecOSProvidedKeyring(fallbackKeyring IdsecKeyringImpl) *IdsecOSProvidedKeyring {
+	if fallbackKeyring == nil {
+		return nil
+	}
+	if basicKeyring, ok := fallbackKeyring.(*IdsecBasicKeyring); ok && basicKeyring == nil {
+		return nil
+	}
 	return &IdsecOSProvidedKeyring{
 		fallbackKeyring: fallbackKeyring,
 		logger:          common.GetLogger("IdsecOSProvidedKeyring", common.Unknown),

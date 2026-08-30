@@ -793,7 +793,7 @@ func TestElevate_validation_missing_role(t *testing.T) {
 		WorkspaceID: "test-workspace-id",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "roleIds")
+	require.Contains(t, err.Error(), "role-ids")
 }
 
 func TestElevate_validation_uninitialized_service(t *testing.T) {

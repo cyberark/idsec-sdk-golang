@@ -25,12 +25,12 @@ type IdsecSIADBDatabaseTargetInfo struct {
 	Name                        string   `json:"name" mapstructure:"name" flag:"name" desc:"The name of the database, often referenced in policies and other APIs."`
 	EnableCertificateValidation bool     `json:"enable_certificate_validation" mapstructure:"enable_certificate_validation" flag:"enable-certification-validation" desc:"Indicates whether to enable and enforce certificate validation."`
 	Certificate                 string   `json:"certificate,omitempty" mapstructure:"certificate,omitempty" flag:"certificate" desc:"The certificate ID related to the database."`
-	Services                    []string `json:"services" mapstructure:"services" flag:"services" desc:"The services related to the database, most commonly used with Oracle/SQL Server."`
+	Services                    []string `json:"services" mapstructure:"services" flag:"services" desc:"The services of the database. Applies to Oracle only; SID/service-name strings, at least one required."`
 	SecretID                    string   `json:"secret_id,omitempty" mapstructure:"secret_id,omitempty" flag:"secret-id" desc:"The Secret identifier stored in the secret service related to the database."`
-	Platform                    string   `json:"platform,omitempty" mapstructure:"platform,omitempty" flag:"platform" desc:"The platform where the database resides." choices:"AWS,AZURE,GCP,ON-PREMISE,ATLAS"`
-	ProviderEngine              string   `json:"provider_engine" mapstructure:"provider_engine" flag:"provider-engine" desc:"The engine type of the database provider."`
-	Family                      string   `json:"family,omitempty" mapstructure:"family,omitempty" flag:"family" desc:"The family type of the database provider."`
-	ConfiguredAuthMethodType    string   `json:"configured_auth_method_type,omitempty" mapstructure:"configured_auth_method_type,omitempty" flag:"configured-auth-method-type" desc:"The target configured auth method type" choices:"ad_ephemeral_user,local_ephemeral_user,rds_iam_authentication,atlas_ephemeral_user"`
+	Platform                    string   `json:"platform,omitempty" mapstructure:"platform,omitempty" flag:"platform" desc:"The platform where the database resides. One of AWS, AZURE, GCP, ON-PREMISE."`
+	ProviderEngine              string   `json:"provider_engine" mapstructure:"provider_engine" flag:"provider-engine" desc:"The provider engine type for the database."`
+	Family                      string   `json:"family,omitempty" mapstructure:"family,omitempty" flag:"family" desc:"The family of the database provider. One of MySQL, MSSQL, Postgres, MariaDB, DB2, Oracle, Mongo."`
+	ConfiguredAuthMethodType    string   `json:"configured_auth_method_type,omitempty" mapstructure:"configured_auth_method_type,omitempty" flag:"configured-auth-method-type" desc:"The target configured auth method type. One of ad_ephemeral_user, local_ephemeral_user, rds_iam_authentication."`
 }
 
 // IdsecSIADBDatabaseTargetInfoList represents the response for listing databases, with a filter or without, by the database-onboarding new API.

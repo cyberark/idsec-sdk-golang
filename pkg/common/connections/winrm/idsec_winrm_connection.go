@@ -466,7 +466,7 @@ func (c *IdsecWinRMConnection) runCommand(command *connectionsmodels.IdsecConnec
 	go io.Copy(stdout, commandOutput.Stdout) //nolint:errcheck
 	go io.Copy(stderr, commandOutput.Stderr) //nolint:errcheck
 	commandOutput.Wait()
-	if command.ExpectedRC != commandOutput.ExitCode() {
+	if !command.IgnoreRC && command.ExpectedRC != commandOutput.ExitCode() {
 		return nil, fmt.Errorf("failed to execute command [%s] - [%d] - [%s]", command.Command, commandOutput.ExitCode(), stderr.String())
 	}
 

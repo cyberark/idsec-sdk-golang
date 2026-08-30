@@ -13,5 +13,7 @@ type IdsecCmgrUninstall struct {
 	RetryCount         int    `json:"retry_count" mapstructure:"retry_count" flag:"retry-count" desc:"The number of times to retry the deletion API, if it fails." default:"30"`
 	RetryDelay         int    `json:"retry_delay" mapstructure:"retry_delay" flag:"retry-delay" desc:"The number of seconds to wait between retries." default:"5"`
 	WinRMProtocol      string `json:"winrm_protocol" mapstructure:"winrm_protocol" flag:"winrm-protocol" desc:"The protocol to use for WinRM connections (http, https)." default:"https" choices:"http,https"`
+	CertificatePath    string `json:"certificate_path,omitempty" mapstructure:"certificate_path,omitempty" flag:"certificate-path" desc:"Path to a custom CA certificate for WinRM HTTPS connections. Only applicable for Windows with HTTPS protocol."`
+	TrustCertificate   bool   `json:"trust_certificate,omitempty" mapstructure:"trust_certificate,omitempty" flag:"trust-certificate" desc:"When true, trusts any server certificate for WinRM HTTPS connections. Only applicable for Windows with HTTPS protocol." default:"false"`
 	ForceDelete        bool   `json:"force_delete" mapstructure:"force_delete" flag:"force-delete" desc:"When true, forces deletion of the connector even if machine cleanup fails." default:"false"`
 }

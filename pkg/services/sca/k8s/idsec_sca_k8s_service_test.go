@@ -603,6 +603,112 @@ func TestListTargetsResponse_WithNextToken(t *testing.T) {
 	require.Equal(t, "page-2-token", *result.NextToken)
 }
 
+// setupGenerateKubeconfigService creates an IdsecSCAK8sService with a mock DPA
+// ISP client injected. Both the primary ISP client and dpaISP point to the same
+// mock server so the CLI-signature token is satisfied without a real ISP.
+func setupGenerateKubeconfigService(client *isp.IdsecISPServiceClient) *IdsecSCAK8sService {
+	// Re-use the elevate-service helper for the primary ISP setup (sets auth token).
+	svc := setupK8sElevateService(client)
+	// Wire the same client as the DPA service used by generateKubeconfigViaDpa.
+	dpaBase := &services.IdsecISPBaseService{}
+	scainternal.InjectISPClient(dpaBase, client)
+	svc.dpaISP = dpaBase
+	return svc
+}
+
+// TestGenerateKubeconfig_404_NoEligibleClusters_ReturnsMessageNotError verifies that
+// when the DPA generate-kubeconfig endpoint responds with HTTP 404 (no eligible
+// clusters), GenerateKubeconfig returns a non-error response carrying the backend
+// message as the map value rather than propagating an error. This allows the CLI to
+// detect the no-targets case and write an empty kubeconfig to clear any stale file.
+func TestGenerateKubeconfig_404_NoEligibleClusters_ReturnsMessageNotError(t *testing.T) {
+	t.Parallel()
+
+	const backendMsg = "No clusters found. Contact your system administrator."
+
+	tests := []struct {
+		name    string
+		csp     string
+		wantKey string
+		path    string
+	}{
+		{
+			name:    "single_azure_csp",
+			csp:     "azure",
+			wantKey: "azure",
+			path:    "/k8s/kube-config/azure_resource",
+		},
+		{
+			name:    "single_aws_csp",
+			csp:     "aws",
+			wantKey: "aws",
+			path:    "/k8s/kube-config/AWS",
+		},
+		{
+			name:    "all_csps",
+			csp:     "",
+			wantKey: "all",
+			path:    "/k8s/kube-config",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+				{
+					Matcher:      func(r *http.Request) bool { return r.URL.Path == tt.path },
+					StatusCode:   http.StatusNotFound,
+					ResponseBody: backendMsg,
+				},
+			})
+			defer cleanup()
+
+			svc := setupGenerateKubeconfigService(client)
+			req := &k8smodels.IdsecSCAK8sGenerateKubeconfigRequest{
+				CSP: tt.csp,
+				All: "true",
+			}
+
+			result, err := svc.GenerateKubeconfig(req)
+
+			require.NoError(t, err, "404 No clusters found must not be returned as an error")
+			require.NotNil(t, result)
+			require.Contains(t, result, tt.wantKey,
+				"response map must have key %q", tt.wantKey)
+			require.Equal(t, backendMsg, result[tt.wantKey],
+				"response map value must be the backend message")
+		})
+	}
+}
+
+// TestGenerateKubeconfig_500_StillReturnsError verifies that non-404 HTTP errors
+// (e.g. 500 Internal Server Error) are still propagated as errors, unchanged from
+// the previous behaviour.
+func TestGenerateKubeconfig_500_StillReturnsError(t *testing.T) {
+	t.Parallel()
+
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusInternalServerError,
+			ResponseBody: `{"error": "internal server error"}`,
+		},
+	})
+	defer cleanup()
+
+	svc := setupGenerateKubeconfigService(client)
+	req := &k8smodels.IdsecSCAK8sGenerateKubeconfigRequest{CSP: "aws", All: "false"}
+
+	result, err := svc.GenerateKubeconfig(req)
+
+	require.Error(t, err, "500 must still be returned as an error")
+	require.Nil(t, result)
+	require.Contains(t, err.Error(), "500")
+}
+
 // mockISPAuth returns a minimal IdsecISPAuth for unit tests.
 func mockISPAuth() *auth.IdsecISPAuth {
 	return &auth.IdsecISPAuth{

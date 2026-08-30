@@ -15,6 +15,51 @@ import (
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
+// ProxyKeyFuture is the handle for a background DPA SSO JWKS fetch started by
+// BeginProxyKeyPrefetch. A nil *ProxyKeyFuture signals the synchronous fallback
+// path in generateDPAProxyExecCredential — existing callers are unaffected.
+//
+// The done channel is closed (never sent to) when the fetch completes. Reading
+// from a closed channel returns immediately, making Wait() naturally idempotent.
+// All field writes happen before close(done), so any read after <-done is safe.
+type ProxyKeyFuture struct {
+	startedAt time.Time
+	done      chan struct{} // closed once when the fetch completes
+	key       *rsa.PublicKey
+	kid       string
+	err       error
+	elapsed   time.Duration
+}
+
+// Wait blocks until the background JWKS fetch completes and returns the RSA
+// public key and the kid that was live when BeginProxyKeyPrefetch was called.
+// Safe to call multiple times: reading from a closed channel returns immediately.
+// JWKSElapsed() is valid after this returns.
+func (f *ProxyKeyFuture) Wait() (*rsa.PublicKey, string, error) {
+	<-f.done
+	return f.key, f.kid, f.err
+}
+
+// JWKSElapsed returns how long the background goroutine took to fetch the key.
+// Valid only after Wait() or a completed CheckNow() has returned.
+func (f *ProxyKeyFuture) JWKSElapsed() time.Duration { return f.elapsed }
+
+// BeginProxyKeyPrefetch starts a background JWKS fetch before the slow
+// Elevate/token-acquisition step so both network calls overlap in time.
+// Pass the result to GenerateProxyExecCredentialWithPrefetch, which calls
+// Wait() to join.
+func (s *IdsecSCAK8sService) BeginProxyKeyPrefetch(diagnostics bool) *ProxyKeyFuture {
+	kid := dpaSsoJWKSKeyID()
+	f := &ProxyKeyFuture{startedAt: time.Now(), done: make(chan struct{})}
+	go func() {
+		f.key, f.err = s.fetchDPASSOPublicKey(kid, diagnostics)
+		f.kid = kid
+		f.elapsed = time.Since(f.startedAt)
+		close(f.done) // all field writes above are visible after this close
+	}()
+	return f
+}
+
 const (
 	proxyExecCredAPI           = "client.authentication.k8s.io/v1beta1"
 	proxyExecCredRefreshBuffer = 60 * time.Second

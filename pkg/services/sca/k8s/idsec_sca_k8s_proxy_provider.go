@@ -62,5 +62,5 @@ func (p *dpaProxyProvider) GenerateExecCredential(
 		return nil, fmt.Errorf("%s proxy: K8sToken is required but was not set in the cluster context",
 			strings.ToLower(p.csp))
 	}
-	return s.generateDPAProxyExecCredential(ctx)
+	return s.generateDPAProxyExecCredential(ctx, nil)
 }

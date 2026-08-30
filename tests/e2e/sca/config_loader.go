@@ -40,6 +40,10 @@ func LoadSCATestConfig(t *testing.T) map[string]interface{} {
 		setEnv("IDSEC_E2E_ISP_USERNAME", strVal(auth, "username"))
 		setEnv("IDSEC_E2E_ISP_AUTH_METHOD", strVal(auth, "method"))
 		setEnv("IDSEC_E2E_ISP_IDENTITY_URL", strVal(auth, "identity_url"))
+		setEnv("IDSEC_E2E_ISP_IDENTITY_TENANT_SUBDOMAIN", strVal(auth, "identity_tenant_subdomain"))
+		if pass := os.Getenv("IDSEC_E2E_SCA_AUTH_PASSWORD"); pass != "" {
+			os.Setenv("IDSEC_E2E_ISP_SECRET", pass)
+		}
 	}
 
 	return cfg
@@ -48,9 +52,8 @@ func LoadSCATestConfig(t *testing.T) map[string]interface{} {
 func skipUnlessSupportedSCAEnv(t *testing.T) {
 	t.Helper()
 
-	env := strings.TrimSpace(os.Getenv("IDSEC_E2E_ENV"))
-	if env == "" {
-		t.Skip("Skipping SCA E2E test: IDSEC_E2E_ENV is not set")
+	if strings.TrimSpace(os.Getenv("IDSEC_E2E_SCA_AUTH_PASSWORD")) == "" {
+		t.Skip("Skipping SCA E2E test: IDSEC_E2E_SCA_AUTH_PASSWORD is not set")
 	}
 }
 

@@ -4,12 +4,53 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cce/internal"
 )
+
+// TestUpdateManualServices_DeleteSendsOnboardingType is the Azure counterpart:
+// the delete-services request must carry onboarding_type=terraform_provider so the
+// API enforces that the entity was onboarded via Terraform.
+func TestUpdateManualServices_DeleteSendsOnboardingType(t *testing.T) {
+	const onboardingID = "entra123abc456"
+
+	var gotQuery map[string][]string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/manual/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				gotQuery = r.URL.Query()
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	// current has dpa+sca, desired keeps only sca -> the flow issues a single
+	// DELETE removing "dpa" (no add calls), which is the request under test.
+	err := service.updateManualServices(
+		onboardingID,
+		[]string{"dpa", "sca"},
+		[]ccemodels.IdsecCCEServiceInput{{ServiceName: "sca"}},
+		"entra",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"dpa"}, gotQuery["services_names"],
+		"delete-services must send the services to remove via services_names")
+	require.Equal(t, []string{ccemodels.TerraformProvider}, gotQuery["onboarding_type"],
+		"delete-services must send onboarding_type=terraform_provider so the API enforces the Terraform onboarding type")
+}
 
 // Helper functions to reduce code duplication
 
@@ -80,6 +121,22 @@ func createErrorDeleteMock(statusCode int, errorBody string) internal.MockEndpoi
 		},
 		StatusCode:   statusCode,
 		ResponseBody: errorBody,
+	}
+}
+
+// captureFirstServiceVersion returns a callback that captures the version of
+// the first service in the request body's "services" array.
+// Safe to use inside OnRequest (no testify calls in the HTTP handler goroutine).
+func captureFirstServiceVersion(version *string) func(*http.Request) {
+	return func(r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]interface{}
+		json.Unmarshal(body, &payload)
+		if services, ok := payload["services"].([]interface{}); ok && len(services) > 0 {
+			if svc, ok := services[0].(map[string]interface{}); ok {
+				*version, _ = svc["version"].(string)
+			}
+		}
 	}
 }
 
@@ -204,6 +261,33 @@ func TestUpdateManualServices_ServiceChanges(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUpdateManualServices_IncludesServiceVersion verifies the version field is
+// preserved when services are added during an update operation.
+func TestUpdateManualServices_IncludesServiceVersion(t *testing.T) {
+	var addedServices []ccemodels.IdsecCCEServiceInput
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		createPostMock(captureAddedServices(&addedServices)),
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	desired := []ccemodels.IdsecCCEServiceInput{
+		{
+			ServiceName: ccemodels.DPA,
+			Version:     "3.2.0",
+			Resources:   map[string]interface{}{"appId": "app-123"},
+		},
+	}
+
+	err := service.updateManualServices("test-id", []string{}, desired, "subscription")
+
+	require.NoError(t, err)
+	require.Len(t, addedServices, 1)
+	require.Equal(t, "3.2.0", addedServices[0].Version, "service version must be preserved when adding services during update")
 }
 
 // TestUpdateManualServices_NoChanges tests scenarios where no API calls should be made

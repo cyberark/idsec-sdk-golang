@@ -76,6 +76,11 @@ func setupMockSecretStoresService(t *testing.T, configs []mockEndpointConfig) (*
 
 // currentStoreJSON returns a JSON response body representing a secret store with the given state.
 func currentStoreJSON(id, name, description, state string) string {
+	return storeWithScanStatusJSON(id, name, description, state, "SUCCESS")
+}
+
+// storeWithScanStatusJSON returns a JSON response body with a configurable scan status.
+func storeWithScanStatusJSON(id, name, description, state, scanStatus string) string {
 	return `{
 		"id": "` + id + `",
 		"type": "AWS_ASM",
@@ -93,7 +98,7 @@ func currentStoreJSON(id, name, description, state string) string {
 		"updated_by": "admin@example.com",
 		"scan": {
 			"id": "scan-1",
-			"status": "SUCCESS"
+			"status": "` + scanStatus + `"
 		},
 		"store_status": {
 			"status": "SUCCESS",
@@ -523,6 +528,7 @@ func TestStripImmutableFields(t *testing.T) {
 					"azureVaultUrl": "https://vault",
 					"hashiVaultUrl": "https://hv",
 					"mountPath":     "/secret",
+					"namespace":     "root",
 					"name":          "my-store",
 				},
 			},
@@ -549,7 +555,8 @@ func TestStripImmutableFields(t *testing.T) {
 			expected: map[string]interface{}{
 				"data": map[string]interface{}{},
 			},
-		}, {
+		},
+		{
 			name: "only_mutable_fields_unchanged",
 			input: map[string]interface{}{
 				"data": map[string]interface{}{
@@ -626,4 +633,120 @@ func TestIdsecSecHubSecretStoresService_ListBy_forwardsBehaviorQueryParam(t *tes
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, "SECRETS_SOURCE", gotBehavior)
+}
+
+// TestIdsecSecHubSecretStoresService_WaitForScanCompletion exercises waitForScanCompletion
+// via SetState to cover the key outcomes of the poll-before-enable guard.
+func TestIdsecSecHubSecretStoresService_WaitForScanCompletion(t *testing.T) {
+	t.Parallel()
+
+	const (
+		storeID   = "store-scan-test"
+		storeName = "scan-test-store"
+		storeDesc = "scan test"
+	)
+
+	tests := []struct {
+		name string
+		// scanStatuses drives the mock GET responses in order; the last entry repeats.
+		scanStatuses []string
+		// getHTTPStatus overrides the GET status code (0 means use 200 OK).
+		getHTTPStatus    int
+		expectedError    bool
+		expectedErrorMsg string
+	}{
+		{
+			name:          "scan_already_done",
+			scanStatuses:  []string{"SUCCESS"},
+			expectedError: false,
+		},
+		{
+			name:          "scan_in_progress_then_done",
+			scanStatuses:  []string{"IN_PROGRESS", "IN_PROGRESS", "SUCCESS"},
+			expectedError: false,
+		},
+		{
+			name:             "get_returns_error",
+			scanStatuses:     []string{},
+			getHTTPStatus:    http.StatusInternalServerError,
+			expectedError:    true,
+			expectedErrorMsg: "failed to check scan status for secret store",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				getCallCount int
+				mu           sync.Mutex
+			)
+
+			stateURL := "/api/secret-stores/" + storeID + "/state"
+			getURL := "/api/secret-stores/" + storeID
+
+			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				if r.Method == "GET" && r.URL.Path == getURL {
+					if tt.getHTTPStatus != 0 {
+						w.WriteHeader(tt.getHTTPStatus)
+						_, _ = w.Write([]byte(`{"error": "server error"}`))
+						return
+					}
+					mu.Lock()
+					idx := getCallCount
+					if idx >= len(tt.scanStatuses) {
+						idx = len(tt.scanStatuses) - 1
+					}
+					scanStatus := tt.scanStatuses[idx]
+					getCallCount++
+					mu.Unlock()
+
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(storeWithScanStatusJSON(storeID, storeName, storeDesc, "ENABLED", scanStatus)))
+					return
+				}
+
+				if r.Method == "PUT" && r.URL.Path == stateURL {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error": "endpoint not found"}`))
+			}))
+			defer testServer.Close()
+
+			client := common.NewIdsecClient("", "", "", "Authorization", nil, nil, "", false)
+			client.BaseURL = testServer.URL
+
+			ispClient := &isp.IdsecISPServiceClient{IdsecClient: client}
+			ispBase := &services.IdsecISPBaseService{}
+			v := reflect.ValueOf(ispBase).Elem()
+			clientField := v.FieldByName("client")
+			clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
+			clientField.Set(reflect.ValueOf(ispClient))
+
+			svc := &IdsecSecHubSecretStoresService{
+				IdsecBaseService:    &services.IdsecBaseService{Logger: common.GlobalLogger},
+				IdsecISPBaseService: ispBase,
+			}
+
+			err := svc.SetState(&secretstoresmodels.IdsecSecHubSetSecretStoreState{
+				ID:     storeID,
+				Action: string(ActionEnable),
+			})
+
+			if tt.expectedError {
+				require.Error(t, err)
+				if tt.expectedErrorMsg != "" {
+					require.Contains(t, err.Error(), tt.expectedErrorMsg)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

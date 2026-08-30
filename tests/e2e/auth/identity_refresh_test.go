@@ -5,6 +5,7 @@ package auth
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -93,6 +94,7 @@ func TestIdentityProactiveRefresh(t *testing.T) {
 		proactiveRefreshHelperEnv: "true",
 		"IDSEC_BASIC_KEYRING":     "true",
 		"IDSEC_KEYRING_FOLDER":    keyringDir,
+		"IDSEC_KEYRING_KEY_FILE":  filepath.Join(t.TempDir(), "keyring.key"),
 		"IDSEC_E2E_PROFILE_NAME":  profileName,
 	})
 

@@ -1,133 +1,304 @@
 package keyring
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
+	"github.com/cyberark/idsec-sdk-golang/pkg/config"
+	"github.com/cyberark/idsec-sdk-golang/pkg/models"
+	"github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
 )
+
+// isolateKeyringEnvironment points both the keyring folder and the master secret
+// file at paths private to the test.
+//
+// Both locations have to be redirected. The master secret deliberately lives outside
+// the keyring folder, so a test that only redirects the folder writes key material
+// into the home directory of whoever is running the suite.
+func isolateKeyringEnvironment(t *testing.T) (folder string, keyFile string) {
+	t.Helper()
+
+	folder = t.TempDir()
+	keyFile = filepath.Join(t.TempDir(), "keyring.key")
+	t.Setenv(IdsecBasicKeyringFolderEnvVar, folder)
+	t.Setenv(IdsecBasicKeyringKeyFileEnvVar, keyFile)
+	return folder, keyFile
+}
+
+// newIsolatedKeyring returns a keyring whose folder and master secret are private
+// to the test.
+func newIsolatedKeyring(t *testing.T) *IdsecBasicKeyring {
+	t.Helper()
+
+	isolateKeyringEnvironment(t)
+	keyring := NewIdsecBasicKeyring()
+	if keyring == nil {
+		t.Fatal("Failed to create keyring for test")
+	}
+	return keyring
+}
+
+// seedUnreadableKeyring replaces the stored state with content the keyring cannot
+// interpret, alongside a leftover sidecar that does not describe it.
+func seedUnreadableKeyring(t *testing.T, keyring *IdsecBasicKeyring) {
+	t.Helper()
+
+	if err := os.WriteFile(keyring.keyringFilePath, []byte("this is not keyring content"), 0600); err != nil {
+		t.Fatalf("Failed to seed keyring file: %v", err)
+	}
+	if err := os.WriteFile(keyring.macFilePath, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatalf("Failed to seed sidecar file: %v", err)
+	}
+}
+
+// seedKeyringWithoutItsKeyFile stores a readable entry and then removes the master
+// secret, which leaves every stored record unopenable.
+func seedKeyringWithoutItsKeyFile(t *testing.T, keyring *IdsecBasicKeyring) {
+	t.Helper()
+
+	if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+		t.Fatalf("Failed to seed keyring entry: %v", err)
+	}
+	if err := os.Remove(keyring.keyFilePath); err != nil {
+		t.Fatalf("Failed to remove the master secret: %v", err)
+	}
+	// The keyring caches what it derived while writing, so a fresh instance is needed
+	// for the read to actually consult the removed key file.
+	keyring.masterSecret = nil
+	keyring.keys = nil
+}
+
+// assertKeyringStateRemoved verifies that no keyring state is left behind.
+func assertKeyringStateRemoved(t *testing.T, keyring *IdsecBasicKeyring) {
+	t.Helper()
+
+	for _, path := range []string{keyring.keyringFilePath, keyring.macFilePath} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Expected '%s' to be removed, stat returned %v", filepath.Base(path), err)
+		}
+	}
+}
+
+// assertMasterSecretPresent verifies that the master secret survived an operation
+// that discarded the cache it protects.
+func assertMasterSecretPresent(t *testing.T, keyring *IdsecBasicKeyring) {
+	t.Helper()
+
+	secret, err := os.ReadFile(keyring.keyFilePath)
+	if err != nil {
+		t.Fatalf("Expected the master secret to be left in place, read returned %v", err)
+	}
+	if len(secret) != masterSecretSize {
+		t.Errorf("Expected a %d byte master secret, got %d bytes", masterSecretSize, len(secret))
+	}
+}
+
+// readStoredEnvelope returns the envelope as it is stored on disk.
+func readStoredEnvelope(t *testing.T, keyring *IdsecBasicKeyring) keyringEnvelope {
+	t.Helper()
+
+	data, err := os.ReadFile(keyring.keyringFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read the stored keyring: %v", err)
+	}
+	var envelope keyringEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatalf("Failed to parse the stored keyring: %v", err)
+	}
+	return envelope
+}
+
+// assertStoredEnvelopeIsCurrentFormat verifies that a write produced a single
+// owner-only envelope file in the current format, and no sidecar beside it.
+func assertStoredEnvelopeIsCurrentFormat(t *testing.T, keyring *IdsecBasicKeyring) {
+	t.Helper()
+
+	info, err := os.Stat(keyring.keyringFilePath)
+	if err != nil {
+		t.Fatalf("Expected the keyring envelope to be created, stat returned %v", err)
+	}
+	// Mode bits do not express owner-only access on Windows.
+	if runtime.GOOS != "windows" {
+		if mode := info.Mode().Perm(); mode != 0600 {
+			t.Errorf("Expected the keyring envelope to be readable by its owner only, got mode %#o", mode)
+		}
+	}
+	envelope := readStoredEnvelope(t, keyring)
+	if envelope.Version != keyringFormatVersion {
+		t.Errorf("Expected envelope version %d, got %d", keyringFormatVersion, envelope.Version)
+	}
+	if envelope.KDF.Algorithm != kdfAlgorithmHKDFSHA256 {
+		t.Errorf("Expected key derivation algorithm %q, got %q", kdfAlgorithmHKDFSHA256, envelope.KDF.Algorithm)
+	}
+	salt, err := base64.StdEncoding.DecodeString(envelope.KDF.Salt)
+	if err != nil {
+		t.Fatalf("Failed to decode the stored salt: %v", err)
+	}
+	if len(salt) != saltSize {
+		t.Errorf("Expected a %d byte salt, got %d bytes", saltSize, len(salt))
+	}
+	if envelope.MAC == "" {
+		t.Error("Expected the envelope to carry a mac over its contents")
+	}
+	if _, err := os.Stat(keyring.macFilePath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected no separate mac file to be written, stat returned %v", err)
+	}
+}
+
+// skipIfFolderPermissionsAreNotEnforced skips tests that rely on a folder being
+// unwritable, which mode bits cannot express on Windows or enforce against root.
+func skipIfFolderPermissionsAreNotEnforced(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Folder mode bits do not restrict writes on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("Running as root bypasses folder permissions")
+	}
+}
+
+// makeFolderReadOnly removes write access from a folder for the duration of a test.
+func makeFolderReadOnly(t *testing.T, folder string) {
+	t.Helper()
+
+	if err := os.Chmod(folder, 0500); err != nil {
+		t.Fatalf("Failed to restrict keyring folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(folder, 0700)
+	})
+}
+
+// keyringPaths describes where a keyring is expected to keep its files.
+type keyringPaths struct {
+	folder  string
+	keyFile string
+}
 
 func TestNewIdsecBasicKeyring(t *testing.T) {
 	tests := []struct {
-		name         string
-		setupFunc    func() (string, func()) // Returns temp dir and cleanup func
-		envVar       string
-		expectedNil  bool
-		validateFunc func(t *testing.T, keyring *IdsecBasicKeyring, tempDir string)
+		name                      string
+		setupFunc                 func(t *testing.T) keyringPaths
+		requiresFolderPermissions bool
+		expectedNil               bool
 	}{
 		{
-			name: "success_creates_keyring_with_default_folder",
-			setupFunc: func() (string, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_home_")
-				originalHome := os.Getenv("HOME")
-				os.Setenv("HOME", tempDir)
-				os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-				return tempDir, func() {
-					os.Setenv("HOME", originalHome)
-					os.RemoveAll(tempDir)
-				}
-			},
-			expectedNil: false,
-			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring, tempDir string) {
-				expectedPath := filepath.Join(tempDir, DefaultBasicKeyringFolder)
-				if keyring.basicFolderPath != expectedPath {
-					t.Errorf("Expected basicFolderPath '%s', got '%s'", expectedPath, keyring.basicFolderPath)
-				}
-				if keyring.keyringFilePath != filepath.Join(expectedPath, "keyring") {
-					t.Errorf("Expected keyringFilePath to end with 'keyring', got '%s'", keyring.keyringFilePath)
-				}
-				if keyring.macFilePath != filepath.Join(expectedPath, "mac") {
-					t.Errorf("Expected macFilePath to end with 'mac', got '%s'", keyring.macFilePath)
-				}
-				// Verify folder was created
-				if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
-					t.Error("Expected keyring folder to be created")
+			name: "success_derives_both_locations_from_the_home_directory",
+			setupFunc: func(t *testing.T) keyringPaths {
+				t.Helper()
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				t.Setenv("USERPROFILE", home)
+				t.Setenv(IdsecBasicKeyringFolderEnvVar, "")
+				t.Setenv(IdsecBasicKeyringKeyFileEnvVar, "")
+				return keyringPaths{
+					folder:  filepath.Join(home, DefaultBasicKeyringFolder),
+					keyFile: filepath.Join(home, DefaultBasicKeyringKeyFile),
 				}
 			},
 		},
 		{
-			name: "success_creates_keyring_with_env_var_folder",
-			setupFunc: func() (string, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_custom_")
-				customPath := filepath.Join(tempDir, "custom_keyring")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, customPath)
-				return customPath, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
+			name: "success_creates_the_folder_named_by_the_environment",
+			setupFunc: func(t *testing.T) keyringPaths {
+				t.Helper()
+				folder := filepath.Join(t.TempDir(), "custom_keyring")
+				keyFile := filepath.Join(t.TempDir(), "keyring.key")
+				t.Setenv(IdsecBasicKeyringFolderEnvVar, folder)
+				t.Setenv(IdsecBasicKeyringKeyFileEnvVar, keyFile)
+				return keyringPaths{folder: folder, keyFile: keyFile}
 			},
-			expectedNil: false,
-			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring, tempDir string) {
-				if keyring.basicFolderPath != tempDir {
-					t.Errorf("Expected basicFolderPath '%s', got '%s'", tempDir, keyring.basicFolderPath)
-				}
-				// Verify folder was created
-				if _, err := os.Stat(tempDir); os.IsNotExist(err) {
-					t.Error("Expected custom keyring folder to be created")
+		},
+		{
+			name: "success_keeps_the_master_secret_outside_a_relocated_folder",
+			setupFunc: func(t *testing.T) keyringPaths {
+				t.Helper()
+				home := t.TempDir()
+				folder := t.TempDir()
+				t.Setenv("HOME", home)
+				t.Setenv("USERPROFILE", home)
+				t.Setenv(IdsecBasicKeyringFolderEnvVar, folder)
+				t.Setenv(IdsecBasicKeyringKeyFileEnvVar, "")
+				return keyringPaths{
+					folder:  folder,
+					keyFile: filepath.Join(home, DefaultBasicKeyringKeyFile),
 				}
 			},
 		},
 		{
-			name: "success_handles_existing_folder",
-			setupFunc: func() (string, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_existing_")
-				existingPath := filepath.Join(tempDir, "existing_keyring")
-				os.MkdirAll(existingPath, 0755)
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, existingPath)
-				return existingPath, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			name: "success_handles_an_existing_folder",
+			setupFunc: func(t *testing.T) keyringPaths {
+				t.Helper()
+				folder := filepath.Join(t.TempDir(), "existing_keyring")
+				if err := os.MkdirAll(folder, 0700); err != nil {
+					t.Fatalf("Failed to create the existing folder: %v", err)
 				}
-			},
-			expectedNil: false,
-			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring, tempDir string) {
-				if keyring.basicFolderPath != tempDir {
-					t.Errorf("Expected basicFolderPath '%s', got '%s'", tempDir, keyring.basicFolderPath)
-				}
+				keyFile := filepath.Join(t.TempDir(), "keyring.key")
+				t.Setenv(IdsecBasicKeyringFolderEnvVar, folder)
+				t.Setenv(IdsecBasicKeyringKeyFileEnvVar, keyFile)
+				return keyringPaths{folder: folder, keyFile: keyFile}
 			},
 		},
 		{
-			name: "error_returns_nil_on_folder_creation_failure",
-			setupFunc: func() (string, func()) {
-				// Create a path that will fail to create (invalid characters)
-				invalidPath := "/proc/invalid/path/that/cannot/be/created"
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, invalidPath)
-				return invalidPath, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-				}
+			name: "error_returns_nil_when_the_folder_cannot_be_created",
+			setupFunc: func(t *testing.T) keyringPaths {
+				t.Helper()
+				parent := t.TempDir()
+				makeFolderReadOnly(t, parent)
+				t.Setenv(IdsecBasicKeyringFolderEnvVar, filepath.Join(parent, "keyring"))
+				t.Setenv(IdsecBasicKeyringKeyFileEnvVar, filepath.Join(t.TempDir(), "keyring.key"))
+				return keyringPaths{}
 			},
-			expectedNil: true,
-			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring, tempDir string) {
-				// No validation needed for nil case
-			},
+			requiresFolderPermissions: true,
+			expectedNil:               true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test environment
-			tempDir, cleanup := tt.setupFunc()
-			defer cleanup()
+			if tt.requiresFolderPermissions {
+				skipIfFolderPermissionsAreNotEnforced(t)
+			}
+			want := tt.setupFunc(t)
 
-			// Execute function
 			keyring := NewIdsecBasicKeyring()
 
-			// Validate result
 			if tt.expectedNil {
 				if keyring != nil {
 					t.Errorf("Expected nil keyring, got %+v", keyring)
 				}
 				return
 			}
-
 			if keyring == nil {
-				t.Error("Expected non-nil keyring")
-				return
+				t.Fatal("Expected non-nil keyring")
 			}
-
-			// Run custom validation
-			if tt.validateFunc != nil {
-				tt.validateFunc(t, keyring, tempDir)
+			if keyring.basicFolderPath != want.folder {
+				t.Errorf("Expected basicFolderPath '%s', got '%s'", want.folder, keyring.basicFolderPath)
+			}
+			if expected := filepath.Join(want.folder, keyringFileName); keyring.keyringFilePath != expected {
+				t.Errorf("Expected keyringFilePath '%s', got '%s'", expected, keyring.keyringFilePath)
+			}
+			if expected := filepath.Join(want.folder, legacyMacFileName); keyring.macFilePath != expected {
+				t.Errorf("Expected macFilePath '%s', got '%s'", expected, keyring.macFilePath)
+			}
+			if keyring.keyFilePath != want.keyFile {
+				t.Errorf("Expected keyFilePath '%s', got '%s'", want.keyFile, keyring.keyFilePath)
+			}
+			if _, err := os.Stat(want.folder); err != nil {
+				t.Errorf("Expected the keyring folder to be created, stat returned %v", err)
+			}
+			// Constructing a keyring must not create key material; only a write does.
+			if _, err := os.Stat(want.keyFile); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Expected no master secret to be created, stat returned %v", err)
 			}
 		})
 	}
@@ -136,7 +307,7 @@ func TestNewIdsecBasicKeyring(t *testing.T) {
 func TestIdsecBasicKeyring_SetPassword(t *testing.T) {
 	tests := []struct {
 		name          string
-		setupFunc     func() (*IdsecBasicKeyring, func())
+		setupFunc     func(t *testing.T) *IdsecBasicKeyring
 		serviceName   string
 		username      string
 		password      string
@@ -144,201 +315,110 @@ func TestIdsecBasicKeyring_SetPassword(t *testing.T) {
 		validateFunc  func(t *testing.T, keyring *IdsecBasicKeyring)
 	}{
 		{
-			name: "success_sets_password_new_keyring",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_set_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
+			name:          "success_sets_password_new_keyring",
+			setupFunc:     newIsolatedKeyring,
 			serviceName:   "github",
 			username:      "testuser",
 			password:      "testpassword",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify keyring file exists
-				if _, err := os.Stat(keyring.keyringFilePath); os.IsNotExist(err) {
-					t.Error("Expected keyring file to be created")
-				}
-				// Verify MAC file exists
-				if _, err := os.Stat(keyring.macFilePath); os.IsNotExist(err) {
-					t.Error("Expected MAC file to be created")
-				}
+				t.Helper()
+				assertStoredEnvelopeIsCurrentFormat(t, keyring)
+				assertMasterSecretPresent(t, keyring)
 			},
 		},
 		{
 			name: "success_sets_password_existing_keyring",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_set_existing_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				// Set an initial password
-				keyring.SetPassword("service1", "user1", "pass1")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("service1", "user1", "pass1"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:   "service2",
 			username:      "user2",
 			password:      "pass2",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify both passwords can be retrieved
-				pass1, err := keyring.GetPassword("service1", "user1")
-				if err != nil {
-					t.Errorf("Error retrieving first password: %v", err)
-				}
-				if pass1 != "pass1" {
-					t.Errorf("Expected first password 'pass1', got '%s'", pass1)
-				}
-				pass2, err := keyring.GetPassword("service2", "user2")
-				if err != nil {
-					t.Errorf("Error retrieving second password: %v", err)
-				}
-				if pass2 != "pass2" {
-					t.Errorf("Expected second password 'pass2', got '%s'", pass2)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "service1", "user1", "pass1")
+				assertStoredPassword(t, keyring, "service2", "user2", "pass2")
 			},
 		},
 		{
 			name: "success_overwrites_existing_password",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_overwrite_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				// Set an initial password
-				keyring.SetPassword("github", "testuser", "oldpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "oldpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:   "github",
 			username:      "testuser",
 			password:      "newpassword",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify new password is retrieved
-				password, err := keyring.GetPassword("github", "testuser")
-				if err != nil {
-					t.Errorf("Error retrieving password: %v", err)
-				}
-				if password != "newpassword" {
-					t.Errorf("Expected password 'newpassword', got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "testuser", "newpassword")
 			},
 		},
 		{
-			name: "edge_case_empty_service_name",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_empty_service_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
+			name:          "edge_case_empty_service_name",
+			setupFunc:     newIsolatedKeyring,
 			serviceName:   "",
 			username:      "testuser",
 			password:      "testpassword",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify password can be retrieved with empty service name
-				password, err := keyring.GetPassword("", "testuser")
-				if err != nil {
-					t.Errorf("Error retrieving password: %v", err)
-				}
-				if password != "testpassword" {
-					t.Errorf("Expected password 'testpassword', got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "", "testuser", "testpassword")
 			},
 		},
 		{
-			name: "edge_case_empty_username",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_empty_user_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
+			name:          "edge_case_empty_username",
+			setupFunc:     newIsolatedKeyring,
 			serviceName:   "github",
 			username:      "",
 			password:      "testpassword",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify password can be retrieved with empty username
-				password, err := keyring.GetPassword("github", "")
-				if err != nil {
-					t.Errorf("Error retrieving password: %v", err)
-				}
-				if password != "testpassword" {
-					t.Errorf("Expected password 'testpassword', got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "", "testpassword")
 			},
 		},
 		{
-			name: "edge_case_empty_password",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_empty_pass_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
+			name:          "edge_case_empty_password",
+			setupFunc:     newIsolatedKeyring,
 			serviceName:   "github",
 			username:      "testuser",
 			password:      "",
 			expectedError: false,
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify empty password can be retrieved
-				password, err := keyring.GetPassword("github", "testuser")
-				if err != nil {
-					t.Errorf("Error retrieving password: %v", err)
-				}
-				if password != "" {
-					t.Errorf("Expected empty password, got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "testuser", "")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test environment
-			keyring, cleanup := tt.setupFunc()
-			defer cleanup()
+			keyring := tt.setupFunc(t)
 
-			if keyring == nil {
-				t.Fatal("Failed to create keyring for test")
-			}
-
-			// Execute function
 			err := keyring.SetPassword(tt.serviceName, tt.username, tt.password)
 
-			// Validate error expectation
 			if tt.expectedError {
 				if err == nil {
-					t.Error("Expected error, got nil")
+					t.Fatal("Expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
-				t.Errorf("Expected no error, got %v", err)
-				return
+				t.Fatalf("Expected no error, got %v", err)
 			}
-
-			// Run custom validation
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, keyring)
 			}
@@ -346,164 +426,135 @@ func TestIdsecBasicKeyring_SetPassword(t *testing.T) {
 	}
 }
 
+// assertStoredPassword verifies that a stored credential reads back unchanged.
+func assertStoredPassword(t *testing.T, keyring *IdsecBasicKeyring, serviceName string, username string, expected string) {
+	t.Helper()
+
+	password, err := keyring.GetPassword(serviceName, username)
+	if err != nil {
+		t.Fatalf("GetPassword %s/%s: %v", serviceName, username, err)
+	}
+	if password != expected {
+		t.Errorf("Expected password '%s' for %s/%s, got '%s'", expected, serviceName, username, password)
+	}
+}
+
 func TestIdsecBasicKeyring_GetPassword(t *testing.T) {
 	tests := []struct {
 		name             string
-		setupFunc        func() (*IdsecBasicKeyring, func())
+		setupFunc        func(t *testing.T) *IdsecBasicKeyring
 		serviceName      string
 		username         string
 		expectedPassword string
-		expectedError    bool
 	}{
 		{
 			name: "success_gets_existing_password",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_get_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:      "github",
 			username:         "testuser",
 			expectedPassword: "testpassword",
-			expectedError:    false,
 		},
 		{
-			name: "success_returns_empty_for_nonexistent_keyring",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_no_keyring_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
+			name:             "success_returns_empty_for_nonexistent_keyring",
+			setupFunc:        newIsolatedKeyring,
 			serviceName:      "github",
 			username:         "testuser",
 			expectedPassword: "",
-			expectedError:    false,
 		},
 		{
 			name: "success_returns_empty_for_nonexistent_service",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_no_service_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:      "gitlab",
 			username:         "testuser",
 			expectedPassword: "",
-			expectedError:    false,
 		},
 		{
 			name: "success_returns_empty_for_nonexistent_username",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_no_user_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:      "github",
 			username:         "otheruser",
 			expectedPassword: "",
-			expectedError:    false,
 		},
 		{
 			name: "success_gets_multiple_passwords",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_multiple_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "user1", "pass1")
-				keyring.SetPassword("github", "user2", "pass2")
-				keyring.SetPassword("gitlab", "user1", "pass3")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				for _, entry := range []struct{ service, user, password string }{
+					{"github", "user1", "pass1"},
+					{"github", "user2", "pass2"},
+					{"gitlab", "user1", "pass3"},
+				} {
+					if err := keyring.SetPassword(entry.service, entry.user, entry.password); err != nil {
+						t.Fatalf("SetPassword %s/%s: %v", entry.service, entry.user, err)
+					}
 				}
+				return keyring
 			},
 			serviceName:      "gitlab",
 			username:         "user1",
 			expectedPassword: "pass3",
-			expectedError:    false,
 		},
 		{
 			name: "edge_case_empty_service_name",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_empty_service_get_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:      "",
 			username:         "testuser",
 			expectedPassword: "testpassword",
-			expectedError:    false,
 		},
 		{
 			name: "edge_case_empty_username",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_empty_user_get_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
 			serviceName:      "github",
 			username:         "",
 			expectedPassword: "testpassword",
-			expectedError:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test environment
-			keyring, cleanup := tt.setupFunc()
-			defer cleanup()
+			keyring := tt.setupFunc(t)
 
-			if keyring == nil {
-				t.Fatal("Failed to create keyring for test")
-			}
-
-			// Execute function
 			password, err := keyring.GetPassword(tt.serviceName, tt.username)
 
-			// Validate error expectation
-			if tt.expectedError {
-				if err == nil {
-					t.Error("Expected error, got nil")
-				}
-				return
-			}
-
 			if err != nil {
-				t.Errorf("Expected no error, got %v", err)
-				return
+				t.Fatalf("Expected no error, got %v", err)
 			}
-
-			// Validate result
 			if password != tt.expectedPassword {
 				t.Errorf("Expected password '%s', got '%s'", tt.expectedPassword, password)
 			}
@@ -513,183 +564,105 @@ func TestIdsecBasicKeyring_GetPassword(t *testing.T) {
 
 func TestIdsecBasicKeyring_DeletePassword(t *testing.T) {
 	tests := []struct {
-		name          string
-		setupFunc     func() (*IdsecBasicKeyring, func())
-		serviceName   string
-		username      string
-		expectedError bool
-		validateFunc  func(t *testing.T, keyring *IdsecBasicKeyring)
+		name         string
+		setupFunc    func(t *testing.T) *IdsecBasicKeyring
+		serviceName  string
+		username     string
+		validateFunc func(t *testing.T, keyring *IdsecBasicKeyring)
 	}{
 		{
 			name: "success_deletes_existing_password",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_delete_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
-			serviceName:   "github",
-			username:      "testuser",
-			expectedError: false,
+			serviceName: "github",
+			username:    "testuser",
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify password no longer exists
-				password, err := keyring.GetPassword("github", "testuser")
-				if err != nil {
-					t.Errorf("Error checking deleted password: %v", err)
-				}
-				if password != "" {
-					t.Errorf("Expected empty password after deletion, got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "testuser", "")
 			},
 		},
 		{
-			name: "success_idempotent_nonexistent_keyring",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_delete_no_keyring_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
-				}
-			},
-			serviceName:   "github",
-			username:      "testuser",
-			expectedError: false,
-			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// No validation needed - should be idempotent
-			},
+			name:        "success_idempotent_nonexistent_keyring",
+			setupFunc:   newIsolatedKeyring,
+			serviceName: "github",
+			username:    "testuser",
 		},
 		{
 			name: "success_idempotent_nonexistent_service",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_delete_no_service_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
-			serviceName:   "gitlab",
-			username:      "testuser",
-			expectedError: false,
+			serviceName: "gitlab",
+			username:    "testuser",
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify original password still exists
-				password, err := keyring.GetPassword("github", "testuser")
-				if err != nil {
-					t.Errorf("Error checking original password: %v", err)
-				}
-				if password != "testpassword" {
-					t.Errorf("Expected original password 'testpassword', got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "testuser", "testpassword")
 			},
 		},
 		{
 			name: "success_idempotent_nonexistent_username",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_delete_no_user_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "testuser", "testpassword")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
 				}
+				return keyring
 			},
-			serviceName:   "github",
-			username:      "otheruser",
-			expectedError: false,
+			serviceName: "github",
+			username:    "otheruser",
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify original password still exists
-				password, err := keyring.GetPassword("github", "testuser")
-				if err != nil {
-					t.Errorf("Error checking original password: %v", err)
-				}
-				if password != "testpassword" {
-					t.Errorf("Expected original password 'testpassword', got '%s'", password)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "testuser", "testpassword")
 			},
 		},
 		{
 			name: "success_deletes_one_of_multiple_passwords",
-			setupFunc: func() (*IdsecBasicKeyring, func()) {
-				tempDir, _ := os.MkdirTemp("", "idsec_test_delete_multiple_")
-				os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-				keyring := NewIdsecBasicKeyring()
-				keyring.SetPassword("github", "user1", "pass1")
-				keyring.SetPassword("github", "user2", "pass2")
-				keyring.SetPassword("gitlab", "user1", "pass3")
-				return keyring, func() {
-					os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-					os.RemoveAll(tempDir)
+			setupFunc: func(t *testing.T) *IdsecBasicKeyring {
+				t.Helper()
+				keyring := newIsolatedKeyring(t)
+				for _, entry := range []struct{ service, user, password string }{
+					{"github", "user1", "pass1"},
+					{"github", "user2", "pass2"},
+					{"gitlab", "user1", "pass3"},
+				} {
+					if err := keyring.SetPassword(entry.service, entry.user, entry.password); err != nil {
+						t.Fatalf("SetPassword %s/%s: %v", entry.service, entry.user, err)
+					}
 				}
+				return keyring
 			},
-			serviceName:   "github",
-			username:      "user1",
-			expectedError: false,
+			serviceName: "github",
+			username:    "user1",
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Verify deleted password is gone
-				password, err := keyring.GetPassword("github", "user1")
-				if err != nil {
-					t.Errorf("Error checking deleted password: %v", err)
-				}
-				if password != "" {
-					t.Errorf("Expected empty password after deletion, got '%s'", password)
-				}
-
-				// Verify other passwords still exist
-				password2, err := keyring.GetPassword("github", "user2")
-				if err != nil {
-					t.Errorf("Error checking remaining password: %v", err)
-				}
-				if password2 != "pass2" {
-					t.Errorf("Expected password 'pass2', got '%s'", password2)
-				}
-
-				password3, err := keyring.GetPassword("gitlab", "user1")
-				if err != nil {
-					t.Errorf("Error checking remaining password: %v", err)
-				}
-				if password3 != "pass3" {
-					t.Errorf("Expected password 'pass3', got '%s'", password3)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "github", "user1", "")
+				assertStoredPassword(t, keyring, "github", "user2", "pass2")
+				assertStoredPassword(t, keyring, "gitlab", "user1", "pass3")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test environment
-			keyring, cleanup := tt.setupFunc()
-			defer cleanup()
+			keyring := tt.setupFunc(t)
 
-			if keyring == nil {
-				t.Fatal("Failed to create keyring for test")
-			}
-
-			// Execute function
 			err := keyring.DeletePassword(tt.serviceName, tt.username)
 
-			// Validate error expectation
-			if tt.expectedError {
-				if err == nil {
-					t.Error("Expected error, got nil")
-				}
-				return
-			}
-
 			if err != nil {
-				t.Errorf("Expected no error, got %v", err)
-				return
+				t.Fatalf("Expected no error, got %v", err)
 			}
-
-			// Run custom validation
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, keyring)
 			}
@@ -712,58 +685,24 @@ func TestIdsecBasicKeyring_Integration(t *testing.T) {
 				func(k *IdsecBasicKeyring) error { return k.DeletePassword("service1", "user1") },
 			},
 			validateFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
-				// Check deleted password
-				pass1, err := keyring.GetPassword("service1", "user1")
-				if err != nil {
-					t.Errorf("Error getting deleted password: %v", err)
-				}
-				if pass1 != "" {
-					t.Errorf("Expected empty password for deleted entry, got '%s'", pass1)
-				}
-
-				// Check remaining passwords
-				pass2, err := keyring.GetPassword("service1", "user2")
-				if err != nil {
-					t.Errorf("Error getting password: %v", err)
-				}
-				if pass2 != "pass2" {
-					t.Errorf("Expected 'pass2', got '%s'", pass2)
-				}
-
-				pass3, err := keyring.GetPassword("service2", "user1")
-				if err != nil {
-					t.Errorf("Error getting password: %v", err)
-				}
-				if pass3 != "pass3" {
-					t.Errorf("Expected 'pass3', got '%s'", pass3)
-				}
+				t.Helper()
+				assertStoredPassword(t, keyring, "service1", "user1", "")
+				assertStoredPassword(t, keyring, "service1", "user2", "pass2")
+				assertStoredPassword(t, keyring, "service2", "user1", "pass3")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup test environment
-			tempDir, _ := os.MkdirTemp("", "idsec_test_integration_")
-			os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-			defer func() {
-				os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-				os.RemoveAll(tempDir)
-			}()
+			keyring := newIsolatedKeyring(t)
 
-			keyring := NewIdsecBasicKeyring()
-			if keyring == nil {
-				t.Fatal("Failed to create keyring for test")
-			}
-
-			// Execute actions
 			for i, action := range tt.actions {
 				if err := action(keyring); err != nil {
 					t.Errorf("Action %d failed: %v", i, err)
 				}
 			}
 
-			// Run validation
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, keyring)
 			}
@@ -780,7 +719,7 @@ func TestConstants(t *testing.T) {
 		{
 			name:     "nonce_size_correct_value",
 			constant: nonceSize,
-			expected: 16,
+			expected: 12,
 		},
 		{
 			name:     "tag_size_correct_value",
@@ -788,9 +727,29 @@ func TestConstants(t *testing.T) {
 			expected: 16,
 		},
 		{
-			name:     "block_size_correct_value",
-			constant: blockSize,
+			name:     "salt_size_correct_value",
+			constant: saltSize,
+			expected: 16,
+		},
+		{
+			name:     "master_secret_size_correct_value",
+			constant: masterSecretSize,
 			expected: 32,
+		},
+		{
+			name:     "derived_key_size_correct_value",
+			constant: derivedKeySize,
+			expected: 32,
+		},
+		{
+			name:     "format_version_correct_value",
+			constant: keyringFormatVersion,
+			expected: 2,
+		},
+		{
+			name:     "kdf_algorithm_correct_value",
+			constant: kdfAlgorithmHKDFSHA256,
+			expected: "hkdf-sha256",
 		},
 		{
 			name:     "default_folder_correct_value",
@@ -798,9 +757,19 @@ func TestConstants(t *testing.T) {
 			expected: ".idsec/cache/keyring",
 		},
 		{
-			name:     "env_var_correct_value",
+			name:     "default_key_file_correct_value",
+			constant: DefaultBasicKeyringKeyFile,
+			expected: ".idsec/keys/keyring.key",
+		},
+		{
+			name:     "folder_env_var_correct_value",
 			constant: IdsecBasicKeyringFolderEnvVar,
 			expected: "IDSEC_KEYRING_FOLDER",
+		},
+		{
+			name:     "key_file_env_var_correct_value",
+			constant: IdsecBasicKeyringKeyFileEnvVar,
+			expected: "IDSEC_KEYRING_KEY_FILE",
 		},
 	}
 
@@ -815,120 +784,355 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-// mockFileOps simulates file operations for ClearAllPasswords tests.
-type mockFileOps struct {
-	statErr      error
-	removeKeyErr error
-	removeMacErr error
-	keyRemoved   bool
-	macRemoved   bool
-}
-
-func (m *mockFileOps) Stat(name string) (os.FileInfo, error) {
-	return nil, m.statErr
-}
-func (m *mockFileOps) Remove(name string) error {
-	if name == "keyring" {
-		m.keyRemoved = true
-		return m.removeKeyErr
-	}
-	if name == "mac" {
-		m.macRemoved = true
-		return m.removeMacErr
-	}
-	return nil
-}
-
-func patchBasicKeyringFileOps(b *IdsecBasicKeyring, ops *mockFileOps) func() {
-	origStat := osStat
-	origRemove := osRemove
-	osStat = ops.Stat
-	osRemove = ops.Remove
-	return func() {
-		osStat = origStat
-		osRemove = origRemove
-	}
-}
-
-// osStat and osRemove allow patching for tests.
-var osStat = os.Stat
-var osRemove = os.Remove
-
+// TestIdsecBasicKeyring_ClearAllPasswords verifies that clearing the cache removes
+// the stored credentials and any file left behind by an earlier on-disk format,
+// while keeping the master secret that other keyrings may still depend on.
 func TestIdsecBasicKeyring_ClearAllPasswords(t *testing.T) {
 	tests := []struct {
-		name           string
-		statErr        error
-		removeKeyErr   error
-		removeMacErr   error
-		expectedError  bool
-		expectedErrMsg string
+		name             string
+		setupFunc        func(t *testing.T, keyring *IdsecBasicKeyring)
+		restrictedFolder bool
+		expectedError    bool
+		expectKeyFile    bool
 	}{
 		{
-			name:          "success_case_files_exist",
-			statErr:       nil,
-			removeKeyErr:  nil,
-			removeMacErr:  nil,
-			expectedError: false,
+			name: "success_case_envelope_exists",
+			setupFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
+				}
+			},
+			expectKeyFile: true,
 		},
 		{
-			name:          "edge_case_files_do_not_exist",
-			statErr:       os.ErrNotExist,
-			expectedError: false,
+			name: "success_case_envelope_and_leftover_sidecar_exist",
+			setupFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
+				}
+				if err := os.WriteFile(keyring.macFilePath, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+					t.Fatalf("Failed to write the leftover sidecar: %v", err)
+				}
+			},
+			expectKeyFile: true,
+		},
+		{
+			name: "edge_case_only_a_leftover_sidecar_exists",
+			setupFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				if err := os.WriteFile(keyring.macFilePath, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+					t.Fatalf("Failed to write the leftover sidecar: %v", err)
+				}
+			},
+		},
+		{
+			name:      "edge_case_files_do_not_exist",
+			setupFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {},
+		},
+		{
+			name: "error_case_files_cannot_be_removed",
+			setupFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				if err := keyring.SetPassword("github", "testuser", "testpassword"); err != nil {
+					t.Fatalf("SetPassword: %v", err)
+				}
+			},
+			restrictedFolder: true,
+			expectedError:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := &IdsecBasicKeyring{
-				keyringFilePath: "keyring",
-				macFilePath:     "mac",
+			if tt.restrictedFolder {
+				skipIfFolderPermissionsAreNotEnforced(t)
 			}
-			ops := &mockFileOps{
-				statErr:      tt.statErr,
-				removeKeyErr: tt.removeKeyErr,
-				removeMacErr: tt.removeMacErr,
-			}
-			restore := patchBasicKeyringFileOps(b, ops)
-			defer restore()
 
-			err := b.ClearAllPasswords()
+			folder, _ := isolateKeyringEnvironment(t)
+			keyring := NewIdsecBasicKeyring()
+			if keyring == nil {
+				t.Fatal("Failed to create keyring for test")
+			}
+			tt.setupFunc(t, keyring)
+			if tt.restrictedFolder {
+				makeFolderReadOnly(t, folder)
+			}
+
+			err := keyring.ClearAllPasswords()
+
 			if tt.expectedError {
 				if err == nil {
-					t.Errorf("Expected error, got nil")
+					t.Fatal("Expected error, got nil")
 				}
-				if tt.expectedErrMsg != "" && err.Error() != tt.expectedErrMsg {
-					t.Errorf("Expected error message '%s', got '%s'", tt.expectedErrMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Expected no error, got %v", err)
-				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+			assertKeyringStateRemoved(t, keyring)
+			if tt.expectKeyFile {
+				assertMasterSecretPresent(t, keyring)
 			}
 		})
 	}
 }
 
+// TestIdsecBasicKeyring_SetPasswordRecoversUnreadableStore verifies that a keyring
+// whose stored state can no longer be interpreted does not block new credentials
+// from being written and read back.
+func TestIdsecBasicKeyring_SetPasswordRecoversUnreadableStore(t *testing.T) {
+	keyring := newIsolatedKeyring(t)
+	seedUnreadableKeyring(t, keyring)
+
+	if err := keyring.SetPassword("github", "testuser", "newpassword"); err != nil {
+		t.Fatalf("SetPassword on an unreadable keyring: %v", err)
+	}
+
+	assertStoredPassword(t, keyring, "github", "testuser", "newpassword")
+}
+
+// TestIdsecBasicKeyring_RecoversFromUnreadableState verifies that every read and
+// delete path treats stored state it cannot interpret as a cache miss and clears it,
+// instead of reporting an error the caller cannot act on. The cases cover the shapes
+// such state actually takes: content that is not a keyring at all, a keyring left
+// behind by an earlier on-disk format, and a keyring whose master secret is gone.
+//
+// Each seed also pins the reason its state is rejected for, which keeps the fixtures
+// honest: without it a seed that stopped exercising the path it was written for, such
+// as an earlier format that merely failed to parse, would still pass.
+func TestIdsecBasicKeyring_RecoversFromUnreadableState(t *testing.T) {
+	seeds := []struct {
+		name     string
+		seedFunc func(t *testing.T, keyring *IdsecBasicKeyring)
+		reason   error
+	}{
+		{name: "uninterpretable_contents", seedFunc: seedUnreadableKeyring, reason: errContentsMalformed},
+		{name: "earlier_on_disk_format", seedFunc: seedEarlierFormatKeyring, reason: errVersionUnsupported},
+		{name: "missing_master_secret", seedFunc: seedKeyringWithoutItsKeyFile, reason: errKeyFileMissing},
+	}
+	operations := []struct {
+		name          string
+		operationFunc func(t *testing.T, keyring *IdsecBasicKeyring)
+	}{
+		{
+			name: "get_password_reports_a_cache_miss",
+			operationFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				password, err := keyring.GetPassword("github", "testuser")
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if password != "" {
+					t.Errorf("Expected empty password, got '%s'", password)
+				}
+			},
+		},
+		{
+			name: "delete_password_is_idempotent",
+			operationFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				if err := keyring.DeletePassword("github", "testuser"); err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+			},
+		},
+		{
+			name: "list_keys_returns_no_entries",
+			operationFunc: func(t *testing.T, keyring *IdsecBasicKeyring) {
+				t.Helper()
+				keys, err := keyring.ListKeys("github")
+				if err != nil {
+					t.Fatalf("Expected no error, got %v", err)
+				}
+				if len(keys) != 0 {
+					t.Errorf("Expected no keys, got %v", keys)
+				}
+			},
+		},
+	}
+
+	for _, seed := range seeds {
+		for _, operation := range operations {
+			t.Run("success_"+operation.name+"_with_"+seed.name, func(t *testing.T) {
+				keyring := newIsolatedKeyring(t)
+				seed.seedFunc(t, keyring)
+				if _, err := keyring.readStore(); !errors.Is(err, seed.reason) {
+					t.Fatalf("Expected the seeded state to be rejected as %v, got %v", seed.reason, err)
+				}
+
+				operation.operationFunc(t, keyring)
+
+				assertKeyringStateRemoved(t, keyring)
+			})
+		}
+	}
+}
+
+// TestIdsecBasicKeyring_DropsOnlyUnreadableRecords verifies that a single entry that
+// cannot be read is reported as a cache miss on its own, while the entries stored
+// next to it still decrypt correctly. Reading never rewrites the stored state, so the
+// unreadable entry is skipped rather than removed.
+func TestIdsecBasicKeyring_DropsOnlyUnreadableRecords(t *testing.T) {
+	keyring := newIsolatedKeyring(t)
+	for _, entry := range []struct{ service, user, password string }{
+		{"github", "alice", "secret-a"},
+		{"github", "bob", "secret-b"},
+		{"gitlab", "carol", "secret-c"},
+	} {
+		if err := keyring.SetPassword(entry.service, entry.user, entry.password); err != nil {
+			t.Fatalf("SetPassword %s/%s: %v", entry.service, entry.user, err)
+		}
+	}
+
+	state, err := keyring.readStore()
+	if err != nil {
+		t.Fatalf("Failed to read seeded keyring: %v", err)
+	}
+	alice := state.entries["github"]["alice"]
+	alice.Ciphertext = base64.StdEncoding.EncodeToString([]byte("unrelated bytes"))
+	state.entries["github"]["alice"] = alice
+	if err := keyring.writeStore(state); err != nil {
+		t.Fatalf("Failed to store the modified keyring: %v", err)
+	}
+
+	assertStoredPassword(t, keyring, "github", "alice", "")
+	// Reading must leave the stored state alone so that it cannot discard an entry
+	// another process wrote in the meantime.
+	if _, err := os.Stat(keyring.keyringFilePath); err != nil {
+		t.Errorf("Expected the stored keyring to be left in place, stat returned %v", err)
+	}
+
+	assertStoredPassword(t, keyring, "github", "bob", "secret-b")
+	assertStoredPassword(t, keyring, "gitlab", "carol", "secret-c")
+
+	// ListKeys does not decrypt, so the unreadable entry is still listed.
+	keys, err := keyring.ListKeys("github")
+	if err != nil {
+		t.Fatalf("ListKeys: %v", err)
+	}
+	listed := map[string]bool{}
+	for _, key := range keys {
+		listed[key] = true
+	}
+	if len(keys) != 2 || !listed["alice"] || !listed["bob"] {
+		t.Errorf("Expected 'alice' and 'bob' to be listed, got %v", keys)
+	}
+}
+
+// TestIdsecBasicKeyring_RecoversWithNonDefaultLoggerStyle verifies that recovery from
+// unreadable state does not depend on how logging is configured.
+func TestIdsecBasicKeyring_RecoversWithNonDefaultLoggerStyle(t *testing.T) {
+	t.Setenv(config.IdsecLoggerStyleEnvVar, "json")
+
+	keyring := newIsolatedKeyring(t)
+	seedUnreadableKeyring(t, keyring)
+
+	assertStoredPassword(t, keyring, "github", "testuser", "")
+	if err := keyring.SetPassword("github", "testuser", "newpassword"); err != nil {
+		t.Fatalf("SetPassword on an unreadable keyring: %v", err)
+	}
+	assertStoredPassword(t, keyring, "github", "testuser", "newpassword")
+}
+
+// TestIdsecBasicKeyring_TreatsALeftoverSidecarAsAnEmptyKeyring verifies that a file
+// left behind by an earlier on-disk format, with no keyring beside it, reads as an
+// empty keyring rather than as unusable state, and that clearing the cache removes it.
+func TestIdsecBasicKeyring_TreatsALeftoverSidecarAsAnEmptyKeyring(t *testing.T) {
+	keyring := newIsolatedKeyring(t)
+	if err := os.WriteFile(keyring.macFilePath, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+		t.Fatalf("Failed to write the leftover sidecar: %v", err)
+	}
+
+	assertStoredPassword(t, keyring, "github", "testuser", "")
+	keys, err := keyring.ListKeys("github")
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("Expected no keys, got %v", keys)
+	}
+	if err := keyring.DeletePassword("github", "testuser"); err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	// Reading an absent keyring creates nothing, so the leftover file is still there.
+	if _, err := os.Stat(keyring.macFilePath); err != nil {
+		t.Errorf("Expected the leftover sidecar to be left in place by a read, stat returned %v", err)
+	}
+
+	if err := keyring.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords: %v", err)
+	}
+	assertKeyringStateRemoved(t, keyring)
+}
+
+// TestIdsecKeyring_DoesNotRetryBasicKeyringOnGenuineFailure verifies that a save which
+// already used the file-backed keyring reports its failure immediately, instead of
+// retrying the same files through a second file-backed keyring.
+func TestIdsecKeyring_DoesNotRetryBasicKeyringOnGenuineFailure(t *testing.T) {
+	skipIfFolderPermissionsAreNotEnforced(t)
+
+	folder, _ := isolateKeyringEnvironment(t)
+	t.Setenv(IdsecBasicKeyringOverrideEnvVar, "true")
+
+	tokenKeyring := NewIdsecKeyring("idsec-test")
+	var logs bytes.Buffer
+	tokenKeyring.logger = common.NewIdsecLogger("IdsecKeyring", common.Debug, true, false)
+	tokenKeyring.logger.SetOutput(&logs)
+	makeFolderReadOnly(t, folder)
+
+	err := tokenKeyring.SaveToken(
+		&models.IdsecProfile{ProfileName: "test-profile"},
+		&auth.IdsecToken{Token: "test-token"},
+		"access",
+		false,
+	)
+
+	if err == nil {
+		t.Fatal("Expected SaveToken to report the write failure, got nil")
+	}
+	// Asserting on the captured failure first keeps the fallback count below
+	// meaningful: an empty buffer would otherwise satisfy it for the wrong reason.
+	if !strings.Contains(logs.String(), "Failed to save token") {
+		t.Fatalf("Expected the write failure to be logged, got %q", logs.String())
+	}
+	if fallbacks := strings.Count(logs.String(), "Falling back to basic keyring"); fallbacks != 0 {
+		t.Errorf("Expected no retry through a second basic keyring, got %d fallback attempts", fallbacks)
+	}
+}
+
+// TestIdsecBasicKeyring_SetPasswordReportsGenuineFailures verifies that a keyring
+// folder that cannot be written to produces an error rather than a silent success.
+func TestIdsecBasicKeyring_SetPasswordReportsGenuineFailures(t *testing.T) {
+	skipIfFolderPermissionsAreNotEnforced(t)
+
+	folder, _ := isolateKeyringEnvironment(t)
+	keyring := NewIdsecBasicKeyring()
+	if keyring == nil {
+		t.Fatal("Failed to create keyring for test")
+	}
+	makeFolderReadOnly(t, folder)
+
+	if err := keyring.SetPassword("github", "testuser", "testpassword"); err == nil {
+		t.Fatal("Expected SetPassword to report the write failure, got nil")
+	}
+	if _, err := os.Stat(keyring.keyringFilePath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected no keyring file to be written, stat returned %v", err)
+	}
+}
+
 func TestIdsecBasicKeyring_ListKeys(t *testing.T) {
 	t.Run("populated_service", func(t *testing.T) {
-		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_")
-		if err != nil {
-			t.Fatalf("MkdirTemp: %v", err)
-		}
-		t.Cleanup(func() {
-			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-			_ = os.RemoveAll(tempDir)
-		})
-		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-
-		kr := NewIdsecBasicKeyring()
-		if err := kr.SetPassword("github", "alice", "secret-a"); err != nil {
-			t.Fatalf("SetPassword alice: %v", err)
-		}
-		if err := kr.SetPassword("github", "bob", "secret-b"); err != nil {
-			t.Fatalf("SetPassword bob: %v", err)
-		}
-		if err := kr.SetPassword("gitlab", "carol", "secret-c"); err != nil {
-			t.Fatalf("SetPassword carol: %v", err)
+		kr := newIsolatedKeyring(t)
+		for _, entry := range []struct{ service, user, password string }{
+			{"github", "alice", "secret-a"},
+			{"github", "bob", "secret-b"},
+			{"gitlab", "carol", "secret-c"},
+		} {
+			if err := kr.SetPassword(entry.service, entry.user, entry.password); err != nil {
+				t.Fatalf("SetPassword %s/%s: %v", entry.service, entry.user, err)
+			}
 		}
 
 		keys, err := kr.ListKeys("github")
@@ -948,17 +1152,8 @@ func TestIdsecBasicKeyring_ListKeys(t *testing.T) {
 	})
 
 	t.Run("missing_file", func(t *testing.T) {
-		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_missing_")
-		if err != nil {
-			t.Fatalf("MkdirTemp: %v", err)
-		}
-		t.Cleanup(func() {
-			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-			_ = os.RemoveAll(tempDir)
-		})
-		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
+		kr := newIsolatedKeyring(t)
 
-		kr := NewIdsecBasicKeyring()
 		keys, err := kr.ListKeys("github")
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)
@@ -969,20 +1164,11 @@ func TestIdsecBasicKeyring_ListKeys(t *testing.T) {
 	})
 
 	t.Run("missing_service", func(t *testing.T) {
-		tempDir, err := os.MkdirTemp("", "idsec_test_listkeys_nosvc_")
-		if err != nil {
-			t.Fatalf("MkdirTemp: %v", err)
-		}
-		t.Cleanup(func() {
-			_ = os.Unsetenv(IdsecBasicKeyringFolderEnvVar)
-			_ = os.RemoveAll(tempDir)
-		})
-		_ = os.Setenv(IdsecBasicKeyringFolderEnvVar, tempDir)
-
-		kr := NewIdsecBasicKeyring()
+		kr := newIsolatedKeyring(t)
 		if err := kr.SetPassword("github", "alice", "secret"); err != nil {
 			t.Fatalf("SetPassword: %v", err)
 		}
+
 		keys, err := kr.ListKeys("gitlab")
 		if err != nil {
 			t.Fatalf("ListKeys: %v", err)

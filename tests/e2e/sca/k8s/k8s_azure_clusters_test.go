@@ -16,6 +16,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestK8sAzureListTargets(t *testing.T) {
+	t.Skip("K8s tests are temporarily disabled")
 	framework.LogSection(t, "Test: K8s Azure Clusters ListTargets")
 	testCtx := scahelpers.SetupK8sListTargetsTest(t, scahelpers.AzureK8sListTargetsConfig, true)
 

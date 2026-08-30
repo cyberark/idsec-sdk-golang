@@ -79,20 +79,36 @@ func (e *Error) Unwrap() error { return e.fields }
 // Fields returns the underlying validator.ValidationErrors slice.
 func (e *Error) Fields() validator.ValidationErrors { return e.fields }
 
+// squashMarker stands in for a `mapstructure:",squash"` embed in validation
+// namespaces. Such an embed has no name of its own, so FieldPath drops the
+// level rather than leaking the Go type name of the embedded struct.
+const squashMarker = "\x00squash"
+
 // FieldPath returns the dotted, tag-resolved path of the offending field
 // with the Go struct type prefix that go-playground prepends in
-// Namespace() stripped.
+// Namespace() stripped, and squashed embeds collapsed into their parent.
 func FieldPath(e validator.FieldError) string {
 	ns := e.Namespace()
-	if i := strings.IndexByte(ns, '.'); i >= 0 {
-		return ns[i+1:]
+	i := strings.IndexByte(ns, '.')
+	if i < 0 {
+		return ns
 	}
-	return ns
+	parts := strings.Split(ns[i+1:], ".")
+	kept := parts[:0]
+	for _, part := range parts {
+		if part != squashMarker {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, ".")
 }
 
 // externalFieldName resolves the user-facing name of a struct field for
 // validation messages.
 func externalFieldName(fld reflect.StructField) string {
+	if fld.Tag.Get("mapstructure") == ",squash" {
+		return squashMarker
+	}
 	for _, tag := range []string{"mapstructure", "json"} {
 		raw := fld.Tag.Get(tag)
 		if raw == "" {
@@ -114,9 +130,19 @@ func formatField(e validator.FieldError) string {
 		rule += "=" + p
 	}
 	if v := e.Value(); v != nil && v != "" {
-		rule += fmt.Sprintf(" (got %q)", v)
+		rule += " (got " + formatValue(v) + ")"
 	}
 	return FieldPath(e) + ": " + rule
+}
+
+// formatValue renders an offending value: strings quoted, anything else in
+// its default form. %q would print a rune for an integer and a verb error
+// for a pointer.
+func formatValue(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return fmt.Sprintf("%q", s)
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 // --- regexp / pattern custom rule -------------------------------------

@@ -196,3 +196,32 @@ type IdsecCCEPageOutput struct {
 	IsLastPage   bool `json:"is_last_page" mapstructure:"is_last_page" desc:"Whether this is the last page of results"`
 	TotalRecords int  `json:"total_records" mapstructure:"total_records" desc:"Total number of records across all pages"`
 }
+
+// IdsecCCEWorkloadFederation represents workload federation identity details shared across platforms.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used directly.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: WorkloadFederation
+type IdsecCCEWorkloadFederation struct {
+	IdentityUserID      string `json:"identity_user_id,omitempty" mapstructure:"identity_user_id,omitempty" validate:"required" desc:"Identity user identifier"`
+	IdentityAppID       string `json:"identity_app_id,omitempty" mapstructure:"identity_app_id,omitempty" validate:"required" desc:"Identity application identifier"`
+	IdentityAppIssuer   string `json:"identity_app_issuer,omitempty" mapstructure:"identity_app_issuer,omitempty" validate:"required" desc:"Identity application issuer"`
+	IdentityAppAudience string `json:"identity_app_audience,omitempty" mapstructure:"identity_app_audience,omitempty" validate:"required" desc:"Identity application audience"`
+}
+
+// TfIdsecCCEGetIdentityParams is the shared input for retrieving identity federation parameters.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used directly.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: Input for GET /api/{platform}/identity-params
+type TfIdsecCCEGetIdentityParams struct {
+}
+
+// TfIdsecCCEIdentityParams is the shared output for identity federation parameters across all platforms.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used directly.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: GetIdentityParamsOutput
+type TfIdsecCCEIdentityParams struct {
+	// TenantID is the tenant identifier.
+	TenantID string `json:"tenant_id" mapstructure:"tenant_id" desc:"Tenant identifier"`
+	// IdentityParams contains a map of service names to their workload identity federation details.
+	IdentityParams map[string]IdsecCCEWorkloadFederation `json:"identity_params" mapstructure:"identity_params" desc:"Map of service names to identity parameters"`
+}

@@ -50,6 +50,14 @@ func (d *Deprecation) IsZero() bool {
 	return d == nil || (d.Message == "" && d.Replacement == "")
 }
 
+// CLIFormatter is implemented by types that want to control how a service action's
+// result is displayed in the CLI instead of the default JSON output.
+// Format receives the raw return value from the service method (e.g. *IdsecSIADoctorReport)
+// and must return a ready-to-print string, including any ANSI colour codes.
+type CLIFormatter interface {
+	Format(result any) string
+}
+
 // IdsecServiceCLIActionDefinition is a struct that defines the structure of an action in the Idsec CLI.
 type IdsecServiceCLIActionDefinition struct {
 	IdsecServiceBaseActionDefinition `mapstructure:",squash"`
@@ -58,6 +66,10 @@ type IdsecServiceCLIActionDefinition struct {
 	AsyncActions                     []string                           `mapstructure:"async_actions,omitempty" json:"async_actions,omitempty" desc:"List of async actions as part of the schemas"`
 	Subactions                       []*IdsecServiceCLIActionDefinition `mapstructure:"subactions,omitempty" json:"subactions,omitempty" desc:"Subactions to this action"`
 	Deprecation                      *Deprecation                       `mapstructure:"deprecation,omitempty" json:"deprecation,omitempty" desc:"Deprecation metadata for the action tree node"`
+	// Formatters maps action names (matching keys in Schemas) to a CLIFormatter
+	// that controls how the result is rendered in the terminal.
+	// When nil or when the action name has no entry, the default JSON output is used.
+	Formatters map[string]CLIFormatter `mapstructure:"-" json:"-"`
 }
 
 // ActionType returns the type of action, which is CLI in this case.

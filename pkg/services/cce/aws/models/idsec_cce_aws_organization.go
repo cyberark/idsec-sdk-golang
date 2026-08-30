@@ -59,7 +59,7 @@ type TfIdsecCCEAWSAddOrganizationOutput struct {
 // OPENAPI-CORRELATION: Custom input combining multiple endpoints
 type TfIdsecCCEAWSUpdateOrganization struct {
 	// ID is the organization's onboarding ID.
-	ID string `json:"id,omitempty" mapstructure:"id" desc:"CCE organization onboarding ID (for example, ef858a2d8f8f4f1781578089bb4ea010)"`
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID (for example, ef858a2d8f8f4f1781578089bb4ea010)"`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	// ServiceParameters contains service-specific parameters, keyed by service name.

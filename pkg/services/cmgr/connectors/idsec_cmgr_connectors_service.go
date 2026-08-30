@@ -141,6 +141,8 @@ func (s *IdsecCmgrConnectorsService) createWinRMConnection(
 	retryCount int,
 	retryDelay int,
 	winrmProtocol string,
+	certificatePath string,
+	trustCertificate bool,
 ) (connections.IdsecConnection, error) {
 	protocol := winrm.WinRMHTTPSPort
 	if strings.ToLower(winrmProtocol) == "http" {
@@ -156,8 +158,8 @@ func (s *IdsecCmgrConnectorsService) createWinRMConnection(
 			Password: password,
 		},
 		ConnectionData: &connectiondata.IdsecWinRMConnectionData{
-			CertificatePath:  "",
-			TrustCertificate: true,
+			CertificatePath:  certificatePath,
+			TrustCertificate: trustCertificate,
 			Protocol:         winrmProtocol,
 		},
 		ConnectionRetries: retryCount,
@@ -209,13 +211,15 @@ func (s *IdsecCmgrConnectorsService) createConnection(
 	retryCount int,
 	retryDelay int,
 	winrmProtocol string,
+	certificatePath string,
+	trustCertificate bool,
 ) (connections.IdsecConnection, error) {
 	var (
 		connection connections.IdsecConnection
 		err        error
 	)
 	if osType == commonmodels.OSTypeWindows {
-		connection, err = s.createWinRMConnection(targetMachine, username, password, retryCount, retryDelay, winrmProtocol)
+		connection, err = s.createWinRMConnection(targetMachine, username, password, retryCount, retryDelay, winrmProtocol, certificatePath, trustCertificate)
 	} else {
 		connection, err = s.createSSHConnection(targetMachine, username, password, privateKeyPath, privateKeyContents, retryCount, retryDelay)
 	}
@@ -260,6 +264,8 @@ func (s *IdsecCmgrConnectorsService) installConnectorOnMachine(
 	retryCount int,
 	retryDelay int,
 	winrmProtocol string,
+	certificatePath string,
+	trustCertificate bool,
 ) (*connectorsmodels.IdsecCmgrConnectorID, error) {
 	connection, err := s.createConnection(
 		osType,
@@ -271,6 +277,8 @@ func (s *IdsecCmgrConnectorsService) installConnectorOnMachine(
 		retryCount,
 		retryDelay,
 		winrmProtocol,
+		certificatePath,
+		trustCertificate,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection: %w", err)
@@ -445,6 +453,8 @@ func (s *IdsecCmgrConnectorsService) Install(req *connectorsmodels.IdsecCmgrInst
 		req.RetryCount,
 		req.RetryDelay,
 		req.WinRMProtocol,
+		req.CertificatePath,
+		req.TrustCertificate,
 	)
 }
 
@@ -459,6 +469,8 @@ func (s *IdsecCmgrConnectorsService) uninstallConnectorOnMachine(
 	retryCount int,
 	retryDelay int,
 	winrmProtocol string,
+	certificatePath string,
+	trustCertificate bool,
 ) error {
 	connection, err := s.createConnection(
 		osType,
@@ -470,6 +482,8 @@ func (s *IdsecCmgrConnectorsService) uninstallConnectorOnMachine(
 		retryCount,
 		retryDelay,
 		winrmProtocol,
+		certificatePath,
+		trustCertificate,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create connection: %w", err)
@@ -534,11 +548,57 @@ func (s *IdsecCmgrConnectorsService) Uninstall(req *connectorsmodels.IdsecCmgrUn
 		req.RetryCount,
 		req.RetryDelay,
 		req.WinRMProtocol,
+		req.CertificatePath,
+		req.TrustCertificate,
 	)
 	if req.ForceDelete || err == nil {
 		return s.deleteConnector(req.ConnectorID, req.RetryCount, req.RetryDelay)
 	}
 	return err
+}
+
+// Update updates specific properties of an existing connector.
+//
+// It calls PATCH /api/connectors/{connector_id} on the connector management
+// service and returns the updated connector on success.
+//
+// Parameters:
+//   - req: Update request containing the connector ID (path) and the fields to
+//     patch. Only non-nil optional fields are sent in the request body.
+//
+// Returns the updated connector or an error if the request fails.
+func (s *IdsecCmgrConnectorsService) Update(req *connectorsmodels.IdsecCmgrUpdate) (*connectorsmodels.IdsecCmgrConnector, error) {
+	s.Logger.Info("Updating connector [%s]", req.ConnectorID)
+
+	body := map[string]interface{}{}
+	if req.ConnectorPoolID != nil {
+		body["connector_pool_id"] = *req.ConnectorPoolID
+	}
+
+	response, err := s.ISPClient().Patch(context.Background(), fmt.Sprintf(connectorURL, req.ConnectorID), body)
+	if err != nil {
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to update connector - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	connectorJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	connectorJSONMap := connectorJSON.(map[string]interface{})
+
+	var connector connectorsmodels.IdsecCmgrConnector
+	if err = mapstructure.Decode(connectorJSONMap, &connector); err != nil {
+		return nil, err
+	}
+	return &connector, nil
 }
 
 // ServiceConfig returns the service configuration for IdsecCmgrConnectorsService.

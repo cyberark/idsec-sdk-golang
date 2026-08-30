@@ -8,4 +8,5 @@ var ActionToSchemaMap = map[string]interface{}{
 	"install":      &connectorsmodels.IdsecCmgrInstall{},
 	"uninstall":    &connectorsmodels.IdsecCmgrUninstall{},
 	"get":          &connectorsmodels.IdsecCmgrGet{},
+	"update":       &connectorsmodels.IdsecCmgrUpdate{},
 }

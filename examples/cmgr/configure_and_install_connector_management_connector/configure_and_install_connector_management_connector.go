@@ -23,6 +23,16 @@ const (
 	// installAndUninstallFlow installs a connector and uninstalls it only if the installation succeeded,
 	// then deletes the pool and the network created by the installation.
 	installAndUninstallFlow flowType = "install_and_uninstall"
+	// installAndUpdateFlow creates a network and two pools, installs a connector on the first pool,
+	// then reassigns it to the second pool via Update. Resources are kept after the flow completes.
+	installAndUpdateFlow flowType = "install_and_update"
+	// installAndUpdateAndUninstallFlow performs the same steps as installAndUpdateFlow, then
+	// uninstalls the connector and deletes both pools and the network.
+	installAndUpdateAndUninstallFlow flowType = "install_and_update_and_uninstall"
+	// updateAndUninstallFlow uses an existing connector/pool/network from config, creates a second
+	// pool on the same network, reassigns the connector to it via Update, then uninstalls the
+	// connector and deletes both pools and the network.
+	updateAndUninstallFlow flowType = "update_and_uninstall"
 )
 
 const (
@@ -46,6 +56,10 @@ type windowsMachineConfig struct {
 	InstallationPath string
 	// WinRMProtocol is either http or https.
 	WinRMProtocol string
+	// CertificatePath is the path to a custom CA certificate for HTTPS WinRM connections.
+	CertificatePath string
+	// TrustCertificate when true trusts any server certificate for HTTPS WinRM connections.
+	TrustCertificate bool
 }
 
 // config holds every parameter used by the example flows.
@@ -98,6 +112,8 @@ func main() {
 			Password:         "<EC2-ADMIN-PASSWORD>",
 			InstallationPath: "",
 			WinRMProtocol:    "https",
+			CertificatePath:  "<SELF-SIGNED-CERT-PUBLIC-KEY-FROM-MACHINE",
+			TrustCertificate: false,
 		},
 	}
 
@@ -161,6 +177,24 @@ func runFlow(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config) error {
 			return err
 		}
 		return uninstall(cmgrAPI, cfg, resources)
+	case installAndUpdateFlow:
+		_, err := installAndUpdateConnector(cmgrAPI, cfg)
+		return err
+	case installAndUpdateAndUninstallFlow:
+		resources, err := installAndUpdateConnector(cmgrAPI, cfg)
+		if err != nil {
+			return err
+		}
+		return uninstall(cmgrAPI, cfg, resources)
+	case updateAndUninstallFlow:
+		if cfg.ConnectorID == "" || cfg.NetworkID == "" {
+			return fmt.Errorf("connector ID and network ID are required for the [%s] flow", cfg.Flow)
+		}
+		resources, err := updateConnector(cmgrAPI, cfg)
+		if err != nil {
+			return err
+		}
+		return uninstall(cmgrAPI, cfg, resources)
 	default:
 		return fmt.Errorf("unsupported flow [%s]", cfg.Flow)
 	}
@@ -168,10 +202,12 @@ func runFlow(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config) error {
 
 // connectorResources holds the identifiers of the resources a connector is built on top of.
 // The pool and the network IDs are optional and are only removed when they are set.
+// UpdatePoolID, when set, is a second pool created by the update flow and is deleted first during cleanup.
 type connectorResources struct {
-	ConnectorID string
-	PoolID      string
-	NetworkID   string
+	ConnectorID  string
+	PoolID       string
+	NetworkID    string
+	UpdatePoolID string
 }
 
 // installConnector creates a network and a pool, then installs a connector on the target machine
@@ -185,14 +221,10 @@ func installConnector(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config) (connectorResourc
 	}
 	fmt.Printf("Added network: %s\n", network.NetworkID)
 
-	pool, err := cmgrAPI.Pools().Create(&poolsmodels.IdsecCmgrAddPool{
-		Name:               cfg.BaseResourceName + "Pool",
-		AssignedNetworkIDs: []string{network.NetworkID},
-	})
+	pool, err := createPool(cmgrAPI, cfg.BaseResourceName+"Pool", []string{network.NetworkID})
 	if err != nil {
-		return connectorResources{}, fmt.Errorf("failed to create pool: %w", err)
+		return connectorResources{}, err
 	}
-	fmt.Printf("Added pool: %s\n", pool.PoolID)
 
 	connector, err := cmgrAPI.Connectors().Install(newInstallRequest(cfg, pool.PoolID))
 	if err != nil {
@@ -219,6 +251,8 @@ func newInstallRequest(cfg *config, poolID string) *connmgmtmodels.IdsecCmgrInst
 			Password:         cfg.WindowsMachine.Password,
 			InstallationPath: cfg.WindowsMachine.InstallationPath,
 			WinRMProtocol:    cfg.WindowsMachine.WinRMProtocol,
+			CertificatePath:  cfg.WindowsMachine.CertificatePath,
+			TrustCertificate: cfg.WindowsMachine.TrustCertificate,
 		}
 	}
 	return &connmgmtmodels.IdsecCmgrInstall{
@@ -230,14 +264,24 @@ func newInstallRequest(cfg *config, poolID string) *connmgmtmodels.IdsecCmgrInst
 	}
 }
 
-// uninstall uninstalls the given connector from the configured target machine, then deletes its pool
-// and network. The pool is deleted before the network because a network cannot be deleted while a
-// pool is still assigned to it. Both deletions are skipped when the matching ID is empty.
+// uninstall uninstalls the given connector from the configured target machine, then deletes its
+// pools and network. Pools are deleted before the network because a network cannot be deleted while
+// pools are still assigned to it. UpdatePoolID (when set) is deleted first, followed by PoolID.
+// Both pool and network deletions are skipped when the matching ID is empty.
 func uninstall(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config, resources connectorResources) error {
 	if err := cmgrAPI.Connectors().Uninstall(newUninstallRequest(cfg, resources.ConnectorID)); err != nil {
 		return fmt.Errorf("failed to uninstall connector [%s]: %w", resources.ConnectorID, err)
 	}
 	fmt.Printf("Uninstalled connector: %s\n", resources.ConnectorID)
+
+	if resources.UpdatePoolID != "" {
+		if err := cmgrAPI.Pools().Delete(&poolsmodels.IdsecCmgrDeletePool{
+			PoolID: resources.UpdatePoolID,
+		}); err != nil {
+			return fmt.Errorf("failed to delete update pool [%s]: %w", resources.UpdatePoolID, err)
+		}
+		fmt.Printf("Deleted update pool: %s\n", resources.UpdatePoolID)
+	}
 
 	if resources.PoolID != "" {
 		if err := cmgrAPI.Pools().Delete(&poolsmodels.IdsecCmgrDeletePool{
@@ -259,6 +303,100 @@ func uninstall(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config, resources connectorResou
 	return nil
 }
 
+// installAndUpdateConnector runs the update flow: it installs a connector on a first pool, then
+// creates a second pool on the same network and reassigns the connector to it via Update. It
+// returns all resource identifiers so the caller can clean them up with uninstall.
+func installAndUpdateConnector(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config) (connectorResources, error) {
+	// Step 1: create the shared network.
+	network, err := cmgrAPI.Networks().Create(&networksmodels.IdsecCmgrAddNetwork{
+		Name: cfg.BaseResourceName + "Network",
+	})
+	if err != nil {
+		return connectorResources{}, fmt.Errorf("failed to create network: %w", err)
+	}
+	fmt.Printf("Added network: %s\n", network.NetworkID)
+
+	// Step 2: create the first pool and install the connector on it.
+	pool, err := createPool(cmgrAPI, cfg.BaseResourceName+"Pool", []string{network.NetworkID})
+	if err != nil {
+		return connectorResources{}, err
+	}
+
+	connector, err := cmgrAPI.Connectors().Install(newInstallRequest(cfg, pool.PoolID))
+	if err != nil {
+		return connectorResources{}, fmt.Errorf("failed to install connector: %w", err)
+	}
+	fmt.Printf("Installed connector: %s (pool: %s)\n", connector.ConnectorID, pool.PoolID)
+
+	// Step 3: create a second pool on the same network.
+	updatePool, err := createPool(cmgrAPI, cfg.BaseResourceName+"UpdatePool", []string{network.NetworkID})
+	if err != nil {
+		return connectorResources{}, err
+	}
+
+	// Step 4: reassign the connector to the new pool.
+	updatePoolID := updatePool.PoolID
+	updatedConnector, err := cmgrAPI.Connectors().Update(&connmgmtmodels.IdsecCmgrUpdate{
+		ConnectorID:     connector.ConnectorID,
+		ConnectorPoolID: &updatePoolID,
+	})
+	if err != nil {
+		return connectorResources{}, fmt.Errorf("failed to update connector [%s]: %w", connector.ConnectorID, err)
+	}
+	fmt.Printf("Updated connector %s: pool changed to %s\n", updatedConnector.ConnectorID, updatedConnector.ConnectorPoolID)
+
+	return connectorResources{
+		ConnectorID:  connector.ConnectorID,
+		PoolID:       pool.PoolID,
+		NetworkID:    network.NetworkID,
+		UpdatePoolID: updatePool.PoolID,
+	}, nil
+}
+
+// updateConnector runs the update-and-uninstall flow against an existing connector. It expects
+// config.ConnectorID and config.NetworkID to be set; config.PoolID is kept as-is for cleanup.
+// A new pool is created on the existing network, the connector is reassigned to it via Update,
+// and all resource identifiers are returned so the caller can run a full uninstall + cleanup.
+func updateConnector(cmgrAPI *cmgr.IdsecCmgrAPI, cfg *config) (connectorResources, error) {
+	// Create a new pool on the existing network.
+	updatePool, err := createPool(cmgrAPI, cfg.BaseResourceName+"UpdatePool", []string{cfg.NetworkID})
+	if err != nil {
+		return connectorResources{}, err
+	}
+
+	// Reassign the connector to the new pool.
+	updatePoolID := updatePool.PoolID
+	updatedConnector, err := cmgrAPI.Connectors().Update(&connmgmtmodels.IdsecCmgrUpdate{
+		ConnectorID:     cfg.ConnectorID,
+		ConnectorPoolID: &updatePoolID,
+	})
+	if err != nil {
+		return connectorResources{}, fmt.Errorf("failed to update connector [%s]: %w", cfg.ConnectorID, err)
+	}
+	fmt.Printf("Updated connector %s: pool changed to %s\n", updatedConnector.ConnectorID, updatedConnector.ConnectorPoolID)
+
+	return connectorResources{
+		ConnectorID:  cfg.ConnectorID,
+		PoolID:       cfg.PoolID,
+		NetworkID:    cfg.NetworkID,
+		UpdatePoolID: updatePool.PoolID,
+	}, nil
+}
+
+// createPool creates a pool with the given name assigned to the provided network IDs, logs the
+// created pool ID, and returns the created pool. It returns a wrapped error on failure.
+func createPool(cmgrAPI *cmgr.IdsecCmgrAPI, name string, networkIDs []string) (*poolsmodels.IdsecCmgrPool, error) {
+	pool, err := cmgrAPI.Pools().Create(&poolsmodels.IdsecCmgrAddPool{
+		Name:               name,
+		AssignedNetworkIDs: networkIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool [%s]: %w", name, err)
+	}
+	fmt.Printf("Added pool: %s\n", pool.PoolID)
+	return pool, nil
+}
+
 // newUninstallRequest builds an uninstall request holding only the parameters relevant to the
 // configured OS, matching the split described in newInstallRequest.
 func newUninstallRequest(cfg *config, connectorID string) *connmgmtmodels.IdsecCmgrUninstall {
@@ -271,6 +409,8 @@ func newUninstallRequest(cfg *config, connectorID string) *connmgmtmodels.IdsecC
 			Password:         cfg.WindowsMachine.Password,
 			InstallationPath: cfg.WindowsMachine.InstallationPath,
 			WinRMProtocol:    cfg.WindowsMachine.WinRMProtocol,
+			CertificatePath:  cfg.WindowsMachine.CertificatePath,
+			TrustCertificate: cfg.WindowsMachine.TrustCertificate,
 		}
 	}
 	return &connmgmtmodels.IdsecCmgrUninstall{

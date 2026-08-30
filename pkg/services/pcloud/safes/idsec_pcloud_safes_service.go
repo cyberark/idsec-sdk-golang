@@ -543,9 +543,20 @@ func (s *IdsecPCloudSafesService) Create(addSafe *safesmodels.IdsecPCloudAddSafe
 		// If both retention values are set, remove the versions one as only one can be set
 		delete(addSafeJSON, "numberOfVersionsRetention")
 	}
-	response, err := s.ISPClient().Post(context.Background(), safesURL, addSafeJSON)
+	response, existingSafe, err := commonpcloud.CreateWithGatewayTimeoutRecovery(
+		func() (*http.Response, error) {
+			return s.ISPClient().Post(context.Background(), safesURL, addSafeJSON)
+		},
+		func() (*safesmodels.IdsecPCloudSafe, error) {
+			return s.Get(&safesmodels.IdsecPCloudGetSafe{SafeName: addSafe.SafeName})
+		},
+	)
 	if err != nil {
 		return nil, err
+	}
+	if existingSafe != nil {
+		s.Logger.Info("Safe [%s] recovered after gateway timeout", addSafe.SafeName)
+		return existingSafe, nil
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()

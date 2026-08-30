@@ -8,6 +8,7 @@ package keyring
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"runtime"
 	"strings"
@@ -25,6 +26,26 @@ const (
 	DefaultExpirationGraceDeltaSeconds = 60
 	MaxKeyringRecordTimeHours          = 12
 )
+
+// ErrKeyringUnavailable indicates that no keyring backend could be initialized.
+//
+// Every backend is built on the basic keyring, whose constructor reports failure by
+// returning nil, which happens when no home directory resolves and the keyring paths are
+// not both configured explicitly. Handing that nil back as an IdsecKeyringImpl would
+// produce a non-nil interface wrapping a nil pointer, which panics on first use and which
+// a caller cannot detect by comparing the interface against nil, so the failure is
+// reported as this sentinel instead.
+//
+// A caller that receives it has no credential cache available. Since the cache only ever
+// saves a round trip, the reasonable response is to authenticate without one rather than
+// to fail.
+//
+// Example:
+//
+//	if errors.Is(err, ErrKeyringUnavailable) {
+//	    // No credential cache on this host, authenticate without caching
+//	}
+var ErrKeyringUnavailable = errors.New("keyring is unavailable")
 
 // IdsecKeyringImpl defines the interface for keyring operations.
 type IdsecKeyringImpl interface {
@@ -102,11 +123,19 @@ func (a *IdsecKeyring) isWSL() bool {
 // when enforceBasicKeyring is true. For Windows, macOS, and Linux systems with
 // proper D-Bus session, it attempts to use system-specific secure storage.
 //
+// Every backend needs a basic keyring, either as the backend itself or as the fallback
+// the OS-provided backend uses when the platform store cannot be reached, so it is built
+// first and a failure to build it fails the call. Returning it instead would put a nil
+// *IdsecBasicKeyring inside a non-nil IdsecKeyringImpl, which no nil check by the caller
+// can detect and which panics on first use. That is reachable wherever no home directory
+// resolves, such as a minimal container image, and it is exactly the graceful cache miss
+// this backend exists to provide, so it is reported as ErrKeyringUnavailable instead.
+//
 // Parameters:
 //   - enforceBasicKeyring: When true, forces the use of basic keyring regardless of environment
 //
-// Returns a IdsecBasicKeyring instance configured for the current environment, or an
-// error if keyring initialization fails.
+// Returns a keyring implementation configured for the current environment, or
+// ErrKeyringUnavailable if no keyring could be initialized.
 //
 // Example:
 //
@@ -115,27 +144,51 @@ func (a *IdsecKeyring) isWSL() bool {
 //	    // handle error
 //	}
 func (a *IdsecKeyring) GetKeyring(enforceBasicKeyring bool) (IdsecKeyringImpl, error) {
+	basicKeyring := NewIdsecBasicKeyring()
+	if basicKeyring == nil {
+		return nil, ErrKeyringUnavailable
+	}
 	if a.isDocker() || a.isWSL() || os.Getenv(IdsecBasicKeyringOverrideEnvVar) != "" || enforceBasicKeyring {
-		return NewIdsecBasicKeyring(), nil
+		return basicKeyring, nil
 	}
 	if runtime.GOOS == "windows" {
-		return NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring()), nil
+		return a.osProvidedKeyring(basicKeyring)
 	}
 	if runtime.GOOS == "darwin" {
-		return NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring()), nil
+		return a.osProvidedKeyring(basicKeyring)
 	}
 	if runtime.GOOS == "linux" && os.Getenv(DBusSessionEnvVar) != "" {
-		return NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring()), nil
+		return a.osProvidedKeyring(basicKeyring)
 	}
-	return NewIdsecBasicKeyring(), nil
+	return basicKeyring, nil
+}
+
+// osProvidedKeyring wraps a basic keyring in the OS-provided backend.
+//
+// The wrap is rejected rather than returned when it fails, for the same reason
+// GetKeyring rejects a nil basic keyring: a nil *IdsecOSProvidedKeyring inside a non-nil
+// IdsecKeyringImpl is indistinguishable from a working one until it is used.
+func (a *IdsecKeyring) osProvidedKeyring(fallbackKeyring IdsecKeyringImpl) (IdsecKeyringImpl, error) {
+	osKeyring := NewIdsecOSProvidedKeyring(fallbackKeyring)
+	if osKeyring == nil {
+		return nil, ErrKeyringUnavailable
+	}
+	return osKeyring, nil
 }
 
 // SaveToken saves an authentication token to the keyring for the specified profile and postfix.
 //
 // SaveToken stores the provided token in the keyring using a composite key format
 // of "serviceName-postfix" and the profile name. The token is serialized to JSON
-// before storage. If the initial save fails and enforceBasicKeyring is false,
-// it automatically falls back to basic keyring storage.
+// before storage. If the initial save fails, it automatically falls back to basic
+// keyring storage, unless the keyring that failed is already the basic keyring, in
+// which case the failure is returned directly. The fallback recurses at most once,
+// because it sets enforceBasicKeyring, which selects the basic keyring and so makes the
+// retry return its error directly rather than fall back again.
+//
+// When no keyring can be initialized at all, ErrKeyringUnavailable is returned without
+// any attempt to store the token and without a fallback attempt, since the fallback is
+// the backend that could not be initialized.
 //
 // Parameters:
 //   - profile: The IDSEC profile containing the profile name used as the keyring username
@@ -143,7 +196,8 @@ func (a *IdsecKeyring) GetKeyring(enforceBasicKeyring bool) (IdsecKeyringImpl, e
 //   - postfix: A suffix added to the service name to create unique keys for different token types
 //   - enforceBasicKeyring: When true, uses basic keyring without attempting system keyring first
 //
-// Returns an error if the token cannot be saved to any available keyring backend.
+// Returns an error if the token cannot be saved to any available keyring backend, or
+// ErrKeyringUnavailable if no backend could be initialized.
 //
 // Example:
 //
@@ -162,7 +216,7 @@ func (a *IdsecKeyring) SaveToken(profile *models.IdsecProfile, token *auth.Idsec
 		return err
 	}
 	if err := kr.SetPassword(profile.ProfileName, a.serviceName+"-"+postfix, string(tokenData)); err != nil {
-		if !enforceBasicKeyring {
+		if _, isBasicKeyring := kr.(*IdsecBasicKeyring); !isBasicKeyring && !enforceBasicKeyring {
 			a.logger.Warning("Falling back to basic keyring as we failed to save token with keyring [%v]", kr)
 			return a.SaveToken(profile, token, postfix, true)
 		}
@@ -179,8 +233,14 @@ func (a *IdsecKeyring) SaveToken(profile *models.IdsecProfile, token *auth.Idsec
 // It performs automatic token expiration checking and cleanup. For tokens without
 // refresh capability that are expired beyond the grace period, the token is removed
 // and nil is returned. For tokens with refresh capability that have been cached
-// too long, they are also removed and nil is returned. If the initial load fails
-// and enforceBasicKeyring is false, it automatically falls back to basic keyring.
+// too long, they are also removed and nil is returned. If the initial load fails,
+// it automatically falls back to basic keyring, unless the keyring that failed is
+// already the basic keyring, in which case the failure is returned directly. The fallback
+// recurses at most once, because it sets enforceBasicKeyring, which selects the basic
+// keyring and so makes the retry return its error directly rather than fall back again.
+//
+// When no keyring can be initialized at all, ErrKeyringUnavailable is returned without a
+// fallback attempt, since the fallback is the backend that could not be initialized.
 //
 // Parameters:
 //   - profile: The IDSEC profile containing the profile name used as the keyring username
@@ -188,7 +248,8 @@ func (a *IdsecKeyring) SaveToken(profile *models.IdsecProfile, token *auth.Idsec
 //   - enforceBasicKeyring: When true, uses basic keyring without attempting system keyring first
 //
 // Returns the loaded token if found and valid, nil if no token exists or token
-// is expired, or an error if the keyring operation fails.
+// is expired, an error if the keyring operation fails, or ErrKeyringUnavailable if no
+// backend could be initialized.
 //
 // Example:
 //
@@ -207,7 +268,7 @@ func (a *IdsecKeyring) LoadToken(profile *models.IdsecProfile, postfix string, e
 	}
 	tokenData, err := kr.GetPassword(profile.ProfileName, a.serviceName+"-"+postfix)
 	if err != nil {
-		if !enforceBasicKeyring {
+		if _, isBasicKeyring := kr.(*IdsecBasicKeyring); !isBasicKeyring && !enforceBasicKeyring {
 			a.logger.Warning("Falling back to basic keyring as we failed to load token with keyring [%v]", kr)
 			return a.LoadToken(profile, postfix, true)
 		}

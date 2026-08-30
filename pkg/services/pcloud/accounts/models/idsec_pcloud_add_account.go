@@ -9,7 +9,7 @@ type IdsecPCloudAddAccount struct {
 	SecretFile                             string                 `json:"secret_file" mapstructure:"secret_file" desc:"The path to the secret file." flag:"secret-file"`
 	Name                                   string                 `json:"name" mapstructure:"name,omitempty" desc:"Name of the account" flag:"name" maxlength:"170"`
 	SafeName                               string                 `json:"safe_name" mapstructure:"safe_name" desc:"The Safe where the account will be created" flag:"safe-name" validate:"required"`
-	PlatformID                             string                 `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"The platform assigned to this account" flag:"platform-id"`
+	PlatformID                             string                 `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"The platform assigned to this account" flag:"platform-id" validate:"required"`
 	Username                               string                 `json:"username,omitempty" mapstructure:"username,omitempty" desc:"Account user's name" flag:"username"`
 	Address                                string                 `json:"address,omitempty" mapstructure:"address,omitempty" desc:"The name or address of the machine where the account will be used" flag:"address"`
 	SecretType                             string                 `json:"secret_type,omitempty" mapstructure:"secret_type,omitempty" desc:"The type of secret for the acccount (password,key)" flag:"secret-type" choices:"password,key"`

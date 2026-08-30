@@ -110,9 +110,21 @@ func (s *IdsecPCloudApplicationsService) Create(createApplication *applicationsm
 	}
 	delete(createAppJSON, "AppId")
 	createAppJSON["AppID"] = createApplication.AppID
-	response, err := s.postOperation()(context.Background(), applicationsURL, map[string]interface{}{"application": createAppJSON})
+	postBody := map[string]interface{}{"application": createAppJSON}
+	response, existingApp, err := commonpcloud.CreateWithGatewayTimeoutRecovery(
+		func() (*http.Response, error) {
+			return s.postOperation()(context.Background(), applicationsURL, postBody)
+		},
+		func() (*applicationsmodels.IdsecPCloudApplication, error) {
+			return s.Get(&applicationsmodels.IdsecPCloudGetApplication{AppID: createApplication.AppID})
+		},
+	)
 	if err != nil {
 		return nil, err
+	}
+	if existingApp != nil {
+		s.Logger.Info("Application [%s] recovered after gateway timeout", createApplication.AppID)
+		return existingApp, nil
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()

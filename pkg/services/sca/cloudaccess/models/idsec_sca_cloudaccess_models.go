@@ -125,6 +125,6 @@ type IdsecSCACloudAccessElevateResponse struct {
 type IdsecSCACloudAccessElevateActionRequest struct {
 	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AWS, AZURE, GCP)"`
 	WorkspaceID    string `json:"workspace_id" mapstructure:"workspace_id" validate:"required" flag:"workspace-id" desc:"The ID of the workspace (e.g. AWS account ID, Azure subscription ID, GCP project/folder/org ID)"`
-	RoleIDs        string `json:"roleIds" mapstructure:"roleIds" validate:"required" flag:"roleIds" desc:"Comma-separated role IDs to elevate with (max 5)"`
+	RoleIDs        string `json:"roleIds" mapstructure:"role_ids" validate:"required" flag:"role-ids" desc:"Comma-separated role IDs to elevate with (max 5)"`
 	OrganizationID string `json:"organization_id" mapstructure:"organization_id" flag:"organization-id" desc:"The ID of the organization/tenant. Required for Azure, GCP, and AWS org accounts."`
 }

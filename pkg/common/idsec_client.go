@@ -28,10 +28,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"path/filepath"
 
+	filelock "github.com/juju/go4/lock"
 	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry"
@@ -65,6 +67,85 @@ const (
 // "Bearer " prefix). CyberArk PAS/PVWA REST expects the Logon session token as the
 // entire Authorization header value per product documentation.
 const IdsecAuthorizationTokenTypeRaw = "Raw"
+
+// Bounds for acquiring the cross-process advisory lock on the cookie file.
+// Declared as vars (not consts) so tests can override them without patching.
+var (
+	// cookieFileLockTimeout caps how long lockCookieFile waits for the
+	// cross-process advisory lock before giving up and proceeding under the
+	// in-process mutex alone. It mirrors the retry window the persistent
+	// cookie jar uses for its own Save/load locking.
+	cookieFileLockTimeout = 3 * time.Second
+	// cookieFileLockRetry is the delay between attempts to acquire the
+	// cross-process advisory lock while it is held by another owner.
+	cookieFileLockRetry = 50 * time.Millisecond
+)
+
+// cookieFileMu serializes edits to the shared on-disk cookie jar within this
+// process.
+//
+// The persistent cookie jar only guards its in-memory map per instance, so
+// several IdsecClient instances backed by the same cookie file (the default)
+// can be mutated concurrently - for example when UnmarshalCookies is called
+// from multiple goroutines during parallel authentication/refresh. This mutex,
+// combined with the cross-process advisory (flock-style) lock acquired in
+// lockCookieFile, makes such cookie edits safe both within and across processes.
+var cookieFileMu sync.Mutex
+
+// lockCookieFile serializes cookie edits before the caller mutates a cookie jar
+// that is persisted to the shared cookie file.
+//
+// It first takes a process-wide mutex (guaranteeing in-process serialization,
+// which is what prevents the concurrent map access inside the jar's setCookies)
+// and then makes a best-effort attempt to grab the same cross-process advisory
+// lock the persistent cookie jar uses for its own Save/load. Using the jar's
+// lock file keeps cookie edits serialized with the jar's persistence across
+// processes.
+//
+// The cross-process lock is best-effort: the jar's Save/load already flock the
+// file, and the in-process mutex is always held, so a failure to obtain the
+// cross-process lock (for example because another process holds it) must never
+// block cookie handling indefinitely.
+//
+// The returned release function must always be called (typically via defer) to
+// release both the advisory lock and the mutex.
+func lockCookieFile() func() {
+	cookieFileMu.Lock()
+	locked := acquireCookieFileLock()
+	return func() {
+		if locked != nil {
+			_ = locked.Close()
+		}
+		cookieFileMu.Unlock()
+	}
+}
+
+// acquireCookieFileLock makes a best-effort attempt to acquire the cross-process
+// advisory lock on the cookie file, returning the held lock or nil.
+//
+// It skips locking when the cookie file's directory does not exist (the jar's
+// own load does the same), so a missing/misconfigured cookie directory never
+// incurs the retry timeout. Under contention the advisory lock is retried until
+// cookieFileLockTimeout elapses, after which the caller proceeds under the
+// in-process mutex alone.
+func acquireCookieFileLock() io.Closer {
+	cookieFile := cookiejar.DefaultCookieFile()
+	if _, err := os.Stat(filepath.Dir(cookieFile)); err != nil {
+		return nil
+	}
+	lockPath := cookieFile + ".lock"
+	deadline := time.Now().Add(cookieFileLockTimeout)
+	for {
+		locked, err := filelock.Lock(lockPath)
+		if err == nil {
+			return locked
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(cookieFileLockRetry)
+	}
+}
 
 // cookieJSON represents the JSON serializable format of an HTTP cookie.
 //
@@ -223,6 +304,12 @@ func UnmarshalCookies(cookies []byte, cookieJar *cookiejar.Jar) error {
 		urlKey := fmt.Sprintf("https://%s%s", cookie.Domain, cookie.Path)
 		cookieGroups[urlKey] = append(cookieGroups[urlKey], cookie)
 	}
+	// Serialize the jar mutation (and its persistence) against concurrent
+	// callers. Without this, parallel UnmarshalCookies calls that target jars
+	// backed by the shared cookie file race on the underlying file and can
+	// crash inside the jar's internal setCookies.
+	release := lockCookieFile()
+	defer release()
 	for urlKey, cookiesGroup := range cookieGroups {
 		parsedURL, err := url.Parse(urlKey)
 		if err != nil {

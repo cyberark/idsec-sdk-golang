@@ -27,7 +27,7 @@ type TfIdsecCCEAWSAddAccount struct {
 // ⚠️  It exists only for compatibility with Terraform provider.
 type TfIdsecCCEAWSUpdateAccount struct {
 	// ID is the GUID of the onboarded account without hyphens
-	ID string `json:"id,omitempty" mapstructure:"id" desc:"GUID of the added account without hyphens. For example, ef858a2d8f8f4f1781578089bb4ea010."`
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"GUID of the added account without hyphens. For example, ef858a2d8f8f4f1781578089bb4ea010."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add to the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 }

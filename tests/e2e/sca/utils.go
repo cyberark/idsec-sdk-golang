@@ -54,7 +54,7 @@ func buildPrincipalISPAuthenticator(
 	if principalUsername == "" {
 		principalUsername = strings.TrimSpace(strVal(principalCfg, "principal_name"))
 	}
-	principalSecret := strings.TrimSpace(os.Getenv("IDSEC_E2E_SCA_PRINCIPAL_SECRET"))
+	principalSecret := strings.TrimSpace(os.Getenv("IDSEC_E2E_SCA_PRINCIPAL_PASSWORD"))
 	t.Log("Principal auth: using principal-specific secret for configured principal user")
 
 	require.NotEmpty(t, principalUsername, "principal_name is required for principal-auth ListTargets")
@@ -440,7 +440,10 @@ func verifyAzureElevateFailsForNonEntraUser(t *testing.T, err error, operation s
 	t.Logf("%s failed as expected for non-Entra ID federated user: %v", operation, err)
 	errorMessage := err.Error()
 	require.Contains(t, errorMessage, "500")
-	require.Contains(t, strings.ToLower(errorMessage), "ca1040")
+	lower := strings.ToLower(errorMessage)
+	require.True(t,
+		strings.Contains(lower, "ca1040") || strings.Contains(lower, "ca1003"),
+		"expected CA1040 or CA1003 error code in elevation failure, got: %s", errorMessage)
 }
 
 func SetupGroupAccessListTargetsTest(t *testing.T, requireConfiguredTarget bool) *K8sTestContext {

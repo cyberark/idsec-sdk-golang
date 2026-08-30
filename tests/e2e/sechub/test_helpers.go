@@ -91,13 +91,15 @@ func randomGCPProjectNumber() string {
 // randomHashiVaultURL generates a random HashiCorp Vault URL for use in e2e tests.
 //
 // The generated URL follows the format
-// "https://<vault-name>.hashicorpcloud.com/" where <vault-name> is a random
+// "https://<vault-name>.hashicorpcloud.com" where <vault-name> is a random
 // alphanumeric string prefixed with "testvault-".
+//
+// No trailing slash is included because the API normalizes the URL by stripping it.
 //
 // Uses crypto/rand to avoid collisions when tests run concurrently.
 //
 // Returns a fully qualified HashiCorp Vault URL string,
-// e.g. "https://testvault-a1b2c3d4.hashicorpcloud.com/".
+// e.g. "https://testvault-a1b2c3d4.hashicorpcloud.com".
 func randomHashiVaultURL() string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	prefix := "testvault-"
@@ -110,7 +112,7 @@ func randomHashiVaultURL() string {
 		}
 		suffix[i] = charset[idx.Int64()]
 	}
-	return fmt.Sprintf("https://%s%s.hashicorpcloud.com/", prefix, string(suffix))
+	return fmt.Sprintf("https://%s%s.hashicorpcloud.com", prefix, string(suffix))
 }
 
 // randomAzureKeyVaultURL generates a random Azure Key Vault URL for use in e2e tests.
@@ -118,10 +120,12 @@ func randomHashiVaultURL() string {
 // Azure Key Vault names must be 3–24 characters long, contain only alphanumeric
 // characters and hyphens, must start and end with a letter or digit, and cannot
 // contain consecutive hyphens. The generated URL follows the format
-// "https://<vault-name>.vault.azure.net/".
+// "https://<vault-name>.vault.azure.net".
+//
+// No trailing slash is included because the API normalizes the URL by stripping it.
 //
 // Returns a fully qualified Azure Key Vault URL string,
-// e.g. "https://testvault-a1b2c3d4.vault.azure.net/".
+// e.g. "https://testvault-a1b2c3d4.vault.azure.net".
 func randomAzureKeyVaultURL() string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	prefix := "testvault-"
@@ -134,5 +138,5 @@ func randomAzureKeyVaultURL() string {
 		}
 		suffix[i] = charset[idx.Int64()]
 	}
-	return fmt.Sprintf("https://%s%s.vault.azure.net/", prefix, string(suffix))
+	return fmt.Sprintf("https://%s%s.vault.azure.net", prefix, string(suffix))
 }

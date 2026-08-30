@@ -47,7 +47,7 @@ type TfIdsecCCEAzureGetSubscription struct {
 // OPENAPI-CORRELATION: Custom input combining multiple endpoints
 type TfIdsecCCEAzureUpdateSubscription struct {
 	// ID is the Subscription's onboarding ID.
-	ID string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"CCE subscription onboarding ID."`
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE subscription onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 }

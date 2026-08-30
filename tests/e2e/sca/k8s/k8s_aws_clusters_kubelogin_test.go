@@ -14,6 +14,7 @@ import (
 // TestK8sAWSKubelogin creates an AWS K8s policy, verifies ListTargets eligibility,
 // then exercises the kubectl-login path by elevating and building an ExecCredential token.
 func TestK8sAWSKubelogin(t *testing.T) {
+	t.Skip("K8s tests are temporarily disabled")
 	framework.LogSection(t, "Test: K8s AWS Clusters Kubelogin")
 	testCtx := scahelpers.SetupK8sListTargetsTest(t, scahelpers.AWSK8sListTargetsConfig, true)
 

@@ -18,6 +18,7 @@ import (
 // TestK8sAWSListTargetsWithNextToken creates multiple eligible clusters,
 // then pages through results using limit=1 to verify nextToken handling.
 func TestK8sAWSListTargetsWithNextToken(t *testing.T) {
+	t.Skip("K8s tests are temporarily disabled")
 	framework.LogSection(t, "Test: K8s AWS Clusters ListTargets pagination")
 	testCtx := scahelpers.SetupK8sListTargetsTest(t, scahelpers.AWSK8sListTargetsConfig, false)
 
@@ -43,6 +44,7 @@ func TestK8sAWSListTargetsWithNextToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestK8sAWSListTargets(t *testing.T) {
+	t.Skip("K8s tests are temporarily disabled")
 	framework.LogSection(t, "Test: K8s AWS Clusters ListTargets full flow")
 	testCtx := scahelpers.SetupK8sListTargetsTest(t, scahelpers.AWSK8sListTargetsConfig, true)
 

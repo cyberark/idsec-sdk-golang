@@ -5,6 +5,7 @@ package auth
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func TestIdentityServiceUserProactiveRefresh(t *testing.T) {
 		serviceUserRefreshHelperEnv: "true",
 		"IDSEC_BASIC_KEYRING":       "true",
 		"IDSEC_KEYRING_FOLDER":      t.TempDir(),
+		"IDSEC_KEYRING_KEY_FILE":    filepath.Join(t.TempDir(), "keyring.key"),
 		"IDSEC_E2E_PROFILE_NAME":    framework.RandomResourceName("e2e-service-user-refresh"),
 	})
 

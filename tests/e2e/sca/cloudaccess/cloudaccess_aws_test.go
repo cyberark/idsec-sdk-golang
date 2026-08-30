@@ -18,8 +18,6 @@ import (
 // TestCloudAccessAWSListTargetsWithNextToken creates multiple eligible targets,
 // then pages through results using limit=1 to verify nextToken handling.
 func TestCloudAccessAWSListTargetsWithNextToken(t *testing.T) {
-	t.Skip("AWS CloudAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: CloudAccess AWS ListTargets pagination")
 
 	testCtx := scahelpers.SetupCloudAccessListTargetsTest(t, scahelpers.AWSCloudAccessListTargetsConfig, false)
@@ -45,8 +43,6 @@ func TestCloudAccessAWSListTargetsWithNextToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCloudAccessAWSListTargets(t *testing.T) {
-	t.Skip("AWS CloudAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: CloudAccess AWS ListTargets")
 
 	testCtx := scahelpers.SetupCloudAccessListTargetsTest(t, scahelpers.AWSCloudAccessListTargetsConfig, true)
@@ -66,8 +62,6 @@ func TestCloudAccessAWSListTargets(t *testing.T) {
 }
 
 func TestCloudAccessAWSElevate(t *testing.T) {
-	t.Skip("AWS CloudAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: CloudAccess AWS Elevate")
 
 	testCtx := scahelpers.SetupCloudAccessListTargetsTest(t, scahelpers.AWSCloudAccessListTargetsConfig, true)

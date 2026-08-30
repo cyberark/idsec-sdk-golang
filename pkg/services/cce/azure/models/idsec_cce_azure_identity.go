@@ -1,35 +1,15 @@
 package models
 
-// IdsecCCEWorkloadFederation represents workload federation identity details for Azure services.
-// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
-// ⚠️  It exists only for compatibility with Terraform provider.
-// OPENAPI-CORRELATION: WorkloadFederation
-type IdsecCCEWorkloadFederation struct {
-	// IdentityUserID is the identity user identifier.
-	IdentityUserID string `json:"identity_user_id,omitempty" mapstructure:"identity_user_id,omitempty" validate:"required" desc:"Identity user identifier"`
-	// IdentityAppID is the identity application identifier.
-	IdentityAppID string `json:"identity_app_id,omitempty" mapstructure:"identity_app_id,omitempty" validate:"required" desc:"Identity application identifier"`
-	// IdentityAppIssuer is the identity application issuer.
-	IdentityAppIssuer string `json:"identity_app_issuer,omitempty" mapstructure:"identity_app_issuer,omitempty" validate:"required" desc:"Identity application issuer"`
-	// IdentityAppAudience is the identity application audience.
-	IdentityAppAudience string `json:"identity_app_audience,omitempty" mapstructure:"identity_app_audience,omitempty" validate:"required" desc:"Identity application audience"`
-}
+import (
+	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
+)
 
-// TfIdsecCCEAzureGetIdentityParams is the input for retrieving Azure identity federation parameters for active services.
-// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
-// ⚠️  It exists only for compatibility with Terraform provider.
-// OPENAPI-CORRELATION: Input for GET /api/azure/identity_params
-type TfIdsecCCEAzureGetIdentityParams struct {
-}
+// IdsecCCEWorkloadFederation is an alias for the shared workload federation struct.
+// Kept for backward compatibility with existing code that references this type.
+type IdsecCCEWorkloadFederation = ccemodels.IdsecCCEWorkloadFederation
 
-// TfIdsecCCEAzureIdentityParams represents the output of retrieving Azure identity parameters.
-// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
-// ⚠️  It exists only for compatibility with Terraform provider.
-// OPENAPI-CORRELATION: GetIdentityParamsOutput
-type TfIdsecCCEAzureIdentityParams struct {
-	// TenantID is the tenant identifier.
-	TenantID string `json:"tenant_id" mapstructure:"tenant_id" desc:"Azure tenant identifier"`
-	// IdentityParams contains a map of service names to their workload federation identity details.
-	// Keys are service names (e.g., "cds", "dpa", "cloud_onboarding") and values are identity objects.
-	IdentityParams map[string]IdsecCCEWorkloadFederation `json:"identity_params" mapstructure:"identity_params" desc:"Map of service names to identity parameters"`
-}
+// TfIdsecCCEAzureGetIdentityParams is the Azure-specific alias for the shared input type.
+type TfIdsecCCEAzureGetIdentityParams = ccemodels.TfIdsecCCEGetIdentityParams
+
+// TfIdsecCCEAzureIdentityParams is the Azure-specific alias for the shared output type.
+type TfIdsecCCEAzureIdentityParams = ccemodels.TfIdsecCCEIdentityParams

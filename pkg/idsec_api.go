@@ -59,6 +59,7 @@ import (
 	assets "github.com/cyberark/idsec-sdk-golang/pkg/services/access/assets"
 	aws "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	azure "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
+	gcp "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/gcp"
 	connectors "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/connectors"
 	networks "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/networks"
 	poolcomponents "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/poolcomponents"
@@ -98,6 +99,7 @@ import (
 	certificates "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/certificates"
 	db2 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/db"
 	dbstrongaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/dbstrongaccounts"
+	doctor "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/doctor"
 	k8s3 "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/k8s"
 	dbsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsdb"
 	vmsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/secretsvm"
@@ -300,6 +302,19 @@ func (api *IdsecAPI) CceAzure() (*azure.IdsecCCEAzureService, error) {
 	}
 	var baseService services.IdsecService = service
 	api.services[azure.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) CceGcp() (*gcp.IdsecCCEGCPService, error) {
+	if serviceIfs, ok := api.services[gcp.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*gcp.IdsecCCEGCPService), nil
+	}
+	service, err := gcp.ServiceGenerator(api.loadServiceAuthenticators(gcp.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[gcp.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 
@@ -807,6 +822,19 @@ func (api *IdsecAPI) SiaDbstrongaccounts() (*dbstrongaccounts.IdsecSIADBStrongAc
 	}
 	var baseService services.IdsecService = service
 	api.services[dbstrongaccounts.ServiceConfig.ServiceName] = &baseService
+	return service, nil
+}
+
+func (api *IdsecAPI) SiaDoctor() (*doctor.IdsecSIADoctorService, error) {
+	if serviceIfs, ok := api.services[doctor.ServiceConfig.ServiceName]; ok {
+		return (*serviceIfs).(*doctor.IdsecSIADoctorService), nil
+	}
+	service, err := doctor.ServiceGenerator(api.loadServiceAuthenticators(doctor.ServiceConfig)...)
+	if err != nil {
+		return nil, err
+	}
+	var baseService services.IdsecService = service
+	api.services[doctor.ServiceConfig.ServiceName] = &baseService
 	return service, nil
 }
 

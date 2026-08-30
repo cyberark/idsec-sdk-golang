@@ -397,17 +397,42 @@ func (s *IdsecSIAAccessService) uninstallConnectorOnMachine(
 	return nil
 }
 
+// buildReachabilityTargets builds the "targets" payload for a reachability test.
+// An explicit Targets list takes precedence; otherwise the single
+// TargetHostname/TargetPort pair is used. When no hostname is given (e.g. a
+// backend-only check) it returns nil so no targets are sent.
+func (s *IdsecSIAAccessService) buildReachabilityTargets(req *accessmodels.IdsecSIATestConnectorReachability) []map[string]interface{} {
+	if len(req.Targets) > 0 {
+		targets := make([]map[string]interface{}, 0, len(req.Targets))
+		for _, t := range req.Targets {
+			targets = append(targets, map[string]interface{}{
+				"hostname": t.Hostname,
+				"port":     t.Port,
+			})
+		}
+		return targets
+	}
+	if req.TargetHostname != "" {
+		return []map[string]interface{}{
+			{
+				"hostname": req.TargetHostname,
+				"port":     req.TargetPort,
+			},
+		}
+	}
+	return nil
+}
+
 // TestConnectorReachability tests the reachability of a connector.
 func (s *IdsecSIAAccessService) TestConnectorReachability(testReachabilityRequest *accessmodels.IdsecSIATestConnectorReachability) (*accessmodels.IdsecSIAReachabilityTestResponse, error) {
 	s.Logger.Info("Starting connector reachability test. ConnectorID: %s", testReachabilityRequest.ConnectorID)
-	var testReachabilityRequestJSON = map[string]interface{}{
-		"targets": []map[string]interface{}{
-			{
-				"hostname": testReachabilityRequest.TargetHostname,
-				"port":     testReachabilityRequest.TargetPort,
-			},
-		},
+	testReachabilityRequestJSON := map[string]interface{}{
 		"checkBackendEndpoints": testReachabilityRequest.CheckBackendEndpoints,
+	}
+	// Only send targets when there is at least one to test. A backend-only check
+	// (empty hostname and no explicit Targets) must not carry an empty target.
+	if targets := s.buildReachabilityTargets(testReachabilityRequest); len(targets) > 0 {
+		testReachabilityRequestJSON["targets"] = targets
 	}
 	response, err := s.ISPClient().Post(context.Background(), fmt.Sprintf(connectorTestReachabilityURL, testReachabilityRequest.ConnectorID), testReachabilityRequestJSON)
 	if err != nil {
@@ -565,24 +590,40 @@ func (s *IdsecSIAAccessService) ListConnectors() (*accessmodels.IdsecSIAConnecto
 		}
 	}
 
-	response, err := getFn(context.Background(), connectorsURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list connectors - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-	}
+	// The connectors endpoint is paginated; follow continuationToken until it is
+	// empty so every connector is returned (not just the first page).
+	aggregated := &accessmodels.IdsecSIAConnectorsListResponse{}
+	var queryParams map[string]string
+	for {
+		response, err := getFn(context.Background(), connectorsURL, queryParams)
+		if err != nil {
+			return nil, err
+		}
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("failed to list connectors - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		}
 
-	listResponseJSON, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		return nil, err
+		listResponseJSON, err := common.DeserializeJSONSnake(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		var page accessmodels.IdsecSIAConnectorsListResponse
+		if err = mapstructure.Decode(listResponseJSON, &page); err != nil {
+			return nil, nil
+		}
+
+		aggregated.Items = append(aggregated.Items, page.Items...)
+
+		if page.ContinuationToken == "" {
+			break
+		}
+		if queryParams == nil {
+			queryParams = map[string]string{}
+		}
+		queryParams["continuationToken"] = page.ContinuationToken
 	}
-	var listResponse accessmodels.IdsecSIAConnectorsListResponse
-	err = mapstructure.Decode(listResponseJSON, &listResponse)
-	if err != nil {
-		return nil, nil
-	}
-	return &listResponse, nil
+	aggregated.Count = len(aggregated.Items)
+	return aggregated, nil
 }
 
 // UpdateConnectorMaintenanceMode updates (enable/disable) maintenance mode on a connector.

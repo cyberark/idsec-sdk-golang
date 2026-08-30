@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,6 +12,43 @@ import (
 	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/cce/internal"
 )
+
+// TestDeleteOrganizationServices_SendsOnboardingType is the organization-level
+// counterpart: the delete-services request must carry
+// onboarding_type=terraform_provider so the API enforces that the organization was
+// onboarded via Terraform.
+func TestDeleteOrganizationServices_SendsOnboardingType(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+
+	var gotQuery map[string][]string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				gotQuery = r.URL.Query()
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	err := service.deleteOrganizationServices(&awsmodels.TfIdsecCCEAWSDeleteOrganizationServices{
+		ID:           onboardingID,
+		ServiceNames: []string{"dpa"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"dpa"}, gotQuery["services_names"],
+		"delete-services must send the services to remove via services_names")
+	require.Equal(t, []string{ccemodels.TerraformProvider}, gotQuery["onboarding_type"],
+		"delete-services must send onboarding_type=terraform_provider so the API enforces the Terraform onboarding type")
+}
 
 func TestOrganization_Success(t *testing.T) {
 	// Define the expected JSON response (with nullable fields)
@@ -603,4 +641,102 @@ func TestUpdateOrganization_WithServiceParameters(t *testing.T) {
 	require.Equal(t, region, result.Region)
 	require.Equal(t, displayName, result.DisplayName)
 	require.Equal(t, status, result.Status)
+}
+
+// TestUpdateOrganization_SendsServiceParameterChange is a regression test for the case the user hit:
+// changing a service_parameter (secrets_hub's SecretsManagerRegions) on an already-onboarded service
+// with an unchanged version must be sent to the org add/update-services endpoint, otherwise the change
+// is applied to local AWS resources but never propagates to CCE. An already-onboarded service whose
+// parameters did NOT change (sca) must be omitted from the request so the (idempotent) endpoint does not
+// reject it with a 501 for a service that is not update-enabled.
+func TestUpdateOrganization_SendsServiceParameterChange(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+
+	// Current state: sca and secrets_hub onboarded; secrets_hub currently deployed with two regions.
+	currentOrganizationJSON := `{
+		"id": "` + onboardingID + `",
+		"organization_root_id": "r-abc123",
+		"management_account_id": "123456789012",
+		"organization_id": "o-abc123def456",
+		"onboarding_type": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["sca", "secrets_hub"],
+		"services_data": [
+			{"name": "sca", "version": "0.0.3", "status": "Completely added", "errors": []},
+			{"name": "secrets_hub", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"sca": {"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRole", "ssoRegion": "us-east-1"},
+			"secrets_hub": {"SecretsHubRoleArn": "arn:aws:iam::123456789012:role/SecretsHubRole", "SecretsManagerRegions": ["us-east-1", "us-east-2"]}
+		},
+		"display_name": "Test Organization",
+		"status": "Completely added"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	getCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, onboardingID) && getCallCount == 0 {
+					getCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: currentOrganizationJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.Contains(r.URL.Path, "services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, onboardingID) && getCallCount > 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: currentOrganizationJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Desired: sca unchanged, secrets_hub regions reduced to a single region.
+	_, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID: onboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]any{"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRole"}},
+			{ServiceName: ccemodels.SecretsHub, Version: "0.0.3", Resources: map[string]any{"SecretsHubRoleArn": "arn:aws:iam::123456789012:role/SecretsHubRole"}},
+		},
+		ServiceParameters: map[string]map[string]interface{}{
+			"sca":         {"ssoRegion": "us-east-1"},
+			"secrets_hub": {"SecretsManagerRegions": []string{"us-east-1"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "a service_parameter change must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"secrets_hub"`, "the changed service (secrets_hub) must be sent")
+	require.NotContains(t, postBody, `"serviceName":"sca"`,
+		"the unchanged service (sca) must NOT be sent, or the API may reject the request with 501")
+	require.Zero(t, deleteCount, "a parameter change must not delete any service")
 }

@@ -250,7 +250,7 @@ func (s *IdsecSCACloudAccessService) Elevate(req *cloudaccessmodels.IdsecSCAClou
 		return nil, fmt.Errorf("workspaceId cannot be empty")
 	}
 	if strings.TrimSpace(req.RoleIDs) == "" {
-		return nil, fmt.Errorf("roleIds cannot be empty")
+		return nil, fmt.Errorf("role-ids cannot be empty")
 	}
 
 	roleIDs := sca.SplitCommaSeparated(req.RoleIDs)

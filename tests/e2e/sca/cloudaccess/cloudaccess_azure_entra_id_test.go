@@ -19,7 +19,6 @@ import (
 // then pages through results using limit=1 to verify nextToken handling.
 func TestCloudAccessAzureEntraIDListTargetsWithNextToken(t *testing.T) {
 	t.Skip("Azure CloudAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: CloudAccess Azure Entra ID ListTargets pagination")
 
 	testCtx := scahelpers.SetupCloudAccessListTargetsTest(t, scahelpers.AzureEntraIDCloudAccessListTargetsConfig, false)
@@ -45,8 +44,6 @@ func TestCloudAccessAzureEntraIDListTargetsWithNextToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCloudAccessAzureEntraIDListTargets(t *testing.T) {
-	t.Skip("Azure CloudAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: CloudAccess Azure Entra ID ListTargets")
 
 	testCtx := scahelpers.SetupCloudAccessListTargetsTest(t, scahelpers.AzureEntraIDCloudAccessListTargetsConfig, true)
@@ -66,8 +63,6 @@ func TestCloudAccessAzureEntraIDListTargets(t *testing.T) {
 }
 
 func TestCloudAccessAzureEntraIDElevate(t *testing.T) {
-	t.Skip("Azure CloudAccess tests are temporarily disabled")
-
 	const (
 		displayName      = "CloudAccess Azure Entra ID Elevate"
 		policyNamePrefix = "sca_cli_cloudaccess_azure_entra_id_elevate_e2e"

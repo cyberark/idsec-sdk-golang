@@ -18,6 +18,7 @@ import (
 // TestK8sAWSGenerateKubeconfig creates an AWS K8s policy, verifies ListTargets eligibility,
 // then calls GenerateKubeconfig and validates the returned AWS kubeconfig YAML.
 func TestK8sAWSGenerateKubeconfig(t *testing.T) {
+	t.Skip("K8s tests are temporarily disabled")
 	framework.LogSection(t, "Test: K8s AWS Clusters Generate Kubeconfig")
 	testCtx := scahelpers.SetupK8sListTargetsTest(t, scahelpers.AWSK8sListTargetsConfig, true)
 

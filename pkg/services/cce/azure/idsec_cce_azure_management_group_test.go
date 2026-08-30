@@ -74,6 +74,57 @@ func TestTfAddManagementGroup_Success(t *testing.T) {
 	require.Equal(t, "mg-test-group", result.ManagementGroupID)
 }
 
+func TestTfAddManagementGroup_IncludesServiceVersion(t *testing.T) {
+	createResponseJSON := `{"id": "mgmt-group-123"}`
+	getResponseJSON := `{
+		"id": "mgmt-group-123",
+		"onboardingType": "terraform_provider",
+		"region": "eastus",
+		"displayName": "Test Management Group",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012",
+		"managementGroupId": "mg-test-group"
+	}`
+
+	var capturedVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest:    captureFirstServiceVersion(&capturedVersion),
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/mgmtgroup/mgmt-group-123"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfAddManagementGroup(&azuremodels.TfIdsecCCEAzureAddManagementGroup{
+		EntraID:           "12345678-1234-1234-1234-123456789012",
+		ManagementGroupID: "mg-test-group",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Version:     "4.0.1",
+				Resources:   map[string]interface{}{},
+			},
+		},
+		CCEResources: map[string]interface{}{},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "4.0.1", capturedVersion, "service version must be included in the create management group request payload")
+}
+
 func TestTfManagementGroup_Success(t *testing.T) {
 	responseJSON := `{
 		"id": "mgmt-group-123",

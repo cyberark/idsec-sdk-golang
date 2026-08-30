@@ -160,8 +160,12 @@ func TestAddOrganizationAccountSync_With404AndQuickRetry(t *testing.T) {
 	// Test the retry logic with fast intervals
 	// This test verifies that the sync function polls Organization endpoint for scan completion
 
-	// Use a recent timestamp for the completed scan
-	completedScanTime := time.Now().Add(1 * time.Second).Format(time.RFC3339)
+	// completedScanTime must be safely AFTER the scanStartTime the code captures inside the call
+	// (time.Now() taken just before triggering the scan). We can't predict how long the initial
+	// add-account round-trip and client setup take before that point, so use a comfortably large
+	// future offset rather than a tight +1s that a slow first request can overrun (which would make
+	// scanTime.After(scanStartTime) never true and time out the poll).
+	completedScanTime := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
 	oldScanTime := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
 
 	addAccountCallCount := 0
@@ -301,8 +305,11 @@ func TestAddOrganizationAccountSync_With400ScanInProgress(t *testing.T) {
 	// Test handling of 400 "scan is in progress" error
 	// This test verifies that when we get 400 scan-in-progress, we poll without triggering a new scan
 
-	// Use a recent timestamp for the completed scan
-	completedScanTime := time.Now().Add(1 * time.Second).Format(time.RFC3339Nano)
+	// completedScanTime must be safely AFTER the scanStartTime the code captures inside the call
+	// (time.Now() taken just before it starts polling). Use a comfortably large future offset rather
+	// than a tight +1s that a slow first request can overrun (which would make
+	// scanTime.After(scanStartTime) never true and time out the poll).
+	completedScanTime := time.Now().Add(1 * time.Hour).Format(time.RFC3339Nano)
 
 	addAccountCallCount := 0
 	scanCallCount := 0
@@ -522,15 +529,44 @@ func TestTfUpdateOrganizationAccount_Success(t *testing.T) {
 }
 
 func TestTfUpdateOrganizationAccount_NoServicesToAdd(t *testing.T) {
-	// Test case where account already has all desired services (no update needed)
+	// Account already has all desired services ("Completely added") and their currently-deployed
+	// resources (exposed under "parameters") match the desired resources exactly. Nothing changed,
+	// so the SDK must send NO add-account request (unchanged services are omitted).
+	accountJSON := `{
+		"id": "` + mockAccountOnboardingID + `",
+		"account_id": "` + mockAWSAccountID + `",
+		"organization_id": "` + mockOrganizationOnboardingID + `",
+		"onboarding_type": "` + mockOnboardingType + `",
+		"services": ["dpa", "sca"],
+		"services_data": [
+			{"name": "dpa", "status": "Completely added", "errors": []},
+			{"name": "sca", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::` + mockAWSAccountID + `:role/DpaRole"},
+			"sca": {"ScaRoleArn": "arn:aws:iam::` + mockAWSAccountID + `:role/ScaRole"}
+		},
+		"status": "Completely added"
+	}`
+
+	var postCallCount int
 	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
 		{
-			// Get account details - returns account with both "dpa" and "sca" services
+			// Add/re-send services - must NOT be called since nothing changed.
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusNoContent,
+			ResponseBody: ``,
+			OnRequest:    func(r *http.Request) { postCallCount++ },
+		},
+		{
+			// Get account details - returns account with both "dpa" and "sca" services and their params
 			Matcher: func(r *http.Request) bool {
 				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
 			},
 			StatusCode:   http.StatusOK,
-			ResponseBody: mockAccountDetailsWithMultipleServicesJSON,
+			ResponseBody: accountJSON,
 		},
 	})
 	defer cleanup()
@@ -559,11 +595,12 @@ func TestTfUpdateOrganizationAccount_NoServicesToAdd(t *testing.T) {
 	// Call TfUpdateOrganizationAccount
 	account, err := service.TfUpdateOrganizationAccount(input)
 
-	// Assertions - should return account without making POST request
+	// Assertions - nothing changed, so no add-account request is sent, and the account is returned.
 	require.NoError(t, err)
 	require.NotNil(t, account)
 	require.Equal(t, mockAccountOnboardingID, account.ID)
 	require.Equal(t, mockAWSAccountID, account.AccountID)
+	require.Zero(t, postCallCount, "unchanged already-onboarded services must NOT be re-sent")
 }
 
 func TestTfUpdateOrganizationAccount_AccountNotFound(t *testing.T) {
@@ -846,8 +883,10 @@ func TestTfUpdateOrganizationAccount_WithServiceParameters(t *testing.T) {
 }
 
 func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
-	// Test that only services with "Waiting for deployment" status trigger re-addition
-	// Services with "Completely added" or other statuses (like "In progress") should be skipped
+	// Settled services are (re)sent so in-place resource changes reach the API's idempotent
+	// resource diff: "Completely added" and "Waiting for deployment" services are both
+	// included. Only services in a transient/mid-operation status (like "In progress") are
+	// skipped, to avoid the API rejecting the request while the service is still processing.
 	accountWithMixedServiceStatusesJSON := `{
 		"id": "` + mockAccountOnboardingID + `",
 		"account_id": "` + mockAWSAccountID + `",
@@ -891,7 +930,8 @@ func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
 			},
 		},
 		{
-			// POST to add services - should only add SCA (status: "Waiting for deployment")
+			// POST to add/re-send services - should include DPA ("Completely added") and SCA
+			// ("Waiting for deployment"), but NOT secrets_hub ("In progress").
 			Matcher: func(r *http.Request) bool {
 				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
 					// Capture request body to verify which services are being added
@@ -977,15 +1017,16 @@ func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
 	require.Equal(t, mockAccountOnboardingID, account.ID)
 	require.Equal(t, mockAWSAccountID, account.AccountID)
 
-	// Verify POST was called (at least one service needs to be added)
+	// Verify POST was called (settled services need to be (re)sent)
 	require.Equal(t, 1, postCallCount, "Expected POST to be called once")
 
-	// Verify the POST body contains ONLY SCA (status: "Waiting for deployment")
-	// DPA should NOT be included since it's already "Completely added"
-	// SecretsHub should NOT be included since it has "In progress" status (not "Waiting for deployment")
-	require.NotContains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should not be in POST body (already 'Completely added')")
+	// Verify the POST body contains DPA and SCA but NOT secrets_hub:
+	// - DPA ("Completely added") is re-sent so any resources change reaches the API's diff
+	// - SCA ("Waiting for deployment") is re-sent
+	// - SecretsHub ("In progress") is skipped to avoid interfering with its in-flight deployment
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should be in POST body (re-sent so resource changes apply)")
 	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body (status: 'Waiting for deployment')")
-	require.NotContains(t, capturedPostBody, `"serviceName":"secrets_hub"`, "SecretsHub should NOT be in POST body (status: 'In progress', not 'Waiting for deployment')")
+	require.NotContains(t, capturedPostBody, `"serviceName":"secrets_hub"`, "SecretsHub should NOT be in POST body (status: 'In progress')")
 }
 
 func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.T) {
@@ -1083,4 +1124,76 @@ func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.
 	// Verify both services are in the POST body (both need re-addition)
 	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should be in POST body")
 	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body")
+}
+
+// TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange is a regression
+// guard for the "silent no-op on resource change" bug on organization member accounts. The SDK
+// used to skip fully-deployed services entirely, so changing an already-deployed service's
+// resources produced a green apply with no API call. The update must now re-send fully-deployed
+// services (carrying their new resources) to the organization add-account endpoint, which diffs
+// resources server-side and applies the change.
+func TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// First GET - account with DPA already "Completely added"
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					// A changed role ARN for the already-deployed DPA service.
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRoleUPDATED",
+				},
+			},
+		},
+	}
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "a resources change on a fully-deployed service must trigger the add-account call")
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the fully-deployed service must be re-sent")
+	require.Contains(t, capturedPostBody, "DpaRoleUPDATED", "the re-sent service must carry the new resources")
 }

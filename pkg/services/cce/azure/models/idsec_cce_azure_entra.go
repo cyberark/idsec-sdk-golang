@@ -41,7 +41,7 @@ type TfIdsecCCEAzureGetEntra struct {
 // OPENAPI-CORRELATION: Custom input combining multiple endpoints
 type TfIdsecCCEAzureUpdateEntra struct {
 	// ID is the Entra tenant's onboarding ID.
-	ID string `json:"id,omitempty" mapstructure:"id,omitempty" desc:"CCE Microsoft Entra tenant onboarding ID."`
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE Microsoft Entra tenant onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add to the Microsoft Entra tenant (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 }

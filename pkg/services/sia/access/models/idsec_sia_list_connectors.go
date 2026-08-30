@@ -27,9 +27,15 @@ type IdsecSIAConnector struct {
 	LastRotationJobStatusDescription string `json:"last_rotation_job_status_description,omitempty" mapstructure:"last_rotation_job_status_description" description:"The description of the last certificate rotation job error, if one exists."`     //nolint:tagliatelle
 }
 
+// Connector status values returned by the SIA API.
+const (
+	ConnectorStatusActive   = "Active"
+	ConnectorStatusInactive = "Inactive"
+)
+
 // IdsecSIAConnectorsListResponse represents the response for listing connectors in Idsec SIA.
 type IdsecSIAConnectorsListResponse struct {
-	Count             int                 `json:"count" `
-	Items             []IdsecSIAConnector `json:"items" `
-	ContinuationToken string              `json:"continuationToken" ` //nolint:tagliatelle
+	Count             int                 `json:"count" mapstructure:"count"`
+	Items             []IdsecSIAConnector `json:"items" mapstructure:"items"`
+	ContinuationToken string              `json:"continuationToken" mapstructure:"continuation_token"` //nolint:tagliatelle
 }

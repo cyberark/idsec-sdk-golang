@@ -265,6 +265,346 @@ func TestTfAddAccountServices_IncludesServiceVersion(t *testing.T) {
 	require.Equal(t, "4.0.1", capturedVersion, "service version must be included in the add services request payload")
 }
 
+// TestTfUpdateAccount_RequestsAccountByID is a regression guard for the empty-ID
+// update bug. The Terraform provider (v0.5.0, PR #197) began stripping computed
+// attributes from the update payload; the CCE account resource declared "id" as
+// computed but did not preserve it via ImportID, so TfUpdateAccount received an
+// empty ID and issued `GET /api/aws/programmatic/account/` (no id) which the
+// tenant rejects with a generic 403. This test locks the SDK contract: the update
+// flow must fetch the account by its real onboarding id, never the bare
+// collection path.
+func TestTfUpdateAccount_RequestsAccountByID(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"status": "Completely added"
+	}`
+
+	var gotPaths []string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			// The update flow now upserts the desired services through the add/update-services
+			// endpoint; accept it so the flow reaches the get-details reads under assertion.
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+			OnRequest: func(r *http.Request) {
+				gotPaths = append(gotPaths, r.URL.Path)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Desired services == current services, so no service is removed; the flow still
+	// performs the get-details reads (the ones that 403'd on empty id) under assertion.
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID: onboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Resources: map[string]any{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotEmpty(t, gotPaths, "update must fetch account details at least once")
+	for _, p := range gotPaths {
+		require.Falsef(t, strings.HasSuffix(p, "/account/"),
+			"update requested the bare collection path %q (empty id -> 403 regression)", p)
+		require.Truef(t, strings.HasSuffix(p, "/account/"+onboardingID),
+			"update must request the account by its onboarding id, got %q", p)
+	}
+}
+
+// TestTfUpdateAccount_UpsertsChangedServiceInput is a regression guard for two related bugs:
+//  1. the original "silent no-op on version change": TfUpdateAccount used to send only the
+//     service names that were new, so bumping the version of an already-onboarded service
+//     produced a green apply with no API call and no server change; and
+//  2. the follow-up "501 on unchanged service": naively re-sending the full desired list makes
+//     the API reject already-onboarded services that are not an upgrade (e.g. dpa) with a 501,
+//     because the add/update-services endpoint only supports adding new services or upgrading a
+//     version - not re-submitting an unchanged service.
+//
+// So the update must send only new services and version-changed services: here dpa is unchanged
+// (0.0.3 -> 0.0.3) and must be omitted, while sca is upgraded (0.0.3 -> 0.0.6) and must be sent.
+func TestTfUpdateAccount_UpsertsChangedServiceInput(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// dpa and sca are already onboarded at 0.0.3; the desired input keeps dpa at 0.0.3 and bumps sca to 0.0.6.
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa", "sca"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []},
+			{"name": "sca", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"status": "Completely added"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID: onboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{}},
+			{ServiceName: ccemodels.SCA, Version: "0.0.6", Resources: map[string]any{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount,
+		"a version change on one service must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"sca"`, "the upgraded service (sca) must be sent")
+	require.Contains(t, postBody, `"version":"0.0.6"`, "the new sca version must be sent")
+	require.NotContains(t, postBody, `"serviceName":"dpa"`,
+		"the unchanged service (dpa) must NOT be sent, or the API rejects the request with 501")
+	require.Zero(t, deleteCount,
+		"a version change on an existing service must not delete any service")
+}
+
+// TestTfUpdateAccount_SendsResourceChange verifies that a resources-only change (same version) on an
+// already-onboarded standalone-account service is detected and sent, while a service whose resources did
+// not change is omitted (so the endpoint does not reject it with a 501 for a non-upgrade-enabled service).
+func TestTfUpdateAccount_SendsResourceChange(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// dpa and sca are onboarded at 0.0.3; the GET exposes their currently-deployed resources under "parameters".
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa", "sca"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []},
+			{"name": "sca", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"},
+			"sca": {"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRoleOld"}
+		},
+		"status": "Completely added"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID: onboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			// dpa: unchanged resources -> must be omitted.
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
+			// sca: resources changed (same version) -> must be sent.
+			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]any{"ScaRoleArn": "arn:aws:iam::123456789012:role/ScaRoleNew"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "a resources change on one service must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"sca"`, "the changed service (sca) must be sent")
+	require.Contains(t, postBody, "ScaRoleNew", "the new sca resource value must be sent")
+	require.NotContains(t, postBody, `"serviceName":"dpa"`,
+		"the unchanged service (dpa) must NOT be sent, or the API may reject the request with 501")
+	require.Zero(t, deleteCount, "a resources change on an existing service must not delete any service")
+}
+
+// TestTfUpdateAccount_OnboardedServiceWithoutVersionIsNotResent guards a subtle 501 regression:
+// whether a service is "already onboarded" must be decided by the authoritative "services" name
+// list, NOT by the presence of a version in "servicesData". The API frequently omits the version
+// for an onboarded service; if onboarding were keyed off the version map, such a service would be
+// misclassified as NEW and re-sent to the add/update-services endpoint, which rejects an
+// already-onboarded, non-upgrade service with 501 FEATURE_NOT_IMPLEMENTED.
+//
+// Here dpa is onboarded but has no version in servicesData, and the desired input leaves it
+// unchanged (no version), so it must NOT be sent; sca is brand-new and must be sent.
+func TestTfUpdateAccount_OnboardedServiceWithoutVersionIsNotResent(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// dpa is onboarded but its servicesData entry carries no version (as the API often returns);
+	// sca is not onboarded at all.
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "status": "Completely added", "errors": []}
+		],
+		"status": "Completely added"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID: onboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Resources: map[string]any{}},
+			{ServiceName: ccemodels.SCA, Resources: map[string]any{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount,
+		"only the brand-new service (sca) should trigger an add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"sca"`, "the new service (sca) must be sent")
+	require.NotContains(t, postBody, `"serviceName":"dpa"`,
+		"an onboarded service without a reported version must NOT be re-sent, or the API rejects it with 501")
+	require.Zero(t, deleteCount,
+		"no desired service was dropped, so nothing must be removed")
+}
+
+// TestDeleteAccountServices_SendsOnboardingType verifies the delete-services request
+// carries onboarding_type=terraform_provider so the API can enforce that the account
+// was onboarded via Terraform. The remove-services endpoint reads onboarding_type from
+// the single-value queryStringParameters and ignores the API-Gateway-mirrored copy in
+// multiValueQueryStringParameters.
+func TestDeleteAccountServices_SendsOnboardingType(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+
+	var gotQuery map[string][]string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete &&
+					strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				gotQuery = r.URL.Query()
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	err := service.DeleteAccountServices(&awsmodels.TfIdsecCCEAWSDeleteAccountServices{
+		ID:           onboardingID,
+		ServiceNames: []string{"dpa"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"dpa"}, gotQuery["services_names"],
+		"delete-services must send the services to remove via services_names")
+	require.Equal(t, []string{ccemodels.TerraformProvider}, gotQuery["onboarding_type"],
+		"delete-services must send onboarding_type=terraform_provider so the API enforces the Terraform onboarding type")
+}
+
 func TestAccount_Success(t *testing.T) {
 	region := "us-east-1"
 	displayName := "Test Account"

@@ -846,9 +846,20 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 			addAccountJSON["remoteMachinesAccess"].(map[string]interface{})["accessRestrictedToRemoteMachines"] = addAccount.AccessRestrictedToRemoteMachines
 		}
 	}
-	response, err := s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
+	response, existingAccount, err := commonpcloud.CreateWithGatewayTimeoutRecovery(
+		func() (*http.Response, error) {
+			return s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
+		},
+		func() (*accountsmodels.IdsecPCloudAccount, error) {
+			return s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountName: addAccount.Name})
+		},
+	)
 	if err != nil {
 		return nil, err
+	}
+	if existingAccount != nil {
+		s.Logger.Info("Account [%s] recovered after gateway timeout", addAccount.Name)
+		return existingAccount, nil
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()

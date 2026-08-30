@@ -19,6 +19,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/iancoleman/strcase v0.3.0
+	github.com/juju/go4 v0.0.0-20160222163258-40d72ab9641a
 	github.com/juju/persistent-cookiejar v1.0.0
 	github.com/masterzen/winrm v0.0.0-20240702205601-3fad6e106085
 	github.com/mitchellh/mapstructure v1.5.0
@@ -63,7 +64,6 @@ require (
 	github.com/jcmturner/goidentity/v6 v6.0.1 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
-	github.com/juju/go4 v0.0.0-20160222163258-40d72ab9641a // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

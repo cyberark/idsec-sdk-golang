@@ -442,12 +442,13 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		require.NoError(t, err)
 
 		// 1. CREATE
+		hashiVaultURL := randomHashiVaultURL()
 		secretStore := creteSecretStoreResourceForTest(t, ctx,
 			e2eSecretStoreNamePrefix,
 			"Initial description",
 			"HASHICORP_VAULT",
 			secretstoresmodels.IdsecSecHubSecretStoreData{
-				HashiVaultURL:      randomHashiVaultURL(),
+				HashiVaultURL:      hashiVaultURL,
 				MountPath:          "secret/",
 				RoleName:           "secrets-hub-role",
 				AuthenticationPath: "auth/jwt/login/",
@@ -457,6 +458,7 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 			})
 
 		t.Logf("SecretStore created successfully: %s (ID: %s)", secretStore.Name, secretStore.ID)
+		assert.Equal(t, hashiVaultURL, secretStore.Data.HashiVaultURL)
 		assert.Equal(t, "secret/", secretStore.Data.MountPath)
 		assert.Equal(t, "auth/jwt/login/", secretStore.Data.AuthenticationPath)
 
@@ -468,6 +470,7 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		require.NoError(t, err, "Failed to retrieve secret store")
 		assert.Equal(t, secretStore.Name, retrievedSecretStore.Name)
 		assert.Equal(t, "Initial description", retrievedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, retrievedSecretStore.Data.HashiVaultURL)
 		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
 		assert.Equal(t, "auth/jwt/login/", retrievedSecretStore.Data.AuthenticationPath)
 
@@ -475,19 +478,25 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		t.Logf("Step 3: Updating secret store: %s", secretStore.ID)
 		updatedDescription := "Updated description"
 		updatedRoleName := "secrets-hub-role-updated"
+		updatedAuthPath := "auth/jwt/v2/login/"
 		updatedSecretStore, err := secretStoresSvc.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
 			ID:          secretStore.ID,
 			Name:        secretStore.Name,
 			Description: updatedDescription,
 			Data: &secretstoresmodels.IdsecSecHubSecretStoreData{
 				RoleName:           updatedRoleName,
-				AuthenticationPath: "auth/jwt/login/",
+				AuthenticationPath: updatedAuthPath,
+				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
+					ConnectionType: "PUBLIC",
+				},
 			},
 		})
 		require.NoError(t, err, "Failed to update secret store")
 		assert.Equal(t, updatedDescription, updatedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, updatedSecretStore.Data.HashiVaultURL)
+		assert.Equal(t, updatedRoleName, updatedSecretStore.Data.RoleName)
+		assert.Equal(t, updatedAuthPath, updatedSecretStore.Data.AuthenticationPath)
 		assert.Equal(t, "secret/", updatedSecretStore.Data.MountPath)
-		assert.Equal(t, "auth/jwt/login/", updatedSecretStore.Data.AuthenticationPath)
 
 		// Verify update
 		retrievedSecretStore, err = secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
@@ -495,8 +504,97 @@ func TestSecretStoreLifecycleHashi(t *testing.T) {
 		})
 		require.NoError(t, err, "Failed to retrieve updated secret store")
 		assert.Equal(t, updatedDescription, retrievedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, retrievedSecretStore.Data.HashiVaultURL)
+		assert.Equal(t, updatedRoleName, retrievedSecretStore.Data.RoleName)
+		assert.Equal(t, updatedAuthPath, retrievedSecretStore.Data.AuthenticationPath)
+		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
+
+		t.Log("SecretStore lifecycle completed successfully")
+		// 4. DELETE happens automatically via cleanup
+	}, secretstores.ServiceConfig)
+}
+
+// TestSecretStoreLifecycleHashiEnt tests the complete CRUD lifecycle for a HashiCorp Vault Enterprise secret store: Create -> Get -> Update -> Delete.
+func TestSecretStoreLifecycleHashiEnt(t *testing.T) {
+	framework.Run(t, func(ctx *framework.TestContext) {
+		framework.LogSection(t, "Test: Secret Store Lifecycle HashiCorp Vault Enterprise (CRUD)")
+
+		// Get the SecHub SecretStores service
+		secretStoresSvc, err := ctx.API.SechubSecretstores()
+		require.NoError(t, err)
+
+		// 1. CREATE
+		hashiVaultURL := randomHashiVaultURL()
+		secretStore := creteSecretStoreResourceForTest(t, ctx,
+			e2eSecretStoreNamePrefix,
+			"Initial description",
+			"HASHICORP_VAULT_ENT",
+			secretstoresmodels.IdsecSecHubSecretStoreData{
+				HashiVaultURL:      hashiVaultURL,
+				Namespace:          "root",
+				MountPath:          "secret/",
+				RoleName:           "secrets-hub-role",
+				AuthenticationPath: "auth/jwt/login/",
+				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
+					ConnectionType: "PUBLIC",
+				},
+			})
+
+		t.Logf("SecretStore created successfully: %s (ID: %s)", secretStore.Name, secretStore.ID)
+		assert.Equal(t, hashiVaultURL, secretStore.Data.HashiVaultURL)
+		assert.Equal(t, "root", secretStore.Data.Namespace)
+		assert.Equal(t, "secret/", secretStore.Data.MountPath)
+		assert.Equal(t, "auth/jwt/login/", secretStore.Data.AuthenticationPath)
+
+		// 2. READ
+		t.Logf("Step 2: Reading secret store: %s", secretStore.ID)
+		retrievedSecretStore, err := secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
+			ID: secretStore.ID,
+		})
+		require.NoError(t, err, "Failed to retrieve secret store")
+		assert.Equal(t, secretStore.Name, retrievedSecretStore.Name)
+		assert.Equal(t, "Initial description", retrievedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, retrievedSecretStore.Data.HashiVaultURL)
+		assert.Equal(t, "root", retrievedSecretStore.Data.Namespace)
 		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
 		assert.Equal(t, "auth/jwt/login/", retrievedSecretStore.Data.AuthenticationPath)
+
+		// 3. UPDATE - exercise all mutable fields with different values than those set at creation.
+		// Immutable fields (HashiVaultURL, MountPath, Namespace) are intentionally omitted from the PATCH body.
+		t.Logf("Step 3: Updating secret store: %s", secretStore.ID)
+		updatedDescription := "Updated description"
+		updatedRoleName := "secrets-hub-role-updated"
+		updatedAuthPath := "auth/jwt/v2/login/"
+		updatedSecretStore, err := secretStoresSvc.Update(&secretstoresmodels.IdsecSecHubUpdateSecretStore{
+			ID:          secretStore.ID,
+			Name:        secretStore.Name,
+			Description: updatedDescription,
+			Data: &secretstoresmodels.IdsecSecHubSecretStoreData{
+				RoleName:           updatedRoleName,
+				AuthenticationPath: updatedAuthPath,
+				ConnectionConfig: &secretstoresmodels.IdsecSecHubSecretStoreConnectionConfig{
+					ConnectionType: "PUBLIC",
+				},
+			},
+		})
+		require.NoError(t, err, "Failed to update secret store")
+		assert.Equal(t, updatedDescription, updatedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, updatedSecretStore.Data.HashiVaultURL)
+		assert.Equal(t, "root", updatedSecretStore.Data.Namespace)
+		assert.Equal(t, updatedRoleName, updatedSecretStore.Data.RoleName)
+		assert.Equal(t, updatedAuthPath, updatedSecretStore.Data.AuthenticationPath)
+
+		// Verify update via GET
+		retrievedSecretStore, err = secretStoresSvc.Get(&secretstoresmodels.IdsecSecHubGetSecretStore{
+			ID: secretStore.ID,
+		})
+		require.NoError(t, err, "Failed to retrieve updated secret store")
+		assert.Equal(t, updatedDescription, retrievedSecretStore.Description)
+		assert.Equal(t, hashiVaultURL, retrievedSecretStore.Data.HashiVaultURL)
+		assert.Equal(t, "root", retrievedSecretStore.Data.Namespace)
+		assert.Equal(t, updatedRoleName, retrievedSecretStore.Data.RoleName)
+		assert.Equal(t, updatedAuthPath, retrievedSecretStore.Data.AuthenticationPath)
+		assert.Equal(t, "secret/", retrievedSecretStore.Data.MountPath)
 
 		t.Log("SecretStore lifecycle completed successfully")
 		// 4. DELETE happens automatically via cleanup

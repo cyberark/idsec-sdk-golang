@@ -18,8 +18,6 @@ import (
 // TestGroupAccessListTargetsWithNextToken creates multiple eligible groups,
 // then pages through results using limit=1 to verify nextToken handling.
 func TestGroupAccessListTargetsWithNextToken(t *testing.T) {
-	t.Skip("Azure GroupAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: GroupAccess Azure ListTargets pagination")
 
 	testCtx := scahelpers.SetupGroupAccessListTargetsTest(t, false)
@@ -45,8 +43,6 @@ func TestGroupAccessListTargetsWithNextToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGroupAccessAzureListTargets(t *testing.T) {
-	t.Skip("Azure GroupAccess tests are temporarily disabled")
-
 	framework.LogSection(t, "Test: GroupAccess Azure ListTargets")
 
 	testCtx := scahelpers.SetupGroupAccessListTargetsTest(t, true)
@@ -66,8 +62,6 @@ func TestGroupAccessAzureListTargets(t *testing.T) {
 }
 
 func TestGroupAccessAzureElevate(t *testing.T) {
-	t.Skip("Azure GroupAccess tests are temporarily disabled")
-
 	const (
 		displayName      = "GroupAccess Azure Elevate"
 		policyNamePrefix = "sca_cli_groupaccess_azure_elevate_e2e"

@@ -2,11 +2,11 @@ package models
 
 // IdsecSecHubSecretStoreConnectionConfig defines the connection configuration for a secret store in the Idsec Secrets Hub.
 type IdsecSecHubSecretStoreConnectionConfig struct {
-	ConnectionType string `json:"connection_type,omitempty" mapstructure:"connection_type,omitempty" flag:"connection-type" desc:"COMMON - AKV, GCP: The type of connector (CONNECTOR,PUBLIC)"` // default:"CONNECTOR" choices:"CONNECTOR,PUBLIC"`
+	ConnectionType string `json:"connection_type,omitempty" mapstructure:"connection_type,omitempty" flag:"connection-type" desc:"The type of connector (CONNECTOR,PUBLIC)" default:"PUBLIC" choices:"CONNECTOR,PUBLIC"`
 	// Required if you choose 'CONNECTOR' as the connection type.
 	// If you choose 'PUBLIC', these fields are not required.
-	ConnectorID     string `json:"connector_id,omitempty" mapstructure:"connector_id,omitempty" flag:"connector-id" desc:"AZURE: The connector unique identifier used to connect Secrets Hub and the Cloud Vendor."`
-	ConnectorPoolID string `json:"connector_pool_id,omitempty" mapstructure:"connector_pool_id,omitempty" flag:"connector-pool-id" desc:"AZURE: The connector pool unique identifier used to connect PAM Self-Hosted and Secrets Hub."`
+	ConnectorID     string `json:"connector_id,omitempty" mapstructure:"connector_id,omitempty" flag:"connector-id" desc:"AZURE, HASHI, HASHI ENT: The connector unique identifier used to connect Secrets Hub and the Cloud Vendor."`
+	ConnectorPoolID string `json:"connector_pool_id,omitempty" mapstructure:"connector_pool_id,omitempty" flag:"connector-pool-id" desc:"The connector pool unique identifier used to connect PAM Self-Hosted and Secrets Hub."`
 }
 
 // IdsecSecHubSecretStoreGcpAuthentication defines the GCP authentication configuration for a secret store in the Idsec Secrets Hub.
@@ -26,7 +26,7 @@ type IdsecSecHubSecretStoreData struct {
 	RegionID     string `json:"region_id,omitempty" mapstructure:"region_id,omitempty" flag:"aws-region-id" desc:"AWS: The region ID for the AWS Secrets Manager"`
 	// Azure AKV Specific Fields
 	AppClientDirectoryID string `json:"app_client_directory_id,omitempty" mapstructure:"app_client_directory_id,omitempty" flag:"azure-app-client-directory-id" desc:"AZURE: The Azure Active Directory ID of the application that has access to the Azure Key Vault"`
-	AzureVaultURL        string `json:"azure_vault_url,omitempty" mapstructure:"azure_vault_url,omitempty" flag:"azure-vault-url" desc:"AZURE: The URL of the Azure Key Vault where you store secrets. Example: https://myvault.vault.azure.net/"`
+	AzureVaultURL        string `json:"azure_vault_url,omitempty" mapstructure:"azure_vault_url,omitempty" flag:"azure-vault-url" desc:"AZURE: The URL of the Azure Key Vault where you store secrets. Example: https://myvault.vault.azure.net"`
 	AppClientID          string `json:"app_client_id,omitempty" mapstructure:"app_client_id,omitempty" flag:"azure-app-client-id" desc:"AZURE: The Azure Active Directory application ID of the application that has access to the Azure Key Vault"`
 	SubscriptionID       string `json:"subscription_id,omitempty" mapstructure:"subscription_id,omitempty" flag:"azure-subscription-id" desc:"AZURE: The Azure subscription ID where the Azure Key Vault is stored"`
 	SubscriptionName     string `json:"subscription_name,omitempty" mapstructure:"subscription_name,omitempty" flag:"azure-subscription-name" desc:"AZURE: The name of the Azure subscription where the Azure Key Vault is stored"`
@@ -40,11 +40,12 @@ type IdsecSecHubSecretStoreData struct {
 	ServiceAccountEmail       string                                   `json:"service_account_email,omitempty" mapstructure:"service_account_email,omitempty" flag:"gcp-service-account-email" desc:"GCP: The service account email created for Secrets Hub to access the GCP Secret Manager"`
 	GcpAuthentication         *IdsecSecHubSecretStoreGcpAuthentication `json:"gcp_authentication,omitempty" mapstructure:"gcp_authentication,omitempty" desc:"GCP: The GCP authentication configuration for the secret store"`
 	// HashiCorp Specific Fields
-	HashiVaultURL      string `json:"hashi_vault_url,omitempty" mapstructure:"hashi_vault_url,omitempty" flag:"hashi-vault-url" desc:"HASHI: The URL of the HashiCorp Vault where you store secrets. Example: https://myvault.hashicorpcloud.com/"`
-	MountPath          string `json:"mount_path,omitempty" mapstructure:"mount_path,omitempty" flag:"hashi-mount-path" desc:"HASHI: The mount path of the HashiCorp Vault where secrets are stored. Example: 'secret' for secrets stored in the 'secret' engine"`
+	HashiVaultURL      string `json:"hashi_vault_url,omitempty" mapstructure:"hashi_vault_url,omitempty" flag:"hashi-vault-url" desc:"HASHI, HASHI ENT: The URL of the HashiCorp Vault where you store secrets. Example: https://myvault.com"`
+	Namespace          string `json:"namespace,omitempty" mapstructure:"namespace,omitempty" flag:"hashi-namespace" desc:"HASHI ENT: The namespace path within HashiCorp Vault used to isolate secrets. Example: root"`
+	MountPath          string `json:"mount_path,omitempty" mapstructure:"mount_path,omitempty" flag:"hashi-mount-path" desc:"HASHI, HASHI ENT: The mount path of the HashiCorp Vault where secrets are stored. Example: 'secret' for secrets stored in the 'secret' engine"`
 	EngineType         string `json:"engine_type,omitempty" mapstructure:"engine_type,omitempty" desc:"The type of the engine in HashiCorp Vault. Valid values: KV, PKI, SSH"`
 	EngineAPIVersion   string `json:"engine_api_version,omitempty" mapstructure:"engine_api_version,omitempty" desc:"The API version of the engine in HashiCorp Vault. Valid values: 1, 2"`
-	AuthenticationPath string `json:"authentication_path,omitempty" mapstructure:"authentication_path,omitempty" flag:"hashi-authentication-path" desc:"HASHI: The authentication path configured in HashiCorp Vault for Secrets Hub to authenticate and access secrets. Example: 'auth/secrets-hub/login' for an authentication path of 'secrets-hub'"`
+	AuthenticationPath string `json:"authentication_path,omitempty" mapstructure:"authentication_path,omitempty" flag:"hashi-authentication-path" desc:"HASHI, HASHI ENT: The authentication path configured in HashiCorp Vault for Secrets Hub to authenticate and access secrets. Example: 'auth/secrets-hub/login' for an authentication path of 'secrets-hub'"`
 	// Privilege Cloud and Self-Hosted Specific Fields
 	Password        string `json:"password,omitempty" mapstructure:"password,omitempty" desc:"SELF HOSTED: The password of the user in PAM 'SecretsHub'" flag:"sh-password"`
 	URL             string `json:"url,omitempty" mapstructure:"url,omitempty" flag:"sh-url" desc:"SELF HOSTED: The URL of your PAM Self-Hosted PVWA, or the load balancer for the PVWA"`
@@ -53,9 +54,8 @@ type IdsecSecHubSecretStoreData struct {
 	ConnectorPoolID string `json:"connector_pool_id,omitempty" mapstructure:"connector_pool_id,omitempty" desc:"SELF HOSTED: The connector pool unique identifier used to connect PAM Self-Hosted and Secrets Hub." flag:"sh-connector-pool-id"`
 	// Common Fields
 	// Used by AWS and HashiCorp Vault
-	RoleName string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"COMMON - AWS, HASHI: The role used for authentication. For AWS, this is the IAM role ARN. For HashiCorp, this is the role name created in HashiCorp Vault for Secrets Hub to authenticate and access secrets."`
-	// Used by Azure and HashiCorp Vault
-	ConnectionConfig *IdsecSecHubSecretStoreConnectionConfig `json:"connection_config,omitzero" mapstructure:"connection_config,omitzero" desc:"COMMON - AZURE, HASHI: The network access configuration set for your target"`
+	RoleName         string                                  `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"COMMON - AWS, HASHI, HASHI ENT: The role used for authentication. For AWS, this is the IAM role ARN. For HashiCorp, this is the role name created in HashiCorp Vault for Secrets Hub to authenticate and access secrets."`
+	ConnectionConfig *IdsecSecHubSecretStoreConnectionConfig `json:"connection_config,omitzero" mapstructure:"connection_config,omitzero" desc:"The network access configuration set for your target"`
 	// Used by AWS and Azure, not required for the SH API, but creation fails [400] - [{"code":"SSAS0104E","description":"You must use the external ID authentication method to create secret stores.","message":"Bad Request."}]
 	AuthenticationMethod string `json:"authentication_method,omitempty" mapstructure:"authentication_method,omitempty" flag:"authentication-method" desc:"Provider-specific authentication method to use"`
 }
@@ -76,7 +76,7 @@ type IdsecSecHubSecretStoreStoreStatus struct {
 // IdsecSecHubSecretStore defines the structure for a secret store in the Idsec Secrets Hub.
 type IdsecSecHubSecretStore struct {
 	ID                 string                            `json:"id" mapstructure:"id" desc:"The unique identifier of the secret store" validate:"required"`
-	Type               string                            `json:"type" mapstructure:"type" desc:"The type of secret store (PAM_PCLOUD,PAM_SELF_HOSTED,AWS_ASM,AZURE_AKV,GCP_GSM,HASHICORP_VAULT)" validate:"required"`
+	Type               string                            `json:"type" mapstructure:"type" desc:"The type of secret store (PAM_PCLOUD,PAM_SELF_HOSTED,AWS_ASM,AZURE_AKV,GCP_GSM,HASHICORP_VAULT,HASHICORP_VAULT_ENT)" validate:"required"`
 	Behaviors          []string                          `json:"behaviors" mapstructure:"behaviors" desc:"Whether the secret store is used as a source or a target. There can be only one source secret store per tenant. Valid values: SECRETS_SOURCE, SECRETS_TARGET"`
 	CreatedAt          string                            `json:"created_at" mapstructure:"created_at" desc:"The secret store creation date." validate:"required"`
 	CreatedBy          string                            `json:"created_by" mapstructure:"created_by" desc:"The user who created the secret store." validate:"required"`
