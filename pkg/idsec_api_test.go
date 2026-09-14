@@ -178,7 +178,7 @@ func TestIdsecAPI_loadServiceAuthenticators(t *testing.T) {
 			// Create API instance with empty authenticators for testing
 			api := &IdsecAPI{
 				authenticators: nil,
-				services:       make(map[string]*services.IdsecService),
+				services:       &serviceCache{services: make(map[string]*services.IdsecService)},
 				profile:        &models.IdsecProfile{ProfileName: "test"},
 			}
 
@@ -240,7 +240,7 @@ func TestIdsecAPI_Authenticator(t *testing.T) {
 			// Create API instance with empty authenticators
 			api := &IdsecAPI{
 				authenticators: nil,
-				services:       make(map[string]*services.IdsecService),
+				services:       &serviceCache{services: make(map[string]*services.IdsecService)},
 				profile:        &models.IdsecProfile{ProfileName: "test"},
 			}
 
@@ -311,7 +311,7 @@ func TestIdsecAPI_Profile(t *testing.T) {
 
 			api := &IdsecAPI{
 				authenticators: nil,
-				services:       make(map[string]*services.IdsecService),
+				services:       &serviceCache{services: make(map[string]*services.IdsecService)},
 				profile:        tt.profile,
 			}
 
@@ -352,8 +352,8 @@ func TestIdsecAPI_ServiceCaching_Pattern(t *testing.T) {
 		{
 			name: "services_map_starts_empty",
 			validateFunc: func(t *testing.T, api *IdsecAPI) {
-				if len(api.services) != 0 {
-					t.Errorf("Expected empty services map, got %d entries", len(api.services))
+				if len(api.services.services) != 0 {
+					t.Errorf("Expected empty services map, got %d entries", len(api.services.services))
 				}
 			},
 		},
@@ -361,14 +361,18 @@ func TestIdsecAPI_ServiceCaching_Pattern(t *testing.T) {
 			name: "can_store_service_in_map",
 			validateFunc: func(t *testing.T, api *IdsecAPI) {
 				// Simulate what service methods do (without creating real services)
-				var mockService services.IdsecService
-				api.services["test-service"] = &mockService
-
-				if len(api.services) != 1 {
-					t.Errorf("Expected 1 service in map, got %d", len(api.services))
+				_, err := api.services.service("test-service", func() (services.IdsecService, error) {
+					return stubService{}, nil
+				})
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
 				}
 
-				if _, exists := api.services["test-service"]; !exists {
+				if len(api.services.services) != 1 {
+					t.Errorf("Expected 1 service in map, got %d", len(api.services.services))
+				}
+
+				if _, exists := api.services.services["test-service"]; !exists {
 					t.Error("Expected service to be stored in map")
 				}
 			},
@@ -381,7 +385,7 @@ func TestIdsecAPI_ServiceCaching_Pattern(t *testing.T) {
 
 			api := &IdsecAPI{
 				authenticators: nil,
-				services:       make(map[string]*services.IdsecService),
+				services:       &serviceCache{services: make(map[string]*services.IdsecService)},
 				profile:        &models.IdsecProfile{ProfileName: "test"},
 			}
 

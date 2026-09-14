@@ -50,6 +50,7 @@ package api
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
@@ -78,6 +79,8 @@ import (
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 	targetplatforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/targetplatforms"
+	usergroups "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/usergroups"
+	users2 "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/users"
 	policy "github.com/cyberark/idsec-sdk-golang/pkg/services/policy"
 	cloudaccess "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/cloudaccess"
 	db "github.com/cyberark/idsec-sdk-golang/pkg/services/policy/db"
@@ -114,6 +117,49 @@ import (
 	sessions "github.com/cyberark/idsec-sdk-golang/pkg/services/sm/sessions"
 )
 
+// serviceCache holds the services an IdsecAPI has built.
+//
+// The cache is held by pointer rather than inlined into IdsecAPI so that
+// IdsecAPI stays copyable. A mutex placed in IdsecAPI directly would make the
+// struct impossible to copy without tripping go vet's copylocks check, and
+// consumers embed IdsecAPI by value. Holding it by pointer also keeps the
+// existing behaviour that a copied IdsecAPI shares one cache, since a map field
+// was already a reference.
+type serviceCache struct {
+	lock     sync.Mutex
+	services map[string]*services.IdsecService
+}
+
+// service returns the cached service registered under name, building and
+// caching it on first use.
+//
+// The lock is held across the build so that two goroutines asking for the same
+// service concurrently receive the same instance. Building under the lock costs
+// the second caller a wait, but the alternative is for both to authenticate and
+// connect a service and for one of them to be thrown away.
+//
+// Parameters:
+//   - name: The service's registered name
+//   - build: Creates the service, called only when it is not already cached
+//
+// Returns the cached or newly built service, or an error if build fails.
+func (c *serviceCache) service(
+	name string,
+	build func() (services.IdsecService, error),
+) (*services.IdsecService, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if cached, ok := c.services[name]; ok {
+		return cached, nil
+	}
+	built, err := build()
+	if err != nil {
+		return nil, err
+	}
+	c.services[name] = &built
+	return &built, nil
+}
+
 // IdsecAPI wraps different API functionality of Idsec Services.
 //
 // IdsecAPI serves as the central entry point and service factory for all IDSEC services.
@@ -131,7 +177,7 @@ import (
 // the appropriate authenticators are provided during initialization.
 type IdsecAPI struct {
 	authenticators []auth.IdsecAuth
-	services       map[string]*services.IdsecService
+	services       *serviceCache
 	profile        *models.IdsecProfile
 }
 
@@ -176,7 +222,7 @@ func NewIdsecAPI(authenticators []auth.IdsecAuth, profile *models.IdsecProfile) 
 	}
 	return &IdsecAPI{
 		authenticators: authenticators,
-		services:       make(map[string]*services.IdsecService),
+		services:       &serviceCache{services: make(map[string]*services.IdsecService)},
 		profile:        profile,
 	}, nil
 }
@@ -267,729 +313,581 @@ func (api *IdsecAPI) Profile() *models.IdsecProfile {
 }
 
 func (api *IdsecAPI) AccessAssets() (*assets.IdsecAccessAssetsService, error) {
-	if serviceIfs, ok := api.services[assets.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*assets.IdsecAccessAssetsService), nil
-	}
-	service, err := assets.ServiceGenerator(api.loadServiceAuthenticators(assets.ServiceConfig)...)
+	service, err := api.services.service(assets.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return assets.ServiceGenerator(api.loadServiceAuthenticators(assets.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[assets.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*assets.IdsecAccessAssetsService), nil
 }
 
 func (api *IdsecAPI) CceAws() (*aws.IdsecCCEAWSService, error) {
-	if serviceIfs, ok := api.services[aws.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*aws.IdsecCCEAWSService), nil
-	}
-	service, err := aws.ServiceGenerator(api.loadServiceAuthenticators(aws.ServiceConfig)...)
+	service, err := api.services.service(aws.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return aws.ServiceGenerator(api.loadServiceAuthenticators(aws.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[aws.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*aws.IdsecCCEAWSService), nil
 }
 
 func (api *IdsecAPI) CceAzure() (*azure.IdsecCCEAzureService, error) {
-	if serviceIfs, ok := api.services[azure.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*azure.IdsecCCEAzureService), nil
-	}
-	service, err := azure.ServiceGenerator(api.loadServiceAuthenticators(azure.ServiceConfig)...)
+	service, err := api.services.service(azure.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return azure.ServiceGenerator(api.loadServiceAuthenticators(azure.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[azure.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*azure.IdsecCCEAzureService), nil
 }
 
 func (api *IdsecAPI) CceGcp() (*gcp.IdsecCCEGCPService, error) {
-	if serviceIfs, ok := api.services[gcp.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*gcp.IdsecCCEGCPService), nil
-	}
-	service, err := gcp.ServiceGenerator(api.loadServiceAuthenticators(gcp.ServiceConfig)...)
+	service, err := api.services.service(gcp.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return gcp.ServiceGenerator(api.loadServiceAuthenticators(gcp.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[gcp.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*gcp.IdsecCCEGCPService), nil
 }
 
 func (api *IdsecAPI) CmgrConnectors() (*connectors.IdsecCmgrConnectorsService, error) {
-	if serviceIfs, ok := api.services[connectors.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*connectors.IdsecCmgrConnectorsService), nil
-	}
-	service, err := connectors.ServiceGenerator(api.loadServiceAuthenticators(connectors.ServiceConfig)...)
+	service, err := api.services.service(connectors.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return connectors.ServiceGenerator(api.loadServiceAuthenticators(connectors.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[connectors.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*connectors.IdsecCmgrConnectorsService), nil
 }
 
 func (api *IdsecAPI) CmgrNetworks() (*networks.IdsecCmgrNetworksService, error) {
-	if serviceIfs, ok := api.services[networks.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*networks.IdsecCmgrNetworksService), nil
-	}
-	service, err := networks.ServiceGenerator(api.loadServiceAuthenticators(networks.ServiceConfig)...)
+	service, err := api.services.service(networks.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return networks.ServiceGenerator(api.loadServiceAuthenticators(networks.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[networks.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*networks.IdsecCmgrNetworksService), nil
 }
 
 func (api *IdsecAPI) CmgrPoolcomponents() (*poolcomponents.IdsecCmgrPoolComponentsService, error) {
-	if serviceIfs, ok := api.services[poolcomponents.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*poolcomponents.IdsecCmgrPoolComponentsService), nil
-	}
-	service, err := poolcomponents.ServiceGenerator(api.loadServiceAuthenticators(poolcomponents.ServiceConfig)...)
+	service, err := api.services.service(poolcomponents.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return poolcomponents.ServiceGenerator(api.loadServiceAuthenticators(poolcomponents.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[poolcomponents.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*poolcomponents.IdsecCmgrPoolComponentsService), nil
 }
 
 func (api *IdsecAPI) CmgrPoolidentifiers() (*poolidentifiers.IdsecCmgrPoolIdentifiersService, error) {
-	if serviceIfs, ok := api.services[poolidentifiers.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*poolidentifiers.IdsecCmgrPoolIdentifiersService), nil
-	}
-	service, err := poolidentifiers.ServiceGenerator(api.loadServiceAuthenticators(poolidentifiers.ServiceConfig)...)
+	service, err := api.services.service(poolidentifiers.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return poolidentifiers.ServiceGenerator(api.loadServiceAuthenticators(poolidentifiers.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[poolidentifiers.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*poolidentifiers.IdsecCmgrPoolIdentifiersService), nil
 }
 
 func (api *IdsecAPI) CmgrPools() (*pools.IdsecCmgrPoolsService, error) {
-	if serviceIfs, ok := api.services[pools.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*pools.IdsecCmgrPoolsService), nil
-	}
-	service, err := pools.ServiceGenerator(api.loadServiceAuthenticators(pools.ServiceConfig)...)
+	service, err := api.services.service(pools.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return pools.ServiceGenerator(api.loadServiceAuthenticators(pools.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[pools.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*pools.IdsecCmgrPoolsService), nil
 }
 
 func (api *IdsecAPI) IdentityAuthprofiles() (*authprofiles.IdsecIdentityAuthProfilesService, error) {
-	if serviceIfs, ok := api.services[authprofiles.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*authprofiles.IdsecIdentityAuthProfilesService), nil
-	}
-	service, err := authprofiles.ServiceGenerator(api.loadServiceAuthenticators(authprofiles.ServiceConfig)...)
+	service, err := api.services.service(authprofiles.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return authprofiles.ServiceGenerator(api.loadServiceAuthenticators(authprofiles.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[authprofiles.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*authprofiles.IdsecIdentityAuthProfilesService), nil
 }
 
 func (api *IdsecAPI) IdentityDirectories() (*directories.IdsecIdentityDirectoriesService, error) {
-	if serviceIfs, ok := api.services[directories.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*directories.IdsecIdentityDirectoriesService), nil
-	}
-	service, err := directories.ServiceGenerator(api.loadServiceAuthenticators(directories.ServiceConfig)...)
+	service, err := api.services.service(directories.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return directories.ServiceGenerator(api.loadServiceAuthenticators(directories.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[directories.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*directories.IdsecIdentityDirectoriesService), nil
 }
 
 func (api *IdsecAPI) IdentityPolicies() (*policies.IdsecIdentityPoliciesService, error) {
-	if serviceIfs, ok := api.services[policies.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*policies.IdsecIdentityPoliciesService), nil
-	}
-	service, err := policies.ServiceGenerator(api.loadServiceAuthenticators(policies.ServiceConfig)...)
+	service, err := api.services.service(policies.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return policies.ServiceGenerator(api.loadServiceAuthenticators(policies.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[policies.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*policies.IdsecIdentityPoliciesService), nil
 }
 
 func (api *IdsecAPI) IdentityRoles() (*roles.IdsecIdentityRolesService, error) {
-	if serviceIfs, ok := api.services[roles.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*roles.IdsecIdentityRolesService), nil
-	}
-	service, err := roles.ServiceGenerator(api.loadServiceAuthenticators(roles.ServiceConfig)...)
+	service, err := api.services.service(roles.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return roles.ServiceGenerator(api.loadServiceAuthenticators(roles.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[roles.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*roles.IdsecIdentityRolesService), nil
 }
 
 func (api *IdsecAPI) IdentityUsers() (*users.IdsecIdentityUsersService, error) {
-	if serviceIfs, ok := api.services[users.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*users.IdsecIdentityUsersService), nil
-	}
-	service, err := users.ServiceGenerator(api.loadServiceAuthenticators(users.ServiceConfig)...)
+	service, err := api.services.service(users.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return users.ServiceGenerator(api.loadServiceAuthenticators(users.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[users.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*users.IdsecIdentityUsersService), nil
 }
 
 func (api *IdsecAPI) IdentityWebapps() (*webapps.IdsecIdentityWebappsService, error) {
-	if serviceIfs, ok := api.services[webapps.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*webapps.IdsecIdentityWebappsService), nil
-	}
-	service, err := webapps.ServiceGenerator(api.loadServiceAuthenticators(webapps.ServiceConfig)...)
+	service, err := api.services.service(webapps.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return webapps.ServiceGenerator(api.loadServiceAuthenticators(webapps.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[webapps.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*webapps.IdsecIdentityWebappsService), nil
 }
 
 func (api *IdsecAPI) PamshAccounts() (*pamshaccounts.IdsecPamshAccountsService, error) {
-	if serviceIfs, ok := api.services[pamshaccounts.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*pamshaccounts.IdsecPamshAccountsService), nil
-	}
-	service, err := pamshaccounts.ServiceGenerator(api.loadServiceAuthenticators(pamshaccounts.ServiceConfig)...)
+	service, err := api.services.service(pamshaccounts.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return pamshaccounts.ServiceGenerator(api.loadServiceAuthenticators(pamshaccounts.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[pamshaccounts.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*pamshaccounts.IdsecPamshAccountsService), nil
 }
 
 func (api *IdsecAPI) PamshSafes() (*pamshsafes.IdsecPamshSafesService, error) {
-	if serviceIfs, ok := api.services[pamshsafes.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*pamshsafes.IdsecPamshSafesService), nil
-	}
-	service, err := pamshsafes.ServiceGenerator(api.loadServiceAuthenticators(pamshsafes.ServiceConfig)...)
+	service, err := api.services.service(pamshsafes.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return pamshsafes.ServiceGenerator(api.loadServiceAuthenticators(pamshsafes.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[pamshsafes.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*pamshsafes.IdsecPamshSafesService), nil
 }
 
 func (api *IdsecAPI) PcloudAccounts() (*accounts.IdsecPCloudAccountsService, error) {
-	if serviceIfs, ok := api.services[accounts.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*accounts.IdsecPCloudAccountsService), nil
-	}
-	service, err := accounts.ServiceGenerator(api.loadServiceAuthenticators(accounts.ServiceConfig)...)
+	service, err := api.services.service(accounts.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return accounts.ServiceGenerator(api.loadServiceAuthenticators(accounts.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[accounts.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*accounts.IdsecPCloudAccountsService), nil
 }
 
 func (api *IdsecAPI) PcloudApplications() (*applications.IdsecPCloudApplicationsService, error) {
-	if serviceIfs, ok := api.services[applications.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*applications.IdsecPCloudApplicationsService), nil
-	}
-	service, err := applications.ServiceGenerator(api.loadServiceAuthenticators(applications.ServiceConfig)...)
+	service, err := api.services.service(applications.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return applications.ServiceGenerator(api.loadServiceAuthenticators(applications.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[applications.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*applications.IdsecPCloudApplicationsService), nil
 }
 
 func (api *IdsecAPI) PcloudPlatforms() (*platforms.IdsecPCloudPlatformsService, error) {
-	if serviceIfs, ok := api.services[platforms.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*platforms.IdsecPCloudPlatformsService), nil
-	}
-	service, err := platforms.ServiceGenerator(api.loadServiceAuthenticators(platforms.ServiceConfig)...)
+	service, err := api.services.service(platforms.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return platforms.ServiceGenerator(api.loadServiceAuthenticators(platforms.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[platforms.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*platforms.IdsecPCloudPlatformsService), nil
 }
 
 func (api *IdsecAPI) PcloudSafes() (*safes.IdsecPCloudSafesService, error) {
-	if serviceIfs, ok := api.services[safes.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*safes.IdsecPCloudSafesService), nil
-	}
-	service, err := safes.ServiceGenerator(api.loadServiceAuthenticators(safes.ServiceConfig)...)
+	service, err := api.services.service(safes.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return safes.ServiceGenerator(api.loadServiceAuthenticators(safes.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[safes.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*safes.IdsecPCloudSafesService), nil
 }
 
 func (api *IdsecAPI) PcloudTargetplatforms() (*targetplatforms.IdsecPCloudTargetPlatformsService, error) {
-	if serviceIfs, ok := api.services[targetplatforms.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*targetplatforms.IdsecPCloudTargetPlatformsService), nil
-	}
-	service, err := targetplatforms.ServiceGenerator(api.loadServiceAuthenticators(targetplatforms.ServiceConfig)...)
+	service, err := api.services.service(targetplatforms.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return targetplatforms.ServiceGenerator(api.loadServiceAuthenticators(targetplatforms.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[targetplatforms.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*targetplatforms.IdsecPCloudTargetPlatformsService), nil
+}
+
+func (api *IdsecAPI) PcloudUsergroups() (*usergroups.IdsecPCloudUserGroupsService, error) {
+	service, err := api.services.service(usergroups.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return usergroups.ServiceGenerator(api.loadServiceAuthenticators(usergroups.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*usergroups.IdsecPCloudUserGroupsService), nil
+}
+
+func (api *IdsecAPI) PcloudUsers() (*users2.IdsecPCloudUsersService, error) {
+	service, err := api.services.service(users2.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return users2.ServiceGenerator(api.loadServiceAuthenticators(users2.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*users2.IdsecPCloudUsersService), nil
 }
 
 func (api *IdsecAPI) Policy() (*policy.IdsecPolicyService, error) {
-	if serviceIfs, ok := api.services[policy.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*policy.IdsecPolicyService), nil
-	}
-	service, err := policy.ServiceGenerator(api.loadServiceAuthenticators(policy.ServiceConfig)...)
+	service, err := api.services.service(policy.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return policy.ServiceGenerator(api.loadServiceAuthenticators(policy.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[policy.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*policy.IdsecPolicyService), nil
 }
 
 func (api *IdsecAPI) PolicyCloudaccess() (*cloudaccess.IdsecPolicyCloudAccessService, error) {
-	if serviceIfs, ok := api.services[cloudaccess.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*cloudaccess.IdsecPolicyCloudAccessService), nil
-	}
-	service, err := cloudaccess.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess.ServiceConfig)...)
+	service, err := api.services.service(cloudaccess.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return cloudaccess.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[cloudaccess.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*cloudaccess.IdsecPolicyCloudAccessService), nil
 }
 
 func (api *IdsecAPI) PolicyDb() (*db.IdsecPolicyDBService, error) {
-	if serviceIfs, ok := api.services[db.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db.IdsecPolicyDBService), nil
-	}
-	service, err := db.ServiceGenerator(api.loadServiceAuthenticators(db.ServiceConfig)...)
+	service, err := api.services.service(db.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return db.ServiceGenerator(api.loadServiceAuthenticators(db.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[db.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*db.IdsecPolicyDBService), nil
 }
 
 func (api *IdsecAPI) PolicyGroupaccess() (*groupaccess.IdsecPolicyGroupAccessService, error) {
-	if serviceIfs, ok := api.services[groupaccess.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*groupaccess.IdsecPolicyGroupAccessService), nil
-	}
-	service, err := groupaccess.ServiceGenerator(api.loadServiceAuthenticators(groupaccess.ServiceConfig)...)
+	service, err := api.services.service(groupaccess.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return groupaccess.ServiceGenerator(api.loadServiceAuthenticators(groupaccess.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[groupaccess.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*groupaccess.IdsecPolicyGroupAccessService), nil
 }
 
 func (api *IdsecAPI) PolicyK8s() (*k8s.IdsecPolicyK8sService, error) {
-	if serviceIfs, ok := api.services[k8s.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s.IdsecPolicyK8sService), nil
-	}
-	service, err := k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	service, err := api.services.service(k8s.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return k8s.ServiceGenerator(api.loadServiceAuthenticators(k8s.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[k8s.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*k8s.IdsecPolicyK8sService), nil
 }
 
 func (api *IdsecAPI) PolicyVm() (*vm.IdsecPolicyVMService, error) {
-	if serviceIfs, ok := api.services[vm.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*vm.IdsecPolicyVMService), nil
-	}
-	service, err := vm.ServiceGenerator(api.loadServiceAuthenticators(vm.ServiceConfig)...)
+	service, err := api.services.service(vm.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return vm.ServiceGenerator(api.loadServiceAuthenticators(vm.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[vm.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*vm.IdsecPolicyVMService), nil
 }
 
 func (api *IdsecAPI) ScaCloudaccess() (*cloudaccess2.IdsecSCACloudAccessService, error) {
-	if serviceIfs, ok := api.services[cloudaccess2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*cloudaccess2.IdsecSCACloudAccessService), nil
-	}
-	service, err := cloudaccess2.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess2.ServiceConfig)...)
+	service, err := api.services.service(cloudaccess2.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return cloudaccess2.ServiceGenerator(api.loadServiceAuthenticators(cloudaccess2.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[cloudaccess2.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*cloudaccess2.IdsecSCACloudAccessService), nil
 }
 
 func (api *IdsecAPI) ScaDiscovery() (*discovery.IdsecSCADiscoveryService, error) {
-	if serviceIfs, ok := api.services[discovery.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*discovery.IdsecSCADiscoveryService), nil
-	}
-	service, err := discovery.ServiceGenerator(api.loadServiceAuthenticators(discovery.ServiceConfig)...)
+	service, err := api.services.service(discovery.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return discovery.ServiceGenerator(api.loadServiceAuthenticators(discovery.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[discovery.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*discovery.IdsecSCADiscoveryService), nil
 }
 
 func (api *IdsecAPI) ScaGroupaccess() (*groupaccess2.IdsecSCAGroupAccessService, error) {
-	if serviceIfs, ok := api.services[groupaccess2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*groupaccess2.IdsecSCAGroupAccessService), nil
-	}
-	service, err := groupaccess2.ServiceGenerator(api.loadServiceAuthenticators(groupaccess2.ServiceConfig)...)
+	service, err := api.services.service(groupaccess2.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return groupaccess2.ServiceGenerator(api.loadServiceAuthenticators(groupaccess2.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[groupaccess2.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*groupaccess2.IdsecSCAGroupAccessService), nil
 }
 
 func (api *IdsecAPI) ScaK8s() (*k8s2.IdsecSCAK8sService, error) {
-	if serviceIfs, ok := api.services[k8s2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s2.IdsecSCAK8sService), nil
-	}
-	service, err := k8s2.ServiceGenerator(api.loadServiceAuthenticators(k8s2.ServiceConfig)...)
+	service, err := api.services.service(k8s2.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return k8s2.ServiceGenerator(api.loadServiceAuthenticators(k8s2.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[k8s2.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*k8s2.IdsecSCAK8sService), nil
 }
 
 func (api *IdsecAPI) SechubConfigurations() (*configurations.IdsecSecHubConfigurationService, error) {
-	if serviceIfs, ok := api.services[configurations.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*configurations.IdsecSecHubConfigurationService), nil
-	}
-	service, err := configurations.ServiceGenerator(api.loadServiceAuthenticators(configurations.ServiceConfig)...)
+	service, err := api.services.service(configurations.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return configurations.ServiceGenerator(api.loadServiceAuthenticators(configurations.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[configurations.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*configurations.IdsecSecHubConfigurationService), nil
 }
 
 func (api *IdsecAPI) SechubFilters() (*filters.IdsecSecHubFiltersService, error) {
-	if serviceIfs, ok := api.services[filters.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*filters.IdsecSecHubFiltersService), nil
-	}
-	service, err := filters.ServiceGenerator(api.loadServiceAuthenticators(filters.ServiceConfig)...)
+	service, err := api.services.service(filters.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return filters.ServiceGenerator(api.loadServiceAuthenticators(filters.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[filters.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*filters.IdsecSecHubFiltersService), nil
 }
 
 func (api *IdsecAPI) SechubScans() (*scans.IdsecSecHubScansService, error) {
-	if serviceIfs, ok := api.services[scans.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*scans.IdsecSecHubScansService), nil
-	}
-	service, err := scans.ServiceGenerator(api.loadServiceAuthenticators(scans.ServiceConfig)...)
+	service, err := api.services.service(scans.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return scans.ServiceGenerator(api.loadServiceAuthenticators(scans.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[scans.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*scans.IdsecSecHubScansService), nil
 }
 
 func (api *IdsecAPI) SechubSecrets() (*secrets.IdsecSecHubSecretsService, error) {
-	if serviceIfs, ok := api.services[secrets.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*secrets.IdsecSecHubSecretsService), nil
-	}
-	service, err := secrets.ServiceGenerator(api.loadServiceAuthenticators(secrets.ServiceConfig)...)
+	service, err := api.services.service(secrets.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return secrets.ServiceGenerator(api.loadServiceAuthenticators(secrets.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[secrets.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*secrets.IdsecSecHubSecretsService), nil
 }
 
 func (api *IdsecAPI) SechubSecretstores() (*secretstores.IdsecSecHubSecretStoresService, error) {
-	if serviceIfs, ok := api.services[secretstores.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*secretstores.IdsecSecHubSecretStoresService), nil
-	}
-	service, err := secretstores.ServiceGenerator(api.loadServiceAuthenticators(secretstores.ServiceConfig)...)
+	service, err := api.services.service(secretstores.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return secretstores.ServiceGenerator(api.loadServiceAuthenticators(secretstores.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[secretstores.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*secretstores.IdsecSecHubSecretStoresService), nil
 }
 
 func (api *IdsecAPI) SechubServiceinfo() (*serviceinfo.IdsecSecHubServiceInfoService, error) {
-	if serviceIfs, ok := api.services[serviceinfo.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*serviceinfo.IdsecSecHubServiceInfoService), nil
-	}
-	service, err := serviceinfo.ServiceGenerator(api.loadServiceAuthenticators(serviceinfo.ServiceConfig)...)
+	service, err := api.services.service(serviceinfo.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return serviceinfo.ServiceGenerator(api.loadServiceAuthenticators(serviceinfo.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[serviceinfo.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*serviceinfo.IdsecSecHubServiceInfoService), nil
 }
 
 func (api *IdsecAPI) SechubSyncpolicies() (*syncpolicies.IdsecSecHubSyncPoliciesService, error) {
-	if serviceIfs, ok := api.services[syncpolicies.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*syncpolicies.IdsecSecHubSyncPoliciesService), nil
-	}
-	service, err := syncpolicies.ServiceGenerator(api.loadServiceAuthenticators(syncpolicies.ServiceConfig)...)
+	service, err := api.services.service(syncpolicies.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return syncpolicies.ServiceGenerator(api.loadServiceAuthenticators(syncpolicies.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[syncpolicies.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*syncpolicies.IdsecSecHubSyncPoliciesService), nil
 }
 
 func (api *IdsecAPI) SiaAccess() (*access.IdsecSIAAccessService, error) {
-	if serviceIfs, ok := api.services[access.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*access.IdsecSIAAccessService), nil
-	}
-	service, err := access.ServiceGenerator(api.loadServiceAuthenticators(access.ServiceConfig)...)
+	service, err := api.services.service(access.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return access.ServiceGenerator(api.loadServiceAuthenticators(access.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[access.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*access.IdsecSIAAccessService), nil
 }
 
 func (api *IdsecAPI) SiaCertificates() (*certificates.IdsecSIACertificatesService, error) {
-	if serviceIfs, ok := api.services[certificates.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*certificates.IdsecSIACertificatesService), nil
-	}
-	service, err := certificates.ServiceGenerator(api.loadServiceAuthenticators(certificates.ServiceConfig)...)
+	service, err := api.services.service(certificates.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return certificates.ServiceGenerator(api.loadServiceAuthenticators(certificates.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[certificates.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*certificates.IdsecSIACertificatesService), nil
 }
 
 func (api *IdsecAPI) SiaDb() (*db2.IdsecSIADBService, error) {
-	if serviceIfs, ok := api.services[db2.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db2.IdsecSIADBService), nil
-	}
-	service, err := db2.ServiceGenerator(api.loadServiceAuthenticators(db2.ServiceConfig)...)
+	service, err := api.services.service(db2.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return db2.ServiceGenerator(api.loadServiceAuthenticators(db2.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[db2.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*db2.IdsecSIADBService), nil
 }
 
 func (api *IdsecAPI) SiaDbstrongaccounts() (*dbstrongaccounts.IdsecSIADBStrongAccountsService, error) {
-	if serviceIfs, ok := api.services[dbstrongaccounts.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*dbstrongaccounts.IdsecSIADBStrongAccountsService), nil
-	}
-	service, err := dbstrongaccounts.ServiceGenerator(api.loadServiceAuthenticators(dbstrongaccounts.ServiceConfig)...)
+	service, err := api.services.service(dbstrongaccounts.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return dbstrongaccounts.ServiceGenerator(api.loadServiceAuthenticators(dbstrongaccounts.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[dbstrongaccounts.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*dbstrongaccounts.IdsecSIADBStrongAccountsService), nil
 }
 
 func (api *IdsecAPI) SiaDoctor() (*doctor.IdsecSIADoctorService, error) {
-	if serviceIfs, ok := api.services[doctor.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*doctor.IdsecSIADoctorService), nil
-	}
-	service, err := doctor.ServiceGenerator(api.loadServiceAuthenticators(doctor.ServiceConfig)...)
+	service, err := api.services.service(doctor.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return doctor.ServiceGenerator(api.loadServiceAuthenticators(doctor.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[doctor.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*doctor.IdsecSIADoctorService), nil
 }
 
 func (api *IdsecAPI) SiaK8s() (*k8s3.IdsecSIAK8SService, error) {
-	if serviceIfs, ok := api.services[k8s3.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*k8s3.IdsecSIAK8SService), nil
-	}
-	service, err := k8s3.ServiceGenerator(api.loadServiceAuthenticators(k8s3.ServiceConfig)...)
+	service, err := api.services.service(k8s3.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return k8s3.ServiceGenerator(api.loadServiceAuthenticators(k8s3.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[k8s3.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*k8s3.IdsecSIAK8SService), nil
 }
 
 func (api *IdsecAPI) SiaSecretsdb() (*dbsecrets.IdsecSIASecretsDBService, error) {
-	if serviceIfs, ok := api.services[dbsecrets.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*dbsecrets.IdsecSIASecretsDBService), nil
-	}
-	service, err := dbsecrets.ServiceGenerator(api.loadServiceAuthenticators(dbsecrets.ServiceConfig)...)
+	service, err := api.services.service(dbsecrets.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return dbsecrets.ServiceGenerator(api.loadServiceAuthenticators(dbsecrets.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[dbsecrets.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*dbsecrets.IdsecSIASecretsDBService), nil
 }
 
 func (api *IdsecAPI) SiaSecretsvm() (*vmsecrets.IdsecSIASecretsVMService, error) {
-	if serviceIfs, ok := api.services[vmsecrets.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*vmsecrets.IdsecSIASecretsVMService), nil
-	}
-	service, err := vmsecrets.ServiceGenerator(api.loadServiceAuthenticators(vmsecrets.ServiceConfig)...)
+	service, err := api.services.service(vmsecrets.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return vmsecrets.ServiceGenerator(api.loadServiceAuthenticators(vmsecrets.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[vmsecrets.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*vmsecrets.IdsecSIASecretsVMService), nil
 }
 
 func (api *IdsecAPI) SiaSettings() (*settings.IdsecSIASettingsService, error) {
-	if serviceIfs, ok := api.services[settings.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*settings.IdsecSIASettingsService), nil
-	}
-	service, err := settings.ServiceGenerator(api.loadServiceAuthenticators(settings.ServiceConfig)...)
+	service, err := api.services.service(settings.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return settings.ServiceGenerator(api.loadServiceAuthenticators(settings.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[settings.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*settings.IdsecSIASettingsService), nil
 }
 
 func (api *IdsecAPI) SiaShortenedconnectionstring() (*shortenedconnectionstring.IdsecSIAShortenedConnectionStringService, error) {
-	if serviceIfs, ok := api.services[shortenedconnectionstring.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*shortenedconnectionstring.IdsecSIAShortenedConnectionStringService), nil
-	}
-	service, err := shortenedconnectionstring.ServiceGenerator(api.loadServiceAuthenticators(shortenedconnectionstring.ServiceConfig)...)
+	service, err := api.services.service(shortenedconnectionstring.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return shortenedconnectionstring.ServiceGenerator(api.loadServiceAuthenticators(shortenedconnectionstring.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[shortenedconnectionstring.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*shortenedconnectionstring.IdsecSIAShortenedConnectionStringService), nil
 }
 
 func (api *IdsecAPI) SiaSsh() (*ssh.IdsecSIASSHService, error) {
-	if serviceIfs, ok := api.services[ssh.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*ssh.IdsecSIASSHService), nil
-	}
-	service, err := ssh.ServiceGenerator(api.loadServiceAuthenticators(ssh.ServiceConfig)...)
+	service, err := api.services.service(ssh.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return ssh.ServiceGenerator(api.loadServiceAuthenticators(ssh.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[ssh.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*ssh.IdsecSIASSHService), nil
 }
 
 func (api *IdsecAPI) SiaSshca() (*sshca.IdsecSIASSHCAService, error) {
-	if serviceIfs, ok := api.services[sshca.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sshca.IdsecSIASSHCAService), nil
-	}
-	service, err := sshca.ServiceGenerator(api.loadServiceAuthenticators(sshca.ServiceConfig)...)
+	service, err := api.services.service(sshca.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return sshca.ServiceGenerator(api.loadServiceAuthenticators(sshca.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[sshca.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*sshca.IdsecSIASSHCAService), nil
 }
 
 func (api *IdsecAPI) SiaSso() (*sso.IdsecSIASSOService, error) {
-	if serviceIfs, ok := api.services[sso.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sso.IdsecSIASSOService), nil
-	}
-	service, err := sso.ServiceGenerator(api.loadServiceAuthenticators(sso.ServiceConfig)...)
+	service, err := api.services.service(sso.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return sso.ServiceGenerator(api.loadServiceAuthenticators(sso.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[sso.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*sso.IdsecSIASSOService), nil
 }
 
 func (api *IdsecAPI) SiaWorkspacesdb() (*db3.IdsecSIAWorkspacesDBService, error) {
-	if serviceIfs, ok := api.services[db3.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*db3.IdsecSIAWorkspacesDBService), nil
-	}
-	service, err := db3.ServiceGenerator(api.loadServiceAuthenticators(db3.ServiceConfig)...)
+	service, err := api.services.service(db3.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return db3.ServiceGenerator(api.loadServiceAuthenticators(db3.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[db3.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*db3.IdsecSIAWorkspacesDBService), nil
 }
 
 func (api *IdsecAPI) SiaWorkspacestargetsets() (*targetsets.IdsecSIAWorkspacesTargetSetsService, error) {
-	if serviceIfs, ok := api.services[targetsets.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*targetsets.IdsecSIAWorkspacesTargetSetsService), nil
-	}
-	service, err := targetsets.ServiceGenerator(api.loadServiceAuthenticators(targetsets.ServiceConfig)...)
+	service, err := api.services.service(targetsets.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return targetsets.ServiceGenerator(api.loadServiceAuthenticators(targetsets.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[targetsets.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*targetsets.IdsecSIAWorkspacesTargetSetsService), nil
 }
 
 func (api *IdsecAPI) SmSessionactivities() (*sessionactivities.IdsecSMSessionActivitiesService, error) {
-	if serviceIfs, ok := api.services[sessionactivities.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sessionactivities.IdsecSMSessionActivitiesService), nil
-	}
-	service, err := sessionactivities.ServiceGenerator(api.loadServiceAuthenticators(sessionactivities.ServiceConfig)...)
+	service, err := api.services.service(sessionactivities.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return sessionactivities.ServiceGenerator(api.loadServiceAuthenticators(sessionactivities.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[sessionactivities.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*sessionactivities.IdsecSMSessionActivitiesService), nil
 }
 
 func (api *IdsecAPI) SmSessions() (*sessions.IdsecSMSessionsService, error) {
-	if serviceIfs, ok := api.services[sessions.ServiceConfig.ServiceName]; ok {
-		return (*serviceIfs).(*sessions.IdsecSMSessionsService), nil
-	}
-	service, err := sessions.ServiceGenerator(api.loadServiceAuthenticators(sessions.ServiceConfig)...)
+	service, err := api.services.service(sessions.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return sessions.ServiceGenerator(api.loadServiceAuthenticators(sessions.ServiceConfig)...)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var baseService services.IdsecService = service
-	api.services[sessions.ServiceConfig.ServiceName] = &baseService
-	return service, nil
+	return (*service).(*sessions.IdsecSMSessionsService), nil
 }

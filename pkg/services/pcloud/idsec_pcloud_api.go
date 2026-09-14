@@ -7,6 +7,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/targetplatforms"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/users"
 )
 
 // IdsecPCloudAPI is a struct that provides access to the Idsec PCloud API as a wrapped set of services.
@@ -16,6 +17,7 @@ type IdsecPCloudAPI struct {
 	platformsService       *platforms.IdsecPCloudPlatformsService
 	targetPlatformsService *targetplatforms.IdsecPCloudTargetPlatformsService
 	applicationsService    *applications.IdsecPCloudApplicationsService
+	usersService           *users.IdsecPCloudUsersService
 }
 
 // NewIdsecPCloudAPI creates a new instance of IdsecPCloudAPI with the provided IdsecISPAuth.
@@ -41,12 +43,17 @@ func NewIdsecPCloudAPI(ispAuth *auth.IdsecISPAuth) (*IdsecPCloudAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	usersService, err := users.NewIdsecPCloudUsersService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	return &IdsecPCloudAPI{
 		safesService:           safesService,
 		accountsService:        accountsService,
 		platformsService:       platformsService,
 		targetPlatformsService: targetPlatformsService,
 		applicationsService:    applicationsService,
+		usersService:           usersService,
 	}, nil
 }
 
@@ -73,4 +80,9 @@ func (api *IdsecPCloudAPI) TargetPlatforms() *targetplatforms.IdsecPCloudTargetP
 // Applications returns the Applications service of the IdsecPCloudAPI instance.
 func (api *IdsecPCloudAPI) Applications() *applications.IdsecPCloudApplicationsService {
 	return api.applicationsService
+}
+
+// Users returns the Users service of the IdsecPCloudAPI instance.
+func (api *IdsecPCloudAPI) Users() *users.IdsecPCloudUsersService {
+	return api.usersService
 }

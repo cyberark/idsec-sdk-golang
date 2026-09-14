@@ -9,11 +9,16 @@ import (
 
 // IdsecSyncTelemetry represents telemetry data for IDSEC SDK applications.
 type IdsecSyncTelemetry struct {
-	Collectors               []collectors.IdsecMetricsCollector
-	Encoder                  encoders.IdsecMetricsEncoder
-	lastCollectedMetrics     map[string]*collectors.IdsecMetrics
+	Collectors []collectors.IdsecMetricsCollector
+	Encoder    encoders.IdsecMetricsEncoder
+	// lastCollectedMetricsLock guards lastCollectedMetrics, which caches the
+	// collectors that report themselves static so that probing the OS and the
+	// environment is not repeated for every request.
+	//
+	// The encoded header is deliberately not cached alongside them: it
+	// describes one request, so a cached one would be sent for another.
 	lastCollectedMetricsLock sync.Mutex
-	lastCollectedEncoded     []byte
+	lastCollectedMetrics     map[string]*collectors.IdsecMetrics
 }
 
 // NewIdsecSyncTelemetry creates a new instance of IdsecTelemetry with the specified collectors and encoder.
@@ -47,22 +52,19 @@ func NewLimitedIdsecSyncTelemetry() IdsecTelemetry {
 	)
 }
 
-// CollectAndEncodeMetrics collects metrics from all collectors and encodes them using the specified encoder.
-func (a *IdsecSyncTelemetry) CollectAndEncodeMetrics() ([]byte, error) {
-	// If all the collectors are static, no need to collect anything
-	// Reuse existing collected metrics
-	if a.lastCollectedEncoded != nil {
-		isStaticCollection := true
-		for _, collector := range a.Collectors {
-			if collector.IsDynamicMetrics() {
-				isStaticCollection = false
-				break
-			}
-		}
-		if isStaticCollection {
-			return a.lastCollectedEncoded, nil
-		}
-	}
+// CollectAndEncodeMetrics collects metrics from all collectors and encodes them
+// into a header describing the given request.
+//
+// A collector that knows how to describe a request is given it; the rest are
+// collected as usual, and those reporting themselves static are collected only
+// once. The resulting header is built fresh every time, because the request
+// part of it differs for every request.
+//
+// Parameters:
+//   - request: The request the header is being built for
+//
+// Returns the encoded header, or an error if a collector or the encoder failed.
+func (a *IdsecSyncTelemetry) CollectAndEncodeMetrics(request collectors.IdsecRequestMetadata) ([]byte, error) {
 	// Collect metrics from each collector
 	// If the collector is static and we have already collected metrics from it, reuse them
 	// Note that we need to lock access to lastCollectedMetrics map to avoid multiple goroutines collecting metrics at the same time
@@ -77,7 +79,7 @@ func (a *IdsecSyncTelemetry) CollectAndEncodeMetrics() ([]byte, error) {
 				continue
 			}
 		}
-		metrics, err := collector.CollectMetrics()
+		metrics, err := collectMetrics(collector, request)
 		if err != nil {
 			return nil, err
 		}
@@ -85,12 +87,22 @@ func (a *IdsecSyncTelemetry) CollectAndEncodeMetrics() ([]byte, error) {
 		allMetrics = append(allMetrics, metrics)
 	}
 	// Encode all collected metrics
-	encodedMetrics, err := a.Encoder.EncodeMetrics(allMetrics)
-	if err != nil {
-		return nil, err
+	return a.Encoder.EncodeMetrics(allMetrics)
+}
+
+// requestMetricsCollector is a collector that describes a single request rather
+// than the process it is running in.
+type requestMetricsCollector interface {
+	CollectMetricsForRequest(request collectors.IdsecRequestMetadata) (*collectors.IdsecMetrics, error)
+}
+
+// collectMetrics collects from a collector, passing it the request when it is
+// able to describe one.
+func collectMetrics(collector collectors.IdsecMetricsCollector, request collectors.IdsecRequestMetadata) (*collectors.IdsecMetrics, error) {
+	if forRequest, ok := collector.(requestMetricsCollector); ok {
+		return forRequest.CollectMetricsForRequest(request)
 	}
-	a.lastCollectedEncoded = encodedMetrics
-	return encodedMetrics, nil
+	return collector.CollectMetrics()
 }
 
 // CollectorByName returns the IdsecMetricsCollector with the specified name, or nil if not found.

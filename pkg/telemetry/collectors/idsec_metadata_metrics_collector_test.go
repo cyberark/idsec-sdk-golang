@@ -31,17 +31,8 @@ func TestNewIdsecMetadataMetricsCollector(t *testing.T) {
 
 			// Verify initial state
 			metadataCollector := collector.(*IdsecMetadataMetricsCollector)
-			if metadataCollector.service != "" {
-				t.Errorf("Expected empty service, got '%s'", metadataCollector.service)
-			}
-			if metadataCollector.class != "" {
-				t.Errorf("Expected empty class, got '%s'", metadataCollector.class)
-			}
-			if metadataCollector.operation != "" {
-				t.Errorf("Expected empty operation, got '%s'", metadataCollector.operation)
-			}
-			if !metadataCollector.changedFromLastCollection {
-				t.Error("Expected changedFromLastCollection to be true initially")
+			if len(metadataCollector.extraContextFields) != 0 {
+				t.Errorf("Expected no tool context fields, got %d", len(metadataCollector.extraContextFields))
 			}
 		})
 	}
@@ -50,20 +41,13 @@ func TestNewIdsecMetadataMetricsCollector(t *testing.T) {
 func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 	tests := []struct {
 		name            string
-		setupCollector  func() *IdsecMetadataMetricsCollector
+		request         IdsecRequestMetadata
 		expectedMetrics int
 		validateFunc    func(t *testing.T, metrics *IdsecMetrics)
-		expectedChanged bool
 	}{
 		{
-			name: "success_collects_all_metadata_metrics",
-			setupCollector: func() *IdsecMetadataMetricsCollector {
-				return &IdsecMetadataMetricsCollector{
-					changedFromLastCollection: true,
-				}
-			},
+			name:            "success_collects_all_metadata_metrics",
 			expectedMetrics: 13, // Base metrics without tool context fields
-			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				if metrics.Collector != IdsecMetadataMetricsCollectorName {
 					t.Errorf("Expected collector name '%s', got '%s'", IdsecMetadataMetricsCollectorName, metrics.Collector)
@@ -74,54 +58,36 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 			},
 		},
 		{
-			name: "success_with_service_class_operation_set",
-			setupCollector: func() *IdsecMetadataMetricsCollector {
-				return &IdsecMetadataMetricsCollector{
-					route:                     "test-route",
-					service:                   "test-service",
-					class:                     "test-class",
-					operation:                 "test-operation",
-					changedFromLastCollection: true,
-				}
+			name: "success_reports_the_given_request",
+			request: IdsecRequestMetadata{
+				Route:     "test-route",
+				Service:   "test-service",
+				Class:     "test-class",
+				Operation: "test-operation",
 			},
 			expectedMetrics: 13, // Base metrics without tool context fields
-			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
-				serviceMetric := findMetricByName(metrics.Metrics, "service")
-				if serviceMetric == nil {
-					t.Error("Expected to find 'service' metric")
-				} else if serviceMetric.Value != "test-service" {
-					t.Errorf("Expected service value 'test-service', got '%v'", serviceMetric.Value)
-				}
-
-				classMetric := findMetricByName(metrics.Metrics, "class")
-				if classMetric == nil {
-					t.Error("Expected to find 'class' metric")
-				} else if classMetric.Value != "test-class" {
-					t.Errorf("Expected class value 'test-class', got '%v'", classMetric.Value)
-				}
-
-				operationMetric := findMetricByName(metrics.Metrics, "operation")
-				if operationMetric == nil {
-					t.Error("Expected to find 'operation' metric")
-				} else if operationMetric.Value != "test-operation" {
-					t.Errorf("Expected operation value 'test-operation', got '%v'", operationMetric.Value)
+				for name, expected := range map[string]string{
+					"route":     "test-route",
+					"service":   "test-service",
+					"class":     "test-class",
+					"operation": "test-operation",
+				} {
+					metric := findMetricByName(metrics.Metrics, name)
+					if metric == nil {
+						t.Errorf("Expected to find '%s' metric", name)
+						continue
+					}
+					if metric.Value != expected {
+						t.Errorf("Expected %s value '%s', got '%v'", name, expected, metric.Value)
+					}
 				}
 			},
 		},
 		{
-			name: "success_empty_service_class_operation",
-			setupCollector: func() *IdsecMetadataMetricsCollector {
-				return &IdsecMetadataMetricsCollector{
-					route:                     "",
-					service:                   "",
-					class:                     "",
-					operation:                 "",
-					changedFromLastCollection: true,
-				}
-			},
+			name:            "success_reports_an_empty_request",
+			request:         IdsecRequestMetadata{},
 			expectedMetrics: 13, // Base metrics without tool context fields
-			expectedChanged: false,
 			validateFunc: func(t *testing.T, metrics *IdsecMetrics) {
 				serviceMetric := findMetricByName(metrics.Metrics, "service")
 				if serviceMetric == nil {
@@ -131,24 +97,14 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "success_resets_changed_flag_after_collection",
-			setupCollector: func() *IdsecMetadataMetricsCollector {
-				return &IdsecMetadataMetricsCollector{
-					changedFromLastCollection: true,
-				}
-			},
-			expectedMetrics: 13, // Base metrics without tool context fields
-			expectedChanged: false,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			collector := tt.setupCollector()
-			metrics, err := collector.CollectMetrics()
+			collector := &IdsecMetadataMetricsCollector{}
+			metrics, err := collector.CollectMetricsForRequest(tt.request)
 
 			if err != nil {
 				t.Errorf("Expected no error, got %v", err)
@@ -162,10 +118,6 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics(t *testing.T) {
 
 			if len(metrics.Metrics) != tt.expectedMetrics {
 				t.Errorf("Expected %d metrics, got %d", tt.expectedMetrics, len(metrics.Metrics))
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection to be %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
 			}
 
 			if tt.validateFunc != nil {
@@ -262,37 +214,23 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics_AllMetricsPresent(t *testi
 	}
 }
 
+// These metrics describe the request being sent, so the collector must always
+// report itself dynamic. Reporting otherwise would let one request's header be
+// cached and sent for another.
 func TestIdsecMetadataMetricsCollector_IsDynamicMetrics(t *testing.T) {
-	tests := []struct {
-		name                      string
-		changedFromLastCollection bool
-		expected                  bool
-	}{
-		{
-			name:                      "success_returns_true_when_changed",
-			changedFromLastCollection: true,
-			expected:                  true,
-		},
-		{
-			name:                      "success_returns_false_when_not_changed",
-			changedFromLastCollection: false,
-			expected:                  false,
-		},
+	t.Parallel()
+
+	collector := &IdsecMetadataMetricsCollector{}
+	if !collector.IsDynamicMetrics() {
+		t.Error("Expected IsDynamicMetrics() to return true")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				changedFromLastCollection: tt.changedFromLastCollection,
-			}
-			result := collector.IsDynamicMetrics()
-
-			if result != tt.expected {
-				t.Errorf("Expected IsDynamicMetrics() to return %v, got %v", tt.expected, result)
-			}
-		})
+	// Collecting must not make it cacheable either.
+	if _, err := collector.CollectMetricsForRequest(IdsecRequestMetadata{Route: "/a"}); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !collector.IsDynamicMetrics() {
+		t.Error("Expected IsDynamicMetrics() to still return true after collection")
 	}
 }
 
@@ -316,270 +254,6 @@ func TestIdsecMetadataMetricsCollector_CollectorName(t *testing.T) {
 
 			if result != tt.expected {
 				t.Errorf("Expected CollectorName() to return '%s', got '%s'", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_SetService(t *testing.T) {
-	tests := []struct {
-		name            string
-		initialService  string
-		newService      string
-		expectedService string
-		expectedChanged bool
-	}{
-		{
-			name:            "success_sets_service_and_marks_changed",
-			initialService:  "",
-			newService:      "new-service",
-			expectedService: "new-service",
-			expectedChanged: true,
-		},
-		{
-			name:            "success_updates_existing_service",
-			initialService:  "old-service",
-			newService:      "new-service",
-			expectedService: "new-service",
-			expectedChanged: true,
-		},
-		{
-			name:            "success_sets_empty_service",
-			initialService:  "existing-service",
-			newService:      "",
-			expectedService: "",
-			expectedChanged: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				service:                   tt.initialService,
-				changedFromLastCollection: false,
-			}
-
-			collector.SetService(tt.newService)
-
-			if collector.service != tt.expectedService {
-				t.Errorf("Expected service '%s', got '%s'", tt.expectedService, collector.service)
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection to be %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_SetClass(t *testing.T) {
-	tests := []struct {
-		name            string
-		initialClass    string
-		newClass        string
-		expectedClass   string
-		expectedChanged bool
-	}{
-		{
-			name:            "success_sets_class_and_marks_changed",
-			initialClass:    "",
-			newClass:        "new-class",
-			expectedClass:   "new-class",
-			expectedChanged: true,
-		},
-		{
-			name:            "success_updates_existing_class",
-			initialClass:    "old-class",
-			newClass:        "new-class",
-			expectedClass:   "new-class",
-			expectedChanged: true,
-		},
-		{
-			name:            "success_sets_empty_class",
-			initialClass:    "existing-class",
-			newClass:        "",
-			expectedClass:   "",
-			expectedChanged: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				class:                     tt.initialClass,
-				changedFromLastCollection: false,
-			}
-
-			collector.SetClass(tt.newClass)
-
-			if collector.class != tt.expectedClass {
-				t.Errorf("Expected class '%s', got '%s'", tt.expectedClass, collector.class)
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection to be %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_SetOperation(t *testing.T) {
-	tests := []struct {
-		name              string
-		initialOperation  string
-		newOperation      string
-		expectedOperation string
-		expectedChanged   bool
-	}{
-		{
-			name:              "success_sets_operation_and_marks_changed",
-			initialOperation:  "",
-			newOperation:      "new-operation",
-			expectedOperation: "new-operation",
-			expectedChanged:   true,
-		},
-		{
-			name:              "success_updates_existing_operation",
-			initialOperation:  "old-operation",
-			newOperation:      "new-operation",
-			expectedOperation: "new-operation",
-			expectedChanged:   true,
-		},
-		{
-			name:              "success_sets_empty_operation",
-			initialOperation:  "existing-operation",
-			newOperation:      "",
-			expectedOperation: "",
-			expectedChanged:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				operation:                 tt.initialOperation,
-				changedFromLastCollection: false,
-			}
-
-			collector.SetOperation(tt.newOperation)
-
-			if collector.operation != tt.expectedOperation {
-				t.Errorf("Expected operation '%s', got '%s'", tt.expectedOperation, collector.operation)
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection to be %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_Service(t *testing.T) {
-	tests := []struct {
-		name            string
-		service         string
-		expectedService string
-	}{
-		{
-			name:            "success_returns_set_service",
-			service:         "test-service",
-			expectedService: "test-service",
-		},
-		{
-			name:            "success_returns_empty_service",
-			service:         "",
-			expectedService: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				service: tt.service,
-			}
-
-			result := collector.Service()
-
-			if result != tt.expectedService {
-				t.Errorf("Expected Service() to return '%s', got '%s'", tt.expectedService, result)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_Class(t *testing.T) {
-	tests := []struct {
-		name          string
-		class         string
-		expectedClass string
-	}{
-		{
-			name:          "success_returns_set_class",
-			class:         "test-class",
-			expectedClass: "test-class",
-		},
-		{
-			name:          "success_returns_empty_class",
-			class:         "",
-			expectedClass: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				class: tt.class,
-			}
-
-			result := collector.Class()
-
-			if result != tt.expectedClass {
-				t.Errorf("Expected Class() to return '%s', got '%s'", tt.expectedClass, result)
-			}
-		})
-	}
-}
-
-func TestIdsecMetadataMetricsCollector_Operation(t *testing.T) {
-	tests := []struct {
-		name              string
-		operation         string
-		expectedOperation string
-	}{
-		{
-			name:              "success_returns_set_operation",
-			operation:         "test-operation",
-			expectedOperation: "test-operation",
-		},
-		{
-			name:              "success_returns_empty_operation",
-			operation:         "",
-			expectedOperation: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			collector := &IdsecMetadataMetricsCollector{
-				operation: tt.operation,
-			}
-
-			result := collector.Operation()
-
-			if result != tt.expectedOperation {
-				t.Errorf("Expected Operation() to return '%s', got '%s'", tt.expectedOperation, result)
 			}
 		})
 	}
@@ -648,94 +322,6 @@ func TestIdsecMetadataMetricsCollector_MetricStructure(t *testing.T) {
 	}
 }
 
-func TestIdsecMetadataMetricsCollector_ChangedFlagBehavior(t *testing.T) {
-	tests := []struct {
-		name         string
-		setupFunc    func(collector *IdsecMetadataMetricsCollector)
-		validateFunc func(t *testing.T, collector *IdsecMetadataMetricsCollector)
-	}{
-		{
-			name: "success_collect_resets_changed_flag",
-			setupFunc: func(collector *IdsecMetadataMetricsCollector) {
-				collector.changedFromLastCollection = true
-			},
-			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector) {
-				_, err := collector.CollectMetrics()
-				if err != nil {
-					t.Errorf("Expected no error, got %v", err)
-				}
-				if collector.changedFromLastCollection {
-					t.Error("Expected changedFromLastCollection to be false after CollectMetrics")
-				}
-			},
-		},
-		{
-			name: "success_set_service_sets_changed_flag",
-			setupFunc: func(collector *IdsecMetadataMetricsCollector) {
-				collector.changedFromLastCollection = false
-			},
-			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector) {
-				collector.SetService("test")
-				if !collector.changedFromLastCollection {
-					t.Error("Expected changedFromLastCollection to be true after SetService")
-				}
-			},
-		},
-		{
-			name: "success_set_class_sets_changed_flag",
-			setupFunc: func(collector *IdsecMetadataMetricsCollector) {
-				collector.changedFromLastCollection = false
-			},
-			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector) {
-				collector.SetClass("test")
-				if !collector.changedFromLastCollection {
-					t.Error("Expected changedFromLastCollection to be true after SetClass")
-				}
-			},
-		},
-		{
-			name: "success_set_operation_sets_changed_flag",
-			setupFunc: func(collector *IdsecMetadataMetricsCollector) {
-				collector.changedFromLastCollection = false
-			},
-			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector) {
-				collector.SetOperation("test")
-				if !collector.changedFromLastCollection {
-					t.Error("Expected changedFromLastCollection to be true after SetOperation")
-				}
-			},
-		},
-		{
-			name: "success_multiple_sets_keep_changed_flag_true",
-			setupFunc: func(collector *IdsecMetadataMetricsCollector) {
-				collector.changedFromLastCollection = false
-			},
-			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector) {
-				collector.SetService("test1")
-				collector.SetClass("test2")
-				collector.SetOperation("test3")
-				if !collector.changedFromLastCollection {
-					t.Error("Expected changedFromLastCollection to be true after multiple sets")
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			collector := &IdsecMetadataMetricsCollector{}
-
-			if tt.setupFunc != nil {
-				tt.setupFunc(collector)
-			}
-
-			if tt.validateFunc != nil {
-				tt.validateFunc(t, collector)
-			}
-		})
-	}
-}
-
 func TestIdsecMetadataMetricsCollector_Integration(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -743,25 +329,26 @@ func TestIdsecMetadataMetricsCollector_Integration(t *testing.T) {
 		validateFunc func(t *testing.T, collector *IdsecMetadataMetricsCollector, metrics1, metrics2 *IdsecMetrics)
 	}{
 		{
-			name: "success_full_lifecycle_with_changes",
+			name: "success_reports_each_request_on_its_own_terms",
 			setupFunc: func() *IdsecMetadataMetricsCollector {
-				return &IdsecMetadataMetricsCollector{
-					changedFromLastCollection: true,
-				}
+				return &IdsecMetadataMetricsCollector{}
 			},
 			validateFunc: func(t *testing.T, collector *IdsecMetadataMetricsCollector, metrics1, metrics2 *IdsecMetrics) {
-				// First collection
-				if collector.IsDynamicMetrics() {
-					t.Error("Expected IsDynamicMetrics to be false after first collection")
+				// Each collection must report the request it was given rather
+				// than the last one the collector happened to see.
+				first, err := collector.CollectMetricsForRequest(IdsecRequestMetadata{Route: "/first"})
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
 				}
-
-				// Make changes
-				collector.SetService("test-service")
-				collector.SetClass("test-class")
-				collector.SetOperation("test-operation")
-
-				if !collector.IsDynamicMetrics() {
-					t.Error("Expected IsDynamicMetrics to be true after changes")
+				second, err := collector.CollectMetricsForRequest(IdsecRequestMetadata{Route: "/second"})
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+				if route := findMetricByName(first.Metrics, "route"); route == nil || route.Value != "/first" {
+					t.Errorf("First request reported route %v, want /first", route)
+				}
+				if route := findMetricByName(second.Metrics, "route"); route == nil || route.Value != "/second" {
+					t.Errorf("Second request reported route %v, want /second", route)
 				}
 			},
 		},

@@ -460,6 +460,14 @@ func (s *IdsecPCloudSafesService) Get(getSafe *safesmodels.IdsecPCloudGetSafe) (
 	return s.parseSafeResponse(response.Body)
 }
 
+// GetByName retrieves a safe by its name.
+// It is a convenience wrapper around Get that accepts only a name, using the
+// API search to locate the safe and then fetching its full details by ID.
+// Returns an error if no safe with the given name exists.
+func (s *IdsecPCloudSafesService) GetByName(getSafe *safesmodels.IdsecPCloudGetSafeByName) (*safesmodels.IdsecPCloudSafe, error) {
+	return s.Get(&safesmodels.IdsecPCloudGetSafe{SafeName: getSafe.SafeName})
+}
+
 // GetMember retrieves a safe member by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Member.htm
 func (s *IdsecPCloudSafesService) GetMember(getSafeMember *safesmodels.IdsecPCloudGetSafeMember) (*safesmodels.IdsecPCloudSafeMember, error) {

@@ -12,7 +12,7 @@ type IdsecSIADBAddSecret struct {
 
 	// Username Password Secret Type
 	Username string `json:"username,omitempty" mapstructure:"username" flag:"username" desc:"The name or ID of the user for username_password type."`
-	Password string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password of the user for username_password type."`
+	Password string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password of the user for username_password type." secret:"true"`
 
 	// PAM Account Secret Type
 	PAMSafe        string `json:"pam_safe,omitempty" mapstructure:"pam_safe" flag:"pam-safe" desc:"The Safe of the account for pam_account type."`
@@ -22,9 +22,9 @@ type IdsecSIADBAddSecret struct {
 	IAMAccount         string `json:"iam_account,omitempty" mapstructure:"iam_account" flag:"iam-account" desc:"The account number of the IAM user."`
 	IAMUsername        string `json:"iam_username,omitempty" mapstructure:"iam_username" flag:"iam-username" desc:"The username portion in the ARN of the IAM user."`
 	IAMAccessKeyID     string `json:"iam_access_key_id,omitempty" mapstructure:"iam_access_key_id" flag:"iam-access-key-id" desc:"The access key ID of the user."`
-	IAMSecretAccessKey string `json:"iam_secret_access_key,omitempty" mapstructure:"iam_secret_access_key" flag:"iam-secret-access-key" desc:"The Secret access key of the user."`
+	IAMSecretAccessKey string `json:"iam_secret_access_key,omitempty" mapstructure:"iam_secret_access_key" flag:"iam-secret-access-key" desc:"The Secret access key of the user." secret:"true"`
 
 	// Atlas Secret Type
 	AtlasPublicKey  string `json:"atlas_public_key,omitempty" mapstructure:"atlas_public_key" flag:"atlas-public-key" desc:"The public part of MongoDB Atlas access keys."`
-	AtlasPrivateKey string `json:"atlas_private_key,omitempty" mapstructure:"atlas_private_key" flag:"atlas-private-key" desc:"The private part of MongoDB Atlas access keys."`
+	AtlasPrivateKey string `json:"atlas_private_key,omitempty" mapstructure:"atlas_private_key" flag:"atlas-private-key" desc:"The private part of MongoDB Atlas access keys." secret:"true"`
 }

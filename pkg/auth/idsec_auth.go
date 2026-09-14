@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	authcommon "github.com/cyberark/idsec-sdk-golang/pkg/auth/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/keyring"
 	"github.com/cyberark/idsec-sdk-golang/pkg/profiles"
 
@@ -194,7 +195,7 @@ func (a *IdsecAuthBase) Authenticate(profile *models.IdsecProfile, authProfile *
 	if a.CacheAuthentication && a.CacheKeyring != nil && !force {
 		token, err = a.CacheKeyring.LoadToken(profile, a.ResolveCachePostfix(authProfile), false)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 		}
 		if token != nil && time.Time(token.ExpiresIn).Before(time.Now()) {
 			if refreshAuth && token.RefreshToken != "" {
@@ -217,7 +218,7 @@ func (a *IdsecAuthBase) Authenticate(profile *models.IdsecProfile, authProfile *
 		if token != nil && a.CacheAuthentication && a.CacheKeyring != nil {
 			err := a.CacheKeyring.SaveToken(profile, token, a.ResolveCachePostfix(authProfile), false)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 			}
 		}
 	} else if refreshAuth && !tokenRefreshed {
@@ -228,7 +229,7 @@ func (a *IdsecAuthBase) Authenticate(profile *models.IdsecProfile, authProfile *
 		if token != nil && a.CacheAuthentication && a.CacheKeyring != nil {
 			err := a.CacheKeyring.SaveToken(profile, token, a.ResolveCachePostfix(authProfile), false)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 			}
 		}
 	}
@@ -337,7 +338,7 @@ func (a *IdsecAuthBase) loadAuthentication(profile *models.IdsecProfile, refresh
 	if a.CacheKeyring != nil {
 		token, err = a.CacheKeyring.LoadToken(profile, a.ResolveCachePostfix(authProfile), false)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 		}
 	}
 	if refreshAuth {
@@ -361,7 +362,7 @@ func (a *IdsecAuthBase) loadAuthentication(profile *models.IdsecProfile, refresh
 			if token != nil && a.CacheAuthentication && a.CacheKeyring != nil {
 				err = a.CacheKeyring.SaveToken(profile, token, a.ResolveCachePostfix(authProfile), false)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 				}
 			}
 		}
@@ -373,6 +374,41 @@ func (a *IdsecAuthBase) loadAuthentication(profile *models.IdsecProfile, refresh
 		a.setState(token, profile, authProfile)
 	} else {
 		a.setState(nil, nil, nil)
+	}
+	return token, nil
+}
+
+// LoadCachedToken returns the token currently stored in the cache (keyring) for
+// this authenticator, if any, WITHOUT discarding it when it has expired.
+//
+// This differs from LoadAuthentication and IsAuthenticated, which treat an
+// expired cached token as absent. It performs no refresh and no network calls,
+// so a caller (for example a status probe) can distinguish "no cached token"
+// (nil, nil) from "a cached token that has expired" (a non-nil token whose
+// ExpiresIn is in the past). A keyring read failure is wrapped so it can be
+// classified via authcommon.Classify.
+func (a *IdsecAuthBase) LoadCachedToken(profile *models.IdsecProfile) (*auth.IdsecToken, error) {
+	a.opMu.Lock()
+	defer a.opMu.Unlock()
+
+	if profile == nil {
+		if _, activeProfile, _ := a.snapshotState(); activeProfile != nil {
+			profile = activeProfile
+		} else {
+			profilesLoader := profiles.DefaultProfilesLoader()
+			profile, _ = (*profilesLoader).LoadDefaultProfile()
+		}
+	}
+	if profile == nil || a.CacheKeyring == nil {
+		return nil, nil
+	}
+	authProfile, ok := profile.AuthProfiles[a.Authenticator.AuthenticatorName()]
+	if !ok {
+		return nil, nil
+	}
+	token, err := a.CacheKeyring.LoadToken(profile, a.ResolveCachePostfix(authProfile), false)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", authcommon.ErrKeyringFailure, err)
 	}
 	return token, nil
 }

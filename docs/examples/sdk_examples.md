@@ -69,6 +69,22 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("%s\n", ssoPassword)
+
+	// Generate a short-lived RDP file for a windows machine
+	// To connect with a specific vaulted account of the target user, set VaultedAccountID
+	// in the <safe id>_<account id> format; it requires TargetUser to be set as well
+	err = ssoService.ShortLivedRdpFile(
+		&ssomodels.IdsecSIASSOGetShortLivedRDPFile{
+			Folder:           "~/Downloads",
+			TargetAddress:    "mymachine.mydomain.com",
+			TargetDomain:     "mydomain.com",
+			TargetUser:       "myuser",
+			VaultedAccountID: "10_10",
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
 }
 ```
 

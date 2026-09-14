@@ -631,14 +631,16 @@ func buildK8sClusterPolicyFromBodyTemplate(
 	targets := policyk8smodels.IdsecPolicyK8sTargets{
 		AwsAccountTargets: []policyk8smodels.IdsecPolicyK8sAWSAccountTarget{
 			{
-				IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+				IdsecPolicyK8sAWSTarget: policyk8smodels.IdsecPolicyK8sAWSTarget{
+					IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+						Scope: scope,
+						FQDN:  fqdn,
+					},
 					RoleID:        target.RoleInfo.ID,
 					WorkspaceID:   target.WorkspaceID,
 					RoleName:      target.RoleInfo.Name,
 					WorkspaceName: target.WorkspaceName,
-					Scope:         scope,
 					ClusterID:     clusterID,
-					FQDN:          fqdn,
 				},
 			},
 		},
@@ -657,15 +659,15 @@ func buildK8sClusterPolicyFromBodyTemplate(
 		targets = policyk8smodels.IdsecPolicyK8sTargets{
 			AzureTargets: []policyk8smodels.IdsecPolicyK8sAzureTarget{
 				{
-					IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
-						RoleID:        target.RoleInfo.ID,
-						WorkspaceID:   target.WorkspaceID,
-						RoleName:      target.RoleInfo.Name,
-						WorkspaceName: target.WorkspaceName,
-						Scope:         scope,
-						ClusterID:     clusterID,
-						FQDN:          fqdn,
+					IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+						Scope: scope,
+						FQDN:  fqdn,
 					},
+					RoleID:        target.RoleInfo.ID,
+					WorkspaceID:   target.WorkspaceID,
+					RoleName:      target.RoleInfo.Name,
+					WorkspaceName: target.WorkspaceName,
+					ClusterID:     clusterID,
 					OrgID:         target.OrganizationID,
 					WorkspaceType: normalizeAzureWorkspaceType(target.WorkspaceType),
 				},

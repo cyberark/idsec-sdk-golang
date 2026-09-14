@@ -755,6 +755,14 @@ func (s *IdsecPCloudAccountsService) Get(getAccount *accountsmodels.IdsecPCloudG
 	return s.parseAccountResponse(response.Body)
 }
 
+// GetByName retrieves an account by its name.
+// It is a convenience wrapper around Get that accepts only a name, using the
+// API search to locate the account and then fetching its full details by ID.
+// Returns an error if no account with the given name exists.
+func (s *IdsecPCloudAccountsService) GetByName(getAccount *accountsmodels.IdsecPCloudGetAccountByName) (*accountsmodels.IdsecPCloudAccount, error) {
+	return s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountName: getAccount.AccountName})
+}
+
 // GetCredentials retrieves the credentials of an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/GetPasswordValueV10.htm?
 func (s *IdsecPCloudAccountsService) GetCredentials(getAccount *accountsmodels.IdsecPCloudGetAccountCredentials) (*accountsmodels.IdsecPCloudAccountCredentials, error) {

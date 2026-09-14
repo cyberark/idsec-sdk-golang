@@ -143,14 +143,16 @@ func exampleK8sPolicy() *policyk8smodels.IdsecPolicyK8sPolicy {
 		Targets: policyk8smodels.IdsecPolicyK8sTargets{
 			AwsAccountTargets: []policyk8smodels.IdsecPolicyK8sAWSAccountTarget{
 				{
-					IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+					IdsecPolicyK8sAWSTarget: policyk8smodels.IdsecPolicyK8sAWSTarget{
+						IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+							Scope: "cluster",
+							FQDN:  "https://example-cluster.eks.us-east-1.amazonaws.com",
+						},
 						RoleID:        "arn:aws:iam::123456789012:role/ExampleEKSRole",
 						WorkspaceID:   "123456789012",
 						RoleName:      "ExampleEKSRole",
 						WorkspaceName: "Example AWS Account",
-						Scope:         "cluster",
 						ClusterID:     "arn:aws:eks:us-east-1:123456789012:cluster/example-cluster",
-						FQDN:          "https://example-cluster.eks.us-east-1.amazonaws.com",
 					},
 				},
 			},
@@ -175,9 +177,11 @@ The policy `Targets` field accepts three target types; set
 Targets: policyk8smodels.IdsecPolicyK8sTargets{
 	AzureTargets: []policyk8smodels.IdsecPolicyK8sAzureTarget{
 		{
+			IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+				Scope: "cluster",
+			},
 			RoleID:        "role-id",
 			WorkspaceID:   "workspace-id",
-			Scope:         "cluster",
 			ClusterID:     "/subscriptions/.../managedClusters/example",
 			OrgID:         "tenant-uuid",
 			WorkspaceType: policyk8smodels.AzureWSTypeResource,
@@ -197,11 +201,13 @@ organization / SSO instance owner account. There is no separate permission-set f
 Targets: policyk8smodels.IdsecPolicyK8sTargets{
 	AwsIdcTargets: []policyk8smodels.IdsecPolicyK8sAWSIDCTarget{
 		{
-			IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+			IdsecPolicyK8sAWSTarget: policyk8smodels.IdsecPolicyK8sAWSTarget{
+				IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+					Scope: "cluster",
+				},
 				RoleID:      "arn:aws:sso:::permissionSet/ssoins-xxxx/ps-xxxx",
 				RoleName:    "AdminPS",
 				WorkspaceID: "081626391589",
-				Scope:       "cluster",
 				ClusterID:   "arn:aws:eks:us-east-1:081626391589:cluster/example-cluster",
 			},
 			OrgID: "081626391589",

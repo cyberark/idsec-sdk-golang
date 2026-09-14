@@ -8,36 +8,32 @@ import (
 // TestIdsecMetadataMetricsCollector_AddExtraContextField tests the AddExtraContextField method.
 func TestIdsecMetadataMetricsCollector_AddExtraContextField(t *testing.T) {
 	tests := []struct {
-		name            string
-		fieldName       string
-		shortName       string
-		value           string
-		expectedValue   string
-		expectedChanged bool
+		name          string
+		fieldName     string
+		shortName     string
+		value         string
+		expectedValue string
 	}{
 		{
-			name:            "success_adds_context_field",
-			fieldName:       "tool_name",
-			shortName:       "tn",
-			value:           "my_tool",
-			expectedValue:   "my_tool",
-			expectedChanged: true,
+			name:          "success_adds_context_field",
+			fieldName:     "tool_name",
+			shortName:     "tn",
+			value:         "my_tool",
+			expectedValue: "my_tool",
 		},
 		{
-			name:            "success_adds_empty_value",
-			fieldName:       "field_name",
-			shortName:       "fn",
-			value:           "",
-			expectedValue:   "",
-			expectedChanged: true,
+			name:          "success_adds_empty_value",
+			fieldName:     "field_name",
+			shortName:     "fn",
+			value:         "",
+			expectedValue: "",
 		},
 		{
-			name:            "success_overwrites_existing_field",
-			fieldName:       "context_field",
-			shortName:       "cf",
-			value:           "new_value",
-			expectedValue:   "new_value",
-			expectedChanged: true,
+			name:          "success_overwrites_existing_field",
+			fieldName:     "context_field",
+			shortName:     "cf",
+			value:         "new_value",
+			expectedValue: "new_value",
 		},
 	}
 
@@ -46,8 +42,7 @@ func TestIdsecMetadataMetricsCollector_AddExtraContextField(t *testing.T) {
 			t.Parallel()
 
 			collector := &IdsecMetadataMetricsCollector{
-				extraContextFields:        make(map[string]extraContextField),
-				changedFromLastCollection: false,
+				extraContextFields: make(map[string]extraContextField),
 			}
 
 			collector.AddExtraContextField(tt.fieldName, tt.shortName, tt.value)
@@ -55,10 +50,6 @@ func TestIdsecMetadataMetricsCollector_AddExtraContextField(t *testing.T) {
 			value, _ := collector.GetExtraContextField(tt.shortName)
 			if value != tt.expectedValue {
 				t.Errorf("Expected value '%s', got '%s'", tt.expectedValue, value)
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
 			}
 		})
 	}
@@ -123,33 +114,27 @@ func TestIdsecMetadataMetricsCollector_GetExtraContextField(t *testing.T) {
 // TestIdsecMetadataMetricsCollector_ClearExtraContext tests the ClearExtraContext method.
 func TestIdsecMetadataMetricsCollector_ClearExtraContext(t *testing.T) {
 	tests := []struct {
-		name            string
-		setupCollector  func() *IdsecMetadataMetricsCollector
-		expectedChanged bool
+		name           string
+		setupCollector func() *IdsecMetadataMetricsCollector
 	}{
 		{
 			name: "success_clears_all_fields",
 			setupCollector: func() *IdsecMetadataMetricsCollector {
 				collector := &IdsecMetadataMetricsCollector{
-					extraContextFields:        make(map[string]extraContextField),
-					changedFromLastCollection: false,
+					extraContextFields: make(map[string]extraContextField),
 				}
 				collector.AddExtraContextField("field1", "f1", "value1")
 				collector.AddExtraContextField("field2", "f2", "value2")
-				collector.changedFromLastCollection = false
 				return collector
 			},
-			expectedChanged: true,
 		},
 		{
 			name: "success_clears_when_already_empty",
 			setupCollector: func() *IdsecMetadataMetricsCollector {
 				return &IdsecMetadataMetricsCollector{
-					extraContextFields:        make(map[string]extraContextField),
-					changedFromLastCollection: false,
+					extraContextFields: make(map[string]extraContextField),
 				}
 			},
-			expectedChanged: true,
 		},
 	}
 
@@ -162,10 +147,6 @@ func TestIdsecMetadataMetricsCollector_ClearExtraContext(t *testing.T) {
 
 			if len(collector.extraContextFields) != 0 {
 				t.Errorf("Expected empty extraContextFields, got %d fields", len(collector.extraContextFields))
-			}
-
-			if collector.changedFromLastCollection != tt.expectedChanged {
-				t.Errorf("Expected changedFromLastCollection %v, got %v", tt.expectedChanged, collector.changedFromLastCollection)
 			}
 		})
 	}
@@ -183,8 +164,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics_WithExtraContext(t *testin
 			name: "success_includes_extra_context_in_metrics",
 			setupCollector: func() *IdsecMetadataMetricsCollector {
 				collector := &IdsecMetadataMetricsCollector{
-					extraContextFields:        make(map[string]extraContextField),
-					changedFromLastCollection: true,
+					extraContextFields: make(map[string]extraContextField),
 				}
 				collector.AddExtraContextField("tool_name", "tn", "my_tool")
 				collector.AddExtraContextField("tool_version", "tv", "1.0.0")
@@ -220,8 +200,7 @@ func TestIdsecMetadataMetricsCollector_CollectMetrics_WithExtraContext(t *testin
 			name: "success_no_extra_fields_when_not_set",
 			setupCollector: func() *IdsecMetadataMetricsCollector {
 				return &IdsecMetadataMetricsCollector{
-					extraContextFields:        make(map[string]extraContextField),
-					changedFromLastCollection: true,
+					extraContextFields: make(map[string]extraContextField),
 				}
 			},
 			expectedMetricsCount: 13, // 13 base + 0 extra fields
@@ -307,8 +286,7 @@ func TestIdsecMetadataMetricsCollector_ExtraContextIntegration(t *testing.T) {
 			t.Parallel()
 
 			collector := &IdsecMetadataMetricsCollector{
-				extraContextFields:        make(map[string]extraContextField),
-				changedFromLastCollection: false,
+				extraContextFields: make(map[string]extraContextField),
 			}
 
 			tt.operations(collector)

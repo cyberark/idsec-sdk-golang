@@ -116,10 +116,6 @@ func TestNewIdsecSyncTelemetry(t *testing.T) {
 				t.Error("Expected encoder to match provided encoder")
 			}
 
-			if syncTelemetry.lastCollectedEncoded != nil {
-				t.Error("Expected lastCollectedEncoded to be nil on initialization")
-			}
-
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, telemetry)
 			}
@@ -162,16 +158,6 @@ func TestNewDefaultIdsecSyncTelemetry(t *testing.T) {
 				syncTelemetry := telemetry.(*IdsecSyncTelemetry)
 				if _, ok := syncTelemetry.Encoder.(*encoders.IdsecTelemetryHeaderMetricsEncoder); !ok {
 					t.Error("Expected encoder to be IdsecTelemetryHeaderMetricsEncoder")
-				}
-			},
-		},
-		{
-			name:               "success_initializes_with_nil_last_collected_metrics",
-			expectedCollectors: 3,
-			validateFunc: func(t *testing.T, telemetry IdsecTelemetry) {
-				syncTelemetry := telemetry.(*IdsecSyncTelemetry)
-				if syncTelemetry.lastCollectedEncoded != nil {
-					t.Error("Expected lastCollectedEncoded to be nil")
 				}
 			},
 		},
@@ -238,12 +224,12 @@ func TestNewLimitedIdsecSyncTelemetry(t *testing.T) {
 			},
 		},
 		{
-			name:               "success_initializes_with_nil_last_collected_encoded",
+			name:               "success_initializes_with_empty_collected_metrics_cache",
 			expectedCollectors: 1,
 			validateFunc: func(t *testing.T, telemetry IdsecTelemetry) {
 				syncTelemetry := telemetry.(*IdsecSyncTelemetry)
-				if syncTelemetry.lastCollectedEncoded != nil {
-					t.Error("Expected lastCollectedEncoded to be nil")
+				if len(syncTelemetry.lastCollectedMetrics) != 0 {
+					t.Error("Expected the collected metrics cache to start empty")
 				}
 			},
 		},
@@ -290,7 +276,9 @@ func TestNewLimitedIdsecSyncTelemetry(t *testing.T) {
 			expectedCollectors: 1,
 			validateFunc: func(t *testing.T, telemetry IdsecTelemetry) {
 				// Verify that returned type implements IdsecTelemetry interface
-				_, canCollect := telemetry.(interface{ CollectAndEncodeMetrics() ([]byte, error) })
+				_, canCollect := telemetry.(interface {
+					CollectAndEncodeMetrics(collectors.IdsecRequestMetadata) ([]byte, error)
+				})
 				if !canCollect {
 					t.Error("Expected telemetry to implement CollectAndEncodeMetrics method")
 				}
@@ -363,7 +351,6 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 		collectors      []collectors.IdsecMetricsCollector
 		encoder         encoders.IdsecMetricsEncoder
 		forceCollection bool
-		lastMetrics     []byte
 		expectedData    []byte
 		expectedError   bool
 		validateFunc    func(t *testing.T, telemetry *IdsecSyncTelemetry, result []byte)
@@ -446,7 +433,9 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			expectedError:   true,
 		},
 		{
-			name: "success_returns_cached_metrics_for_static_collectors",
+			// The header describes one request, so it is encoded afresh even
+			// when every collector feeding it reports itself static.
+			name: "success_encodes_a_header_even_for_static_collectors",
 			collectors: []collectors.IdsecMetricsCollector{
 				&mockCollector{
 					name:      "test",
@@ -460,8 +449,7 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("new-data")},
 			forceCollection: false,
-			lastMetrics:     []byte("cached-data"),
-			expectedData:    []byte("cached-data"),
+			expectedData:    []byte("new-data"),
 			expectedError:   false,
 		},
 		{
@@ -479,7 +467,6 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("new-data")},
 			forceCollection: true,
-			lastMetrics:     []byte("cached-data"),
 			expectedData:    []byte("new-data"),
 			expectedError:   false,
 		},
@@ -498,7 +485,6 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("new-data")},
 			forceCollection: false,
-			lastMetrics:     []byte("cached-data"),
 			expectedData:    []byte("new-data"),
 			expectedError:   false,
 		},
@@ -526,7 +512,6 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("mixed-data")},
 			forceCollection: false,
-			lastMetrics:     []byte("cached-data"),
 			expectedData:    []byte("mixed-data"),
 			expectedError:   false,
 		},
@@ -567,7 +552,6 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("first-collection")},
 			forceCollection: false,
-			lastMetrics:     nil,
 			expectedData:    []byte("first-collection"),
 			expectedError:   false,
 		},
@@ -586,16 +570,18 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 			},
 			encoder:         &mockEncoder{encodedData: []byte("cached-after-collection")},
 			forceCollection: false,
-			lastMetrics:     nil,
 			expectedData:    []byte("cached-after-collection"),
 			expectedError:   false,
 			validateFunc: func(t *testing.T, telemetry *IdsecSyncTelemetry, result []byte) {
-				if telemetry.lastCollectedEncoded == nil {
-					t.Error("Expected lastCollectedEncoded to be set after collection")
+				// The static collector is cached so that it is not re-collected
+				// per request, while the header itself is not.
+				cached, ok := telemetry.lastCollectedMetrics["test"]
+				if !ok {
+					t.Error("Expected the static collector to be cached after collection")
 					return
 				}
-				if !reflect.DeepEqual(telemetry.lastCollectedEncoded, result) {
-					t.Error("Expected lastCollectedEncoded to match returned result")
+				if cached.ShortName != "t" {
+					t.Errorf("Cached collector reported %q, want %q", cached.ShortName, "t")
 				}
 			},
 		},
@@ -609,10 +595,9 @@ func TestIdsecSyncTelemetry_CollectAndEncodeMetrics(t *testing.T) {
 				Collectors:           tt.collectors,
 				Encoder:              tt.encoder,
 				lastCollectedMetrics: make(map[string]*collectors.IdsecMetrics),
-				lastCollectedEncoded: tt.lastMetrics,
 			}
 
-			result, err := telemetry.CollectAndEncodeMetrics()
+			result, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 
 			if tt.expectedError {
 				if err == nil {
@@ -797,7 +782,7 @@ func TestIdsecSyncTelemetry_InterfaceCompliance(t *testing.T) {
 				}
 
 				// Test CollectAndEncodeMetrics method
-				_, err := telemetry.CollectAndEncodeMetrics()
+				_, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 				// Don't check error, just verify method exists and is callable
 				_ = err
 
@@ -1096,7 +1081,7 @@ func TestIdsecSyncTelemetry_ConcurrentCollectAndEncodeMetrics(t *testing.T) {
 				go func(goroutineID int) {
 					defer wg.Done()
 					for j := 0; j < tt.iterations; j++ {
-						result, err := telemetry.CollectAndEncodeMetrics()
+						result, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 
 						// Store result with mutex to avoid race on result slice
 						indexMutex.Lock()
@@ -1173,7 +1158,7 @@ func TestIdsecSyncTelemetry_MutexProtectsLastCollectedMetrics(t *testing.T) {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						_, err := telemetry.CollectAndEncodeMetrics()
+						_, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 						if err != nil {
 							t.Errorf("Unexpected error during concurrent collection: %v", err)
 						}
@@ -1212,7 +1197,7 @@ func TestIdsecSyncTelemetry_MutexProtectsLastCollectedMetrics(t *testing.T) {
 			encoder: &mockEncoder{encodedData: []byte("read-test")},
 			validateFunc: func(t *testing.T, telemetry *IdsecSyncTelemetry) {
 				// First collection to populate cache
-				_, err := telemetry.CollectAndEncodeMetrics()
+				_, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 				if err != nil {
 					t.Fatalf("Initial collection failed: %v", err)
 				}
@@ -1225,7 +1210,7 @@ func TestIdsecSyncTelemetry_MutexProtectsLastCollectedMetrics(t *testing.T) {
 					wg.Add(1)
 					go func(idx int) {
 						defer wg.Done()
-						_, err := telemetry.CollectAndEncodeMetrics()
+						_, err := telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 						errors[idx] = err
 					}(i)
 				}
@@ -1262,7 +1247,7 @@ func TestIdsecSyncTelemetry_MutexProtectsLastCollectedMetrics(t *testing.T) {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						_, _ = telemetry.CollectAndEncodeMetrics()
+						_, _ = telemetry.CollectAndEncodeMetrics(collectors.IdsecRequestMetadata{})
 					}()
 				}
 

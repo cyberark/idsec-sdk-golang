@@ -337,7 +337,7 @@ func FromISPAuth(
 	if tenantEnv == "" {
 		tenantEnv = commonmodels.Prod
 	}
-	cookieJar, _ := cookiejar.New(nil)
+	cookieJar := common.NewInMemoryCookieJar()
 	if cookies, ok := token.Metadata["cookies"]; ok {
 		decoded, _ := base64.StdEncoding.DecodeString(cookies.(string))
 		err := common.UnmarshalCookies(decoded, cookieJar)

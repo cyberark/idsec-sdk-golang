@@ -4,7 +4,7 @@ package models
 type IdsecPCloudUpdateAccount struct {
 	IdsecPCloudAccountSecretManagement     `mapstructure:",squash"`
 	IdsecPCloudAccountRemoteMachinesAccess `mapstructure:",squash"`
-	Secret                                 string                 `json:"secret" mapstructure:"secret" desc:"The secret of the account to update" flag:"secret"`
+	Secret                                 string                 `json:"secret" mapstructure:"secret" desc:"The secret of the account to update" flag:"secret" secret:"true"`
 	SecretFile                             string                 `json:"secret_file" mapstructure:"secret_file" desc:"The path to the secret file." flag:"secret-file"`
 	AccountID                              string                 `json:"account_id" mapstructure:"account_id" desc:"The unique ID of the account to updatee" flag:"account-id" validate:"required"`
 	Name                                   string                 `json:"name,omitempty" mapstructure:"name,omitempty" desc:"Name of the account to update" flag:"name" maxlength:"170"`

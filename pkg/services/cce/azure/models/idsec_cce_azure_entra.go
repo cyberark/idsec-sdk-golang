@@ -11,7 +11,7 @@ import (
 type TfIdsecCCEAzureAddEntra struct {
 	EntraID      string                           `json:"entraId" mapstructure:"entra_id" validate:"required,uuid" desc:"Microsoft Entra tenant ID (UUID format)."`
 	Services     []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
-	CCEResources map[string]interface{}           `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE resources."`
+	CCEResources map[string]interface{}           `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE resources. Must contain 'appId' (string, UUID) — the Azure application ID."`
 }
 
 // TfIdsecCCEAzureEntra represents the details of an Azure Entra tenant.

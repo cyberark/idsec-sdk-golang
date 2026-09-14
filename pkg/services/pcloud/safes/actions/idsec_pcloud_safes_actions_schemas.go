@@ -8,6 +8,7 @@ var ActionToSchemaMap = map[string]interface{}{
 	"update":            &safesmodels.IdsecPCloudUpdateSafe{},
 	"delete":            &safesmodels.IdsecPCloudDeleteSafe{},
 	"get":               &safesmodels.IdsecPCloudGetSafe{},
+	"get-by-name":       &safesmodels.IdsecPCloudGetSafeByName{},
 	"list":              nil,
 	"list-by":           &safesmodels.IdsecPCloudSafesFilters{},
 	"stats":             nil,

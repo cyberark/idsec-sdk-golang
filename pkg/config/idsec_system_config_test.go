@@ -2,6 +2,9 @@ package config
 
 import (
 	"os"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -2256,4 +2259,56 @@ func TestUserAgent(t *testing.T) {
 			tt.validateFunc(t, ua, tt.expectedSuffix)
 		})
 	}
+}
+
+// TestBrowserUA validates the browser-prefix portion of the User-Agent string:
+// modern Chrome version, correct Mozilla prefix, OS-appropriate platform token,
+// and stable output across repeated calls within the same process.
+func TestBrowserUA(t *testing.T) {
+	ua := cachedBrowserUA
+
+	t.Run("starts_with_mozilla", func(t *testing.T) {
+		if !strings.HasPrefix(ua, "Mozilla/5.0") {
+			t.Errorf("browser UA does not start with 'Mozilla/5.0': %q", ua)
+		}
+	})
+
+	t.Run("contains_modern_chrome_version", func(t *testing.T) {
+		re := regexp.MustCompile(`Chrome/(\d+)\.`)
+		m := re.FindStringSubmatch(ua)
+		if m == nil {
+			t.Fatalf("browser UA has no Chrome/ token: %q", ua)
+		}
+		major, _ := strconv.Atoi(m[1])
+		if major < 90 {
+			t.Errorf("Chrome version %d is below WAF bot-control threshold of 90: %q", major, ua)
+		}
+	})
+
+	t.Run("platform_matches_runtime_goos", func(t *testing.T) {
+		var wantSubstr string
+		switch runtime.GOOS {
+		case "windows":
+			wantSubstr = "Windows NT"
+		case "darwin":
+			wantSubstr = "Macintosh"
+		default:
+			wantSubstr = "Linux"
+		}
+		if !strings.Contains(ua, wantSubstr) {
+			t.Errorf("browser UA %q does not contain expected platform token %q for GOOS=%s", ua, wantSubstr, runtime.GOOS)
+		}
+	})
+
+	t.Run("stable_across_calls", func(t *testing.T) {
+		SetIdsecToolInUse(IdsecToolSDK)
+		SetIdsecVersion("9.9.9")
+		first := UserAgent()
+		for range 20 {
+			if got := UserAgent(); got != first {
+				t.Errorf("UserAgent() returned different values across calls:\n  first: %q\n  later: %q", first, got)
+				break
+			}
+		}
+	})
 }

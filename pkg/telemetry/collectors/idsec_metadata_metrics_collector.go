@@ -1,6 +1,7 @@
 package collectors
 
 import (
+	"sync"
 	"time"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
@@ -32,13 +33,29 @@ type extraContextField struct {
 	value string
 }
 
+// IdsecRequestMetadata describes the single request a header is being built for.
+//
+// It is passed by value from the client rather than stored on the collector,
+// because it differs for every request. A client sends requests from as many
+// goroutines as its caller cares to use — the SDK's own fan-out helpers issue
+// one per safe or per member — so a collector that held these fields would
+// report whichever request happened to write them last.
+type IdsecRequestMetadata struct {
+	// Route is the path being requested.
+	Route string
+	// Service is the name of the service the client belongs to.
+	Service string
+	// Class is the type whose method is making the request.
+	Class string
+	// Operation is the method making the request.
+	Operation string
+}
+
 type IdsecMetadataMetricsCollector struct {
-	route                     string
-	service                   string
-	class                     string
-	operation                 string
-	extraContextFields        map[string]extraContextField // Dynamic tool-specific context fields (shortName -> {name, value})
-	changedFromLastCollection bool
+	// extraContextFieldsLock guards extraContextFields, which outlives any one
+	// request and is written by callers announcing what they are doing.
+	extraContextFieldsLock sync.RWMutex
+	extraContextFields     map[string]extraContextField // Dynamic tool-specific context fields (shortName -> {name, value})
 }
 
 // NewIdsecMetadataMetricsCollector creates a new instance of IdsecMetadataMetricsCollector.
@@ -46,15 +63,33 @@ type IdsecMetadataMetricsCollector struct {
 // Returns a pointer to the newly created IdsecMetadataMetricsCollector.
 func NewIdsecMetadataMetricsCollector() IdsecMetricsCollector {
 	return &IdsecMetadataMetricsCollector{
-		extraContextFields:        make(map[string]extraContextField),
-		changedFromLastCollection: true,
+		extraContextFields: make(map[string]extraContextField),
 	}
 }
 
 // CollectMetrics collects and returns Idsec tool metadata metrics.
 //
+// The metrics describing a request are reported empty, because no request was
+// given. Callers building a header for a request should use
+// CollectMetricsForRequest instead.
+//
 // Returns IdsecMetrics with a single metric indicating the Idsec tool in use.
 func (c *IdsecMetadataMetricsCollector) CollectMetrics() (*IdsecMetrics, error) {
+	return c.CollectMetricsForRequest(IdsecRequestMetadata{})
+}
+
+// CollectMetricsForRequest collects Idsec tool metadata metrics describing a
+// single request.
+//
+// Everything specific to the request is taken from request rather than from the
+// collector, so that concurrent requests through one client cannot report each
+// other's route or operation.
+//
+// Parameters:
+//   - request: The request the metrics are being collected for
+//
+// Returns IdsecMetrics describing the tool, the request, and any tool context.
+func (c *IdsecMetadataMetricsCollector) CollectMetricsForRequest(request IdsecRequestMetadata) (*IdsecMetrics, error) {
 	metrics := &IdsecMetrics{
 		Collector: IdsecMetadataMetricsCollectorName,
 		ShortName: "mm",
@@ -105,22 +140,22 @@ func (c *IdsecMetadataMetricsCollector) CollectMetrics() (*IdsecMetrics, error) 
 		IdsecMetric{
 			Name:      "route",
 			ShortName: "rt",
-			Value:     c.route,
+			Value:     request.Route,
 		},
 		IdsecMetric{
 			Name:      "service",
 			ShortName: "svc",
-			Value:     c.service,
+			Value:     request.Service,
 		},
 		IdsecMetric{
 			Name:      "class",
 			ShortName: "cls",
-			Value:     c.class,
+			Value:     request.Class,
 		},
 		IdsecMetric{
 			Name:      "operation",
 			ShortName: "op",
-			Value:     c.operation,
+			Value:     request.Operation,
 		},
 		IdsecMetric{
 			Name:      "deploy_env",
@@ -130,6 +165,7 @@ func (c *IdsecMetadataMetricsCollector) CollectMetrics() (*IdsecMetrics, error) 
 	)
 
 	// Add dynamic tool context fields
+	c.extraContextFieldsLock.RLock()
 	for shortName, field := range c.extraContextFields {
 		metrics.Metrics = append(metrics.Metrics, IdsecMetric{
 			Name:      field.name,
@@ -137,65 +173,23 @@ func (c *IdsecMetadataMetricsCollector) CollectMetrics() (*IdsecMetrics, error) 
 			Value:     field.value,
 		})
 	}
+	c.extraContextFieldsLock.RUnlock()
 
-	c.changedFromLastCollection = false
 	return metrics, nil
 }
 
 // IsDynamicMetrics indicates whether the collected metrics are dynamic.
 //
-// Returns false as metadata metrics are static.
+// Returns true, because these metrics describe the request being sent and so
+// differ for every one of them. Reporting them as static would let a cached
+// header from one request be reused for another.
 func (c *IdsecMetadataMetricsCollector) IsDynamicMetrics() bool {
-	return c.changedFromLastCollection
+	return true
 }
 
 // CollectorName returns the name of the collector.
 func (c *IdsecMetadataMetricsCollector) CollectorName() string {
 	return IdsecMetadataMetricsCollectorName
-}
-
-// SetRoute sets the route for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) SetRoute(route string) {
-	c.route = route
-	c.changedFromLastCollection = true
-}
-
-// SetService sets the service name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) SetService(service string) {
-	c.service = service
-	c.changedFromLastCollection = true
-}
-
-// SetClass sets the class name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) SetClass(class string) {
-	c.class = class
-	c.changedFromLastCollection = true
-}
-
-// SetOperation sets the operation name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) SetOperation(operation string) {
-	c.operation = operation
-	c.changedFromLastCollection = true
-}
-
-// Route returns the route for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) Route() string {
-	return c.route
-}
-
-// Service returns the service name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) Service() string {
-	return c.service
-}
-
-// Class returns the class name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) Class() string {
-	return c.class
-}
-
-// Operation returns the operation name for the metadata metrics.
-func (c *IdsecMetadataMetricsCollector) Operation() string {
-	return c.operation
 }
 
 // AddExtraContextField adds a tool-specific context field to the metadata metrics.
@@ -214,6 +208,8 @@ func (c *IdsecMetadataMetricsCollector) Operation() string {
 //	collector.AddExtraContextField("terraform_resource", "tfr", "idsec_user")
 //	collector.AddExtraContextField("cli_command", "clic", "login")
 func (c *IdsecMetadataMetricsCollector) AddExtraContextField(name, shortName, value string) {
+	c.extraContextFieldsLock.Lock()
+	defer c.extraContextFieldsLock.Unlock()
 	if c.extraContextFields == nil {
 		c.extraContextFields = make(map[string]extraContextField)
 	}
@@ -221,7 +217,6 @@ func (c *IdsecMetadataMetricsCollector) AddExtraContextField(name, shortName, va
 		name:  name,
 		value: value,
 	}
-	c.changedFromLastCollection = true
 }
 
 // GetExtraContextField retrieves a tool-specific context field value.
@@ -235,6 +230,8 @@ func (c *IdsecMetadataMetricsCollector) AddExtraContextField(name, shortName, va
 //
 //	value, exists := collector.GetExtraContextField("tfr")
 func (c *IdsecMetadataMetricsCollector) GetExtraContextField(shortName string) (string, bool) {
+	c.extraContextFieldsLock.RLock()
+	defer c.extraContextFieldsLock.RUnlock()
 	field, exists := c.extraContextFields[shortName]
 	return field.value, exists
 }
@@ -249,6 +246,7 @@ func (c *IdsecMetadataMetricsCollector) GetExtraContextField(shortName string) (
 //
 //	defer collector.ClearExtraContext()
 func (c *IdsecMetadataMetricsCollector) ClearExtraContext() {
+	c.extraContextFieldsLock.Lock()
+	defer c.extraContextFieldsLock.Unlock()
 	c.extraContextFields = make(map[string]extraContextField)
-	c.changedFromLastCollection = true
 }

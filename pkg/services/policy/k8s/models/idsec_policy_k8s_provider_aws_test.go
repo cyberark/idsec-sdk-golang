@@ -9,15 +9,17 @@ import (
 func TestAWSAccountTarget_roundTrip(t *testing.T) {
 	t.Parallel()
 	original := IdsecPolicyK8sAWSAccountTarget{
-		IdsecPolicyK8sTarget: IdsecPolicyK8sTarget{
+		IdsecPolicyK8sAWSTarget: IdsecPolicyK8sAWSTarget{
+			IdsecPolicyK8sSharedTarget: IdsecPolicyK8sSharedTarget{
+				Scope:       "cluster",
+				NamespaceID: "ns-1",
+				FQDN:        "https://example.eks.us-east-1.amazonaws.com",
+			},
 			RoleID:        "arn:aws:iam::123456789012:role/EKSRole",
 			WorkspaceID:   "123456789012",
 			RoleName:      "EKSRole",
 			WorkspaceName: "Example AWS Account",
-			Scope:         "cluster",
 			ClusterID:     "arn:aws:eks:us-east-1:123456789012:cluster/example",
-			NamespaceID:   "ns-1",
-			FQDN:          "https://example.eks.us-east-1.amazonaws.com",
 		},
 	}
 
@@ -31,8 +33,8 @@ func TestAWSAccountTarget_roundTrip(t *testing.T) {
 		t.Fatalf("unexpected deserialize error: %v", err)
 	}
 
-	if got.IdsecPolicyK8sTarget != original.IdsecPolicyK8sTarget {
-		t.Fatalf("round-trip mismatch:\n got  %+v\n want %+v", got.IdsecPolicyK8sTarget, original.IdsecPolicyK8sTarget)
+	if got.IdsecPolicyK8sAWSTarget != original.IdsecPolicyK8sAWSTarget {
+		t.Fatalf("round-trip mismatch:\n got  %+v\n want %+v", got.IdsecPolicyK8sAWSTarget, original.IdsecPolicyK8sAWSTarget)
 	}
 }
 
@@ -42,12 +44,14 @@ func TestAWSAccountTarget_roundTrip(t *testing.T) {
 func TestAWSIDCTarget_roundTrip(t *testing.T) {
 	t.Parallel()
 	original := IdsecPolicyK8sAWSIDCTarget{
-		IdsecPolicyK8sTarget: IdsecPolicyK8sTarget{
+		IdsecPolicyK8sAWSTarget: IdsecPolicyK8sAWSTarget{
+			IdsecPolicyK8sSharedTarget: IdsecPolicyK8sSharedTarget{
+				Scope: "cluster",
+			},
 			RoleID:        AWSIDCPermissionSetARNPrefix + "ssoins-72231f8423e74442/ps-e7fd50e355dea4d6",
 			WorkspaceID:   "081626391589",
 			RoleName:      "AdminPS",
 			WorkspaceName: "CybrSCA AWS Organization",
-			Scope:         "cluster",
 			ClusterID:     "arn:aws:eks:us-east-1:081626391589:cluster/peculiar-classical-goose",
 			ClusterName:   "peculiar-classical-goose",
 			Region:        "us-east-1",
@@ -71,8 +75,8 @@ func TestAWSIDCTarget_roundTrip(t *testing.T) {
 		t.Fatalf("unexpected deserialize error: %v", err)
 	}
 
-	if got.IdsecPolicyK8sTarget != original.IdsecPolicyK8sTarget {
-		t.Fatalf("base round-trip mismatch:\n got  %+v\n want %+v", got.IdsecPolicyK8sTarget, original.IdsecPolicyK8sTarget)
+	if got.IdsecPolicyK8sAWSTarget != original.IdsecPolicyK8sAWSTarget {
+		t.Fatalf("base round-trip mismatch:\n got  %+v\n want %+v", got.IdsecPolicyK8sAWSTarget, original.IdsecPolicyK8sAWSTarget)
 	}
 	if got.OrgID != original.OrgID {
 		t.Fatalf("org_id: got %q want %q", got.OrgID, original.OrgID)
@@ -138,11 +142,13 @@ func TestSerializeTargets_idcRoundTrip(t *testing.T) {
 	in := IdsecPolicyK8sTargets{
 		AwsIdcTargets: []IdsecPolicyK8sAWSIDCTarget{
 			{
-				IdsecPolicyK8sTarget: IdsecPolicyK8sTarget{
+				IdsecPolicyK8sAWSTarget: IdsecPolicyK8sAWSTarget{
+					IdsecPolicyK8sSharedTarget: IdsecPolicyK8sSharedTarget{
+						Scope: "cluster",
+					},
 					RoleID:      AWSIDCPermissionSetARNPrefix + "ssoins-abc/ps-123",
 					WorkspaceID: "081626391589",
 					RoleName:    "AdminPS",
-					Scope:       "cluster",
 					ClusterID:   "arn:aws:eks:us-east-1:081626391589:cluster/example",
 				},
 				OrgID: "081626391589",

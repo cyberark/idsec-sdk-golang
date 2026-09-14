@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"io"
 	"net/http"
 	"testing"
 
@@ -251,6 +252,100 @@ func TestTfUpdateSubscription_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "subscription-123", result.ID)
+}
+
+// TestTfUpdateSubscription_SendsResourceChange verifies that a resources-only change (same
+// version) on an already-onboarded Subscription (standalone-level) service is detected and sent,
+// while a service whose resources did not change is omitted (so the endpoint does not reject it
+// with a 501 for a non-upgrade-enabled service). Mirrors AWS's
+// TestTfUpdateAccount_SendsResourceChange in idsec_cce_aws_account_test.go.
+func TestTfUpdateSubscription_SendsResourceChange(t *testing.T) {
+	// dpa and sca are onboarded at 0.0.3; the GET exposes their currently-deployed resources under "parameters".
+	getCurrentResponseJSON := `{
+		"id": "subscription-123",
+		"services": ["dpa", "sca"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []},
+			{"name": "sca", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"appId": "app-123"},
+			"sca": {"roleArn": "arn:aws:iam::123456789012:role/ScaRoleOld"}
+		}
+	}`
+	getUpdatedResponseJSON := `{
+		"id": "subscription-123",
+		"onboardingType": "terraform_provider",
+		"region": "westus",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012",
+		"subscriptionId": "sub-12345678-1234-1234-1234-123456789012"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	getCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "GET" && r.URL.Path == "/api/azure/manual/subscription/subscription-123" && getCallCount == 0 {
+					getCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getCurrentResponseJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual/subscription-123/services"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "DELETE" && r.URL.Path == "/api/azure/manual/subscription-123/services"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/subscription/subscription-123" && getCallCount > 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getUpdatedResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfUpdateSubscription(&azuremodels.TfIdsecCCEAzureUpdateSubscription{
+		ID: "subscription-123",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			// dpa: unchanged resources -> must be omitted.
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]interface{}{"appId": "app-123"}},
+			// sca: resources changed (same version) -> must be sent.
+			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]interface{}{"roleArn": "arn:aws:iam::123456789012:role/ScaRoleNew"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "a resources change on one service must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"sca"`, "the changed service (sca) must be sent")
+	require.Contains(t, postBody, "ScaRoleNew", "the new sca resource value must be sent")
+	require.NotContains(t, postBody, `"serviceName":"dpa"`,
+		"the unchanged service (dpa) must NOT be sent, or the API may reject the request with 501")
+	require.Zero(t, deleteCount, "a resources change on an existing service must not delete any service")
 }
 
 func TestTfDeleteSubscription_Success(t *testing.T) {

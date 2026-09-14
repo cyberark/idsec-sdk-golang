@@ -132,31 +132,34 @@ func exampleK8sPolicy() *policyk8smodels.IdsecPolicyK8sPolicy {
 		Targets: policyk8smodels.IdsecPolicyK8sTargets{
 			AwsAccountTargets: []policyk8smodels.IdsecPolicyK8sAWSAccountTarget{
 				{
-					IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+					IdsecPolicyK8sAWSTarget: policyk8smodels.IdsecPolicyK8sAWSTarget{
+						IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{
+							Scope: "cluster",
+							FQDN:  "https://example-cluster.eks.us-east-1.amazonaws.com",
+						},
 						RoleID:        "arn:aws:iam::123456789012:role/ExampleEKSRole",
 						WorkspaceID:   "123456789012",
 						RoleName:      "ExampleEKSRole",
 						WorkspaceName: "Example AWS Account",
-						Scope:         "cluster",
 						ClusterID:     "arn:aws:eks:us-east-1:123456789012:cluster/example-cluster",
-						FQDN:          "https://example-cluster.eks.us-east-1.amazonaws.com",
 					},
 				},
 			},
 			// Azure example (uncomment and set LocationType to WorkspaceTypeAzure):
 			// AzureTargets: []policyk8smodels.IdsecPolicyK8sAzureTarget{{
+			// 	IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{Scope: "cluster"},
 			// 	RoleID: "role-id", WorkspaceID: "workspace-id", OrgID: "tenant-uuid",
 			// 	WorkspaceType: policyk8smodels.AzureWSTypeResource,
-			// 	Scope: "cluster", ClusterID: "/subscriptions/.../managedClusters/example",
+			// 	ClusterID: "/subscriptions/.../managedClusters/example",
 			// }},
 			// AWS IAM Identity Center (IDC) example: RoleID is the SSO permission-set ARN and OrgID
 			// is the AWS organization / SSO instance owner account.
 			// AwsIdcTargets: []policyk8smodels.IdsecPolicyK8sAWSIDCTarget{{
-			// 	IdsecPolicyK8sTarget: policyk8smodels.IdsecPolicyK8sTarget{
+			// 	IdsecPolicyK8sAWSTarget: policyk8smodels.IdsecPolicyK8sAWSTarget{
+			// 		IdsecPolicyK8sSharedTarget: policyk8smodels.IdsecPolicyK8sSharedTarget{Scope: "cluster"},
 			// 		RoleID:      "arn:aws:sso:::permissionSet/ssoins-xxxx/ps-xxxx",
 			// 		RoleName:    "AdminPS",
 			// 		WorkspaceID: "081626391589",
-			// 		Scope:       "cluster",
 			// 		ClusterID:   "arn:aws:eks:us-east-1:081626391589:cluster/example-cluster",
 			// 	},
 			// 	OrgID: "081626391589",

@@ -32,15 +32,15 @@ type IdsecSCAK8sElevateRequest struct {
 // second json.Unmarshal call is required to extract these fields.
 type IdsecSCAK8sAWSAccessCredentials struct {
 	AWSAccessKey       string `json:"aws_access_key"`
-	AWSSecretAccessKey string `json:"aws_secret_access_key"`
-	AWSSessionToken    string `json:"aws_session_token"`
+	AWSSecretAccessKey string `json:"aws_secret_access_key" secret:"true"`
+	AWSSessionToken    string `json:"aws_session_token" secret:"true"`
 }
 
 // IdsecSCAK8sElevateClientDetails carries AWS IAM Identity Center OIDC client
 // metadata returned by the Elevate API for permission-set targets.
 type IdsecSCAK8sElevateClientDetails struct {
 	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
+	ClientSecret string `json:"clientSecret" secret:"true"`
 	StartURL     string `json:"startUrl"`
 	SSORegion    string `json:"ssoRegion"`
 }

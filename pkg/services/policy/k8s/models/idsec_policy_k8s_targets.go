@@ -12,47 +12,57 @@ type IdsecPolicyK8sBaseTarget interface {
 	Deserialize(data map[string]interface{}) error
 }
 
-// IdsecPolicyK8sTarget contains fields shared by K8s policy targets.
-type IdsecPolicyK8sTarget struct {
-	RoleID        string `json:"role_id" validate:"required" mapstructure:"role_id" flag:"role-id" desc:"The unique identifier assigned to the IAM role in AWS (IAM role ARN)."`
-	WorkspaceID   string `json:"workspace_id" validate:"required" mapstructure:"workspace_id" flag:"workspace-id" desc:"The unique identifier created for the AWS account in Idira when it was connected."`
-	RoleName      string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The display name of the IAM role."`
-	WorkspaceName string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The display name of the AWS account in Idira."`
+// IdsecPolicyK8sSharedTarget contains fields with identical descriptions across all K8s policy target types.
+type IdsecPolicyK8sSharedTarget struct {
 	Scope         string `json:"scope" validate:"required" mapstructure:"scope" flag:"scope" desc:"Indicates whether the role grants access to the entire cluster or to a specific namespace within the cluster."`
-	ClusterID     string `json:"cluster_id" validate:"required" mapstructure:"cluster_id" flag:"cluster-id" desc:"The unique identifier of the cluster (cluster ARN)."`
 	NamespaceID   string `json:"namespace_id,omitempty" mapstructure:"namespace_id,omitempty" flag:"namespace-id" desc:"The unique identifier of the Kubernetes namespace. Required only when scope is set to namespace."`
-	FQDN          string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"K8s cluster endpoint"`
-	ClusterName   string `json:"cluster_name,omitempty" mapstructure:"cluster_name,omitempty" flag:"cluster-name" desc:"The display name of the cluster."`
+	FQDN          string `json:"fqdn,omitempty" mapstructure:"fqdn,omitempty" flag:"fqdn" desc:"Fully qualified domain name of the Kubernetes cluster endpoint (e.g. my-cluster.example.com)"`
 	NamespaceName string `json:"namespace_name,omitempty" mapstructure:"namespace_name,omitempty" flag:"namespace-name" desc:"The display name of the Kubernetes namespace. Required only when scope is set to namespace."`
-	Region        string `json:"region,omitempty" mapstructure:"region,omitempty" flag:"region" desc:"The AWS region where the EKS cluster is located."`
 }
 
-// AppendTo adds K8s fields to a serialized policy target.
-func (s IdsecPolicyK8sTarget) AppendTo(result map[string]interface{}) {
+// appendSharedTo adds the shared K8s fields to a serialized policy target.
+func (s IdsecPolicyK8sSharedTarget) appendSharedTo(result map[string]interface{}) {
 	result["scope"] = s.Scope
-	result["clusterId"] = s.ClusterID
 	if s.NamespaceID != "" {
 		result["namespaceId"] = s.NamespaceID
 	}
 	if s.FQDN != "" {
 		result["fqdn"] = s.FQDN
 	}
-	if s.ClusterName != "" {
-		result["clusterName"] = s.ClusterName
-	}
 	if s.NamespaceName != "" {
 		result["namespaceName"] = s.NamespaceName
+	}
+}
+
+// IdsecPolicyK8sAWSTarget contains AWS-specific fields shared by both AWS K8s policy target types.
+type IdsecPolicyK8sAWSTarget struct {
+	IdsecPolicyK8sSharedTarget `mapstructure:",squash"`
+	RoleID                     string `json:"role_id" validate:"required" mapstructure:"role_id" flag:"role-id" desc:"The unique identifier assigned to the IAM role in AWS (IAM role ARN)."`
+	WorkspaceID                string `json:"workspace_id" validate:"required" mapstructure:"workspace_id" flag:"workspace-id" desc:"The unique identifier created for the AWS account in Idira when it was connected."`
+	RoleName                   string `json:"role_name,omitempty" mapstructure:"role_name,omitempty" flag:"role-name" desc:"The display name of the IAM role."`
+	WorkspaceName              string `json:"workspace_name,omitempty" mapstructure:"workspace_name,omitempty" flag:"workspace-name" desc:"The display name of the AWS account in Idira."`
+	ClusterID                  string `json:"cluster_id" validate:"required" mapstructure:"cluster_id" flag:"cluster-id" desc:"The unique identifier of the cluster (cluster ARN)."`
+	ClusterName                string `json:"cluster_name,omitempty" mapstructure:"cluster_name,omitempty" flag:"cluster-name" desc:"The display name of the cluster."`
+	Region                     string `json:"region,omitempty" mapstructure:"region,omitempty" flag:"region" desc:"The AWS region where the EKS cluster is located."`
+}
+
+// appendAWSTo adds all AWS K8s target fields to a serialized policy target.
+func (s IdsecPolicyK8sAWSTarget) appendAWSTo(result map[string]interface{}) {
+	result["clusterId"] = s.ClusterID
+	if s.ClusterName != "" {
+		result["clusterName"] = s.ClusterName
 	}
 	if s.Region != "" {
 		result["region"] = s.Region
 	}
+	s.appendSharedTo(result)
 }
 
 // IdsecPolicyK8sTargets contains the supported K8s cluster policy targets.
 type IdsecPolicyK8sTargets struct {
-	AwsAccountTargets []IdsecPolicyK8sAWSAccountTarget `json:"aws_account_targets,omitempty" mapstructure:"aws_account_targets,omitempty" flag:"aws-account-targets" desc:"AWS IAM K8s cluster target details"`
-	AwsIdcTargets     []IdsecPolicyK8sAWSIDCTarget     `json:"aws_idc_targets,omitempty" mapstructure:"aws_idc_targets,omitempty" flag:"aws-idc-targets" desc:"AWS Identity Center K8s cluster target details"`
-	AzureTargets      []IdsecPolicyK8sAzureTarget      `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"Azure K8s cluster target details"`
+	AwsAccountTargets []IdsecPolicyK8sAWSAccountTarget `json:"aws_account_targets,omitempty" mapstructure:"aws_account_targets,omitempty" flag:"aws-account-targets" desc:"Amazon EKS cluster target details (AWS IAM)"`
+	AwsIdcTargets     []IdsecPolicyK8sAWSIDCTarget     `json:"aws_idc_targets,omitempty" mapstructure:"aws_idc_targets,omitempty" flag:"aws-idc-targets" desc:"Amazon EKS cluster target details (AWS IAM Identity Center)"`
+	AzureTargets      []IdsecPolicyK8sAzureTarget      `json:"azure_targets,omitempty" mapstructure:"azure_targets,omitempty" flag:"azure-targets" desc:"AKS cluster target details"`
 }
 
 // SerializeTargets converts all configured K8s policy targets into the API payload shape.
@@ -179,17 +189,21 @@ func k8sTargetIntField(data map[string]interface{}, keys ...string) int {
 	return 0
 }
 
-func deserializeK8sTarget(data map[string]interface{}, target *IdsecPolicyK8sTarget) {
+func deserializeK8sSharedTarget(data map[string]interface{}, target *IdsecPolicyK8sSharedTarget) {
+	target.Scope = k8sTargetStringField(data, "scope")
+	target.NamespaceID = k8sTargetStringField(data, "namespace_id", "namespaceId")
+	target.FQDN = k8sTargetStringField(data, "fqdn")
+	target.NamespaceName = k8sTargetStringField(data, "namespace_name", "namespaceName")
+}
+
+func deserializeK8sAWSTarget(data map[string]interface{}, target *IdsecPolicyK8sAWSTarget) {
+	deserializeK8sSharedTarget(data, &target.IdsecPolicyK8sSharedTarget)
 	target.RoleID = k8sTargetStringField(data, "role_id", "roleId")
 	target.WorkspaceID = k8sTargetStringField(data, "workspace_id", "workspaceId")
 	target.RoleName = k8sTargetStringField(data, "role_name", "roleName")
 	target.WorkspaceName = k8sTargetStringField(data, "workspace_name", "workspaceName")
-	target.Scope = k8sTargetStringField(data, "scope")
 	target.ClusterID = k8sTargetStringField(data, "cluster_id", "clusterId")
-	target.NamespaceID = k8sTargetStringField(data, "namespace_id", "namespaceId")
-	target.FQDN = k8sTargetStringField(data, "fqdn")
 	target.ClusterName = k8sTargetStringField(data, "cluster_name", "clusterName")
-	target.NamespaceName = k8sTargetStringField(data, "namespace_name", "namespaceName")
 	target.Region = k8sTargetStringField(data, "region")
 }
 

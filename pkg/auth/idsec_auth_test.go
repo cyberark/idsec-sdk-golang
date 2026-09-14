@@ -608,7 +608,7 @@ func TestAuthenticate(t *testing.T) {
 				return base
 			},
 			expectedError:    true,
-			expectedErrorMsg: "cache load failed",
+			expectedErrorMsg: "token cache (keyring) operation failed: cache load failed",
 		},
 		{
 			name:        "error_cache_save_fails_after_auth",
@@ -633,7 +633,7 @@ func TestAuthenticate(t *testing.T) {
 				return base
 			},
 			expectedError:    true,
-			expectedErrorMsg: "cache save failed",
+			expectedErrorMsg: "token cache (keyring) operation failed: cache save failed",
 		},
 		{
 			name:        "error_cache_save_fails_after_refresh",
@@ -665,7 +665,7 @@ func TestAuthenticate(t *testing.T) {
 				return base
 			},
 			expectedError:    true,
-			expectedErrorMsg: "cache save failed after refresh",
+			expectedErrorMsg: "token cache (keyring) operation failed: cache save failed after refresh",
 		},
 		{
 			name:        "success_force_with_cached_token_skips_cache",

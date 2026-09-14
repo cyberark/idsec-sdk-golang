@@ -8,6 +8,7 @@ var ActionToSchemaMap = map[string]interface{}{
 	"update":                      &accountsmodels.IdsecPCloudUpdateAccount{},
 	"delete":                      &accountsmodels.IdsecPCloudDeleteAccount{},
 	"get":                         &accountsmodels.IdsecPCloudGetAccount{},
+	"get-by-name":                 &accountsmodels.IdsecPCloudGetAccountByName{},
 	"get-credentials":             &accountsmodels.IdsecPCloudGetAccountCredentials{},
 	"list":                        nil,
 	"list-by":                     &accountsmodels.IdsecPCloudAccountsFilter{},

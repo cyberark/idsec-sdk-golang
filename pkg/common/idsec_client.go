@@ -2,7 +2,7 @@
 //
 // This package implements a comprehensive HTTP client with features like:
 // - Authentication support (token-based, basic auth)
-// - Cookie management with persistent storage
+// - In-memory cookie management with JSON (de)serialization
 // - Automatic token refresh capabilities
 // - Request/response logging
 // - TLS configuration options
@@ -21,19 +21,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"path/filepath"
 
-	filelock "github.com/juju/go4/lock"
 	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	"github.com/cyberark/idsec-sdk-golang/pkg/telemetry"
@@ -68,83 +70,28 @@ const (
 // entire Authorization header value per product documentation.
 const IdsecAuthorizationTokenTypeRaw = "Raw"
 
-// Bounds for acquiring the cross-process advisory lock on the cookie file.
-// Declared as vars (not consts) so tests can override them without patching.
-var (
-	// cookieFileLockTimeout caps how long lockCookieFile waits for the
-	// cross-process advisory lock before giving up and proceeding under the
-	// in-process mutex alone. It mirrors the retry window the persistent
-	// cookie jar uses for its own Save/load locking.
-	cookieFileLockTimeout = 3 * time.Second
-	// cookieFileLockRetry is the delay between attempts to acquire the
-	// cross-process advisory lock while it is held by another owner.
-	cookieFileLockRetry = 50 * time.Millisecond
-)
+// cookieMu serializes bulk cookie import/export against concurrent callers.
+//
+// A jar guards its own entry map, but MarshalCookies and UnmarshalCookies each
+// span several jar calls that must observe a single consistent snapshot: a jar
+// mutated mid-marshal would otherwise yield a cookie set that never existed.
+// Authentication and refresh run these in parallel across goroutines that share
+// a jar, so the two are serialized against each other here.
+var cookieMu sync.Mutex
 
-// cookieFileMu serializes edits to the shared on-disk cookie jar within this
-// process.
+// NewInMemoryCookieJar returns a cookie jar that is never persisted to disk.
 //
-// The persistent cookie jar only guards its in-memory map per instance, so
-// several IdsecClient instances backed by the same cookie file (the default)
-// can be mutated concurrently - for example when UnmarshalCookies is called
-// from multiple goroutines during parallel authentication/refresh. This mutex,
-// combined with the cross-process advisory (flock-style) lock acquired in
-// lockCookieFile, makes such cookie edits safe both within and across processes.
-var cookieFileMu sync.Mutex
-
-// lockCookieFile serializes cookie edits before the caller mutates a cookie jar
-// that is persisted to the shared cookie file.
-//
-// It first takes a process-wide mutex (guaranteeing in-process serialization,
-// which is what prevents the concurrent map access inside the jar's setCookies)
-// and then makes a best-effort attempt to grab the same cross-process advisory
-// lock the persistent cookie jar uses for its own Save/load. Using the jar's
-// lock file keeps cookie edits serialized with the jar's persistence across
-// processes.
-//
-// The cross-process lock is best-effort: the jar's Save/load already flock the
-// file, and the in-process mutex is always held, so a failure to obtain the
-// cross-process lock (for example because another process holds it) must never
-// block cookie handling indefinitely.
-//
-// The returned release function must always be called (typically via defer) to
-// release both the advisory lock and the mutex.
-func lockCookieFile() func() {
-	cookieFileMu.Lock()
-	locked := acquireCookieFileLock()
-	return func() {
-		if locked != nil {
-			_ = locked.Close()
-		}
-		cookieFileMu.Unlock()
-	}
-}
-
-// acquireCookieFileLock makes a best-effort attempt to acquire the cross-process
-// advisory lock on the cookie file, returning the held lock or nil.
-//
-// It skips locking when the cookie file's directory does not exist (the jar's
-// own load does the same), so a missing/misconfigured cookie directory never
-// incurs the retry timeout. Under contention the advisory lock is retried until
-// cookieFileLockTimeout elapses, after which the caller proceeds under the
-// in-process mutex alone.
-func acquireCookieFileLock() io.Closer {
-	cookieFile := cookiejar.DefaultCookieFile()
-	if _, err := os.Stat(filepath.Dir(cookieFile)); err != nil {
-		return nil
-	}
-	lockPath := cookieFile + ".lock"
-	deadline := time.Now().Add(cookieFileLockTimeout)
-	for {
-		locked, err := filelock.Lock(lockPath)
-		if err == nil {
-			return locked
-		}
-		if time.Now().After(deadline) {
-			return nil
-		}
-		time.Sleep(cookieFileLockRetry)
-	}
+// Session cookies are persisted alongside the token in the keyring (see the
+// MarshalCookies callers in pkg/auth), so the jar itself needs no file backing.
+// Avoiding the persistent path also avoids the cross-process advisory lock the
+// jar takes around its load, which is unreliable on Windows: that lock has no
+// fcntl implementation there and falls back to a PID lock file whose staleness
+// check cannot detect a dead owner, so a lock file left behind by an
+// interrupted process is never reclaimed. Creating a non-persistent jar
+// performs no I/O and therefore cannot fail.
+func NewInMemoryCookieJar() *cookiejar.Jar {
+	jar, _ := cookiejar.New(&cookiejar.Options{NoPersist: true})
+	return jar
 }
 
 // cookieJSON represents the JSON serializable format of an HTTP cookie.
@@ -177,7 +124,7 @@ type cookieJSON struct {
 //
 // Key features:
 // - Token-based and basic authentication support
-// - Persistent cookie storage with JSON serialization
+// - In-memory cookie storage with JSON serialization
 // - Automatic retry with token refresh on 401 responses
 // - Configurable headers for all requests
 // - Request/response logging with timing information
@@ -187,12 +134,12 @@ type cookieJSON struct {
 // and cookie storage, making it suitable for session-based interactions
 // with Idsec services.
 type IdsecClient struct {
-	BaseURL                   string
-	token                     string
-	tokenType                 string
+	BaseURL string
+	// session holds the credentials and headers, and is replaced rather than
+	// modified so that concurrent requests always read a consistent set.
+	session                   atomic.Pointer[clientSession]
 	authHeaderName            string
 	client                    *http.Client
-	headers                   map[string]string
 	cookieJar                 *cookiejar.Jar
 	refreshConnectionCallback func(*IdsecClient) error
 	telemetry                 telemetry.IdsecTelemetry
@@ -203,6 +150,66 @@ type IdsecClient struct {
 	transientRetryCount       int
 	transientRetryBaseWait    time.Duration
 	transientRetryMaxWait     time.Duration
+}
+
+// clientSession is the credential state a client sends with a request.
+//
+// A session is immutable once published. Changing it means building the next
+// one and swapping it in, so a request that has already read the session keeps
+// sending a consistent set of headers even if the token is refreshed underneath
+// it. Mutating the fields in place instead let a refresh write the
+// authorization header while another goroutine was reading the map to build its
+// request, which is both a torn read and a data race.
+type clientSession struct {
+	token     string
+	tokenType string
+	headers   map[string]string
+}
+
+// withHeaders returns a copy of the session carrying a copy of its headers,
+// ready to be modified before being published.
+//
+// The headers are cloned rather than shared, because the published session is
+// still being read by requests already in flight.
+func (s *clientSession) withHeaders(headers map[string]string) *clientSession {
+	next := &clientSession{token: s.token, tokenType: s.tokenType}
+	if headers == nil {
+		headers = s.headers
+	}
+	next.headers = make(map[string]string, len(headers))
+	maps.Copy(next.headers, headers)
+	return next
+}
+
+// currentSession returns the session a caller should read.
+//
+// The returned session must be treated as read-only: it is shared with every
+// other request reading it at the same time.
+func (ac *IdsecClient) currentSession() *clientSession {
+	session := ac.session.Load()
+	if session == nil {
+		return &clientSession{headers: map[string]string{}}
+	}
+	return session
+}
+
+// updateSession publishes the session produced by applying change to the
+// current one.
+//
+// change may be called more than once: if another goroutine publishes first,
+// the change is reapplied to what that goroutine published, so that a token
+// refresh and a header change made at the same time cannot discard each other.
+func (ac *IdsecClient) updateSession(change func(current *clientSession) *clientSession) {
+	for {
+		published := ac.session.Load()
+		current := published
+		if current == nil {
+			current = &clientSession{headers: map[string]string{}}
+		}
+		if ac.session.CompareAndSwap(published, change(current)) {
+			return
+		}
+	}
 }
 
 // MarshalCookies serializes a cookie jar into a JSON byte array.
@@ -228,8 +235,11 @@ type IdsecClient struct {
 //	}
 //	// Save cookieData to file or database
 func MarshalCookies(cookieJar *cookiejar.Jar) ([]byte, error) {
-	jsonCookies := make([]cookieJSON, len(cookieJar.AllCookies()))
-	for i, c := range cookieJar.AllCookies() {
+	cookieMu.Lock()
+	defer cookieMu.Unlock()
+	allCookies := cookieJar.AllCookies()
+	jsonCookies := make([]cookieJSON, len(allCookies))
+	for i, c := range allCookies {
 		jsonCookies[i] = cookieJSON{
 			Name:        c.Name,
 			Value:       c.Value,
@@ -304,12 +314,8 @@ func UnmarshalCookies(cookies []byte, cookieJar *cookiejar.Jar) error {
 		urlKey := fmt.Sprintf("https://%s%s", cookie.Domain, cookie.Path)
 		cookieGroups[urlKey] = append(cookieGroups[urlKey], cookie)
 	}
-	// Serialize the jar mutation (and its persistence) against concurrent
-	// callers. Without this, parallel UnmarshalCookies calls that target jars
-	// backed by the shared cookie file race on the underlying file and can
-	// crash inside the jar's internal setCookies.
-	release := lockCookieFile()
-	defer release()
+	cookieMu.Lock()
+	defer cookieMu.Unlock()
 	for urlKey, cookiesGroup := range cookieGroups {
 		parsedURL, err := url.Parse(urlKey)
 		if err != nil {
@@ -352,7 +358,7 @@ func NewSimpleIdsecClient(baseURL string) *IdsecClient {
 //   - token: Authentication token (empty string for no authentication)
 //   - tokenType: Type of token ("Bearer", "Basic", etc.)
 //   - authHeaderName: Name of the authorization header (e.g., "Authorization")
-//   - cookieJar: Cookie jar for session management (nil for new jar)
+//   - cookieJar: Cookie jar for session management (nil for a new in-memory jar)
 //   - refreshCallback: Function to call for token refresh on 401 responses (nil to disable)
 //   - owningService: Name of the service using this client (for logging/telemetry)
 //   - enableTelemetry: Flag to enable telemetry collection
@@ -361,7 +367,7 @@ func NewSimpleIdsecClient(baseURL string) *IdsecClient {
 //
 // Example:
 //
-//	jar, _ := cookiejar.New(nil)
+//	jar := NewInMemoryCookieJar()
 //	client := NewIdsecClient(
 //	    "https://api.example.com",
 //	    "abc123",
@@ -383,19 +389,11 @@ func NewIdsecClient(
 	owningService string,
 	enableTelemetry bool,
 ) *IdsecClient {
-	var err error
 	if baseURL != "" && !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "https://" + baseURL
 	}
 	if cookieJar == nil {
-		// Make sure to remove corrupted cookie jar lock file
-		_ = os.Remove(fmt.Sprintf("%s.lock", cookiejar.DefaultCookieFile()))
-		cookieJar, err = cookiejar.New(nil)
-		if err != nil {
-			// Remove jar file and try again
-			_ = os.Remove(cookiejar.DefaultCookieFile())
-			cookieJar, _ = cookiejar.New(nil)
-		}
+		cookieJar = NewInMemoryCookieJar()
 	}
 	var telemetryInstance telemetry.IdsecTelemetry
 	if enableTelemetry && config.IsTelemetryCollectionEnabled() {
@@ -452,7 +450,6 @@ func NewIdsecClient(
 		authHeaderName:            authHeaderName,
 		cookieJar:                 cookieJar,
 		client:                    httpClient,
-		headers:                   make(map[string]string),
 		refreshConnectionCallback: refreshCallback,
 		owningService:             owningService,
 		telemetry:                 telemetryInstance,
@@ -464,7 +461,7 @@ func NewIdsecClient(
 		transientRetryMaxWait:     defaultTransientRetryMaxWait,
 	}
 	client.UpdateToken(token, tokenType)
-	client.headers["User-Agent"] = config.UserAgent()
+	client.SetHeader("User-Agent", config.UserAgent())
 	return client
 }
 
@@ -483,7 +480,11 @@ func NewIdsecClient(
 //	client.SetHeader("Content-Type", "application/json")
 //	client.SetHeader("Accept", "application/json")
 func (ac *IdsecClient) SetHeader(key string, value string) {
-	ac.headers[key] = value
+	ac.updateSession(func(current *clientSession) *clientSession {
+		next := current.withHeaders(nil)
+		next.headers[key] = value
+		return next
+	})
 }
 
 // SetHeaders replaces all existing headers with the provided header map.
@@ -503,7 +504,9 @@ func (ac *IdsecClient) SetHeader(key string, value string) {
 //	}
 //	client.SetHeaders(headers)
 func (ac *IdsecClient) SetHeaders(headers map[string]string) {
-	ac.headers = headers
+	ac.updateSession(func(current *clientSession) *clientSession {
+		return current.withHeaders(headers)
+	})
 }
 
 // UpdateHeaders merges the provided headers into the existing header map.
@@ -523,9 +526,11 @@ func (ac *IdsecClient) SetHeaders(headers map[string]string) {
 //	}
 //	client.UpdateHeaders(newHeaders)
 func (ac *IdsecClient) UpdateHeaders(headers map[string]string) {
-	for key, value := range headers {
-		ac.headers[key] = value
-	}
+	ac.updateSession(func(current *clientSession) *clientSession {
+		next := current.withHeaders(nil)
+		maps.Copy(next.headers, headers)
+		return next
+	})
 }
 
 // GetHeaders returns a copy of the current header map.
@@ -541,7 +546,10 @@ func (ac *IdsecClient) UpdateHeaders(headers map[string]string) {
 //	currentHeaders := client.GetHeaders()
 //	fmt.Printf("Content-Type: %s\n", currentHeaders["Content-Type"])
 func (ac *IdsecClient) GetHeaders() map[string]string {
-	return ac.headers
+	headers := ac.currentSession().headers
+	copied := make(map[string]string, len(headers))
+	maps.Copy(copied, headers)
+	return copied
 }
 
 // RemoveHeader removes a single HTTP header from the IdsecClient.
@@ -557,7 +565,11 @@ func (ac *IdsecClient) GetHeaders() map[string]string {
 //	client.RemoveHeader("Authorization")
 //	client.RemoveHeader("X-Custom-Header")
 func (ac *IdsecClient) RemoveHeader(key string) {
-	delete(ac.headers, key)
+	ac.updateSession(func(current *clientSession) *clientSession {
+		next := current.withHeaders(nil)
+		delete(next.headers, key)
+		return next
+	})
 }
 
 // DisableRedirections disables automatic HTTP redirection handling.
@@ -767,39 +779,97 @@ func (ac *IdsecClient) ClearExtraContext() {
 	}
 }
 
-// fillMetadataTelemetry populates telemetry metadata for the current operation.
-func (ac *IdsecClient) fillMetadataTelemetry(route string, refreshRetryCountLocal int) {
-	collector := ac.telemetry.CollectorByName(collectors.IdsecMetadataMetricsCollectorName)
-	if collector != nil {
-		metadataCollector, ok := collector.(*collectors.IdsecMetadataMetricsCollector)
-		if ok {
-			metadataCollector.SetRoute(route)
-			metadataCollector.SetService(ac.owningService)
-			// Get the caller function name three levels up the stack, since the public method is two levels up
-			// This also includes the refresh retry count to differentiate between retries
-			pc, _, _, ok := runtime.Caller(3 + refreshRetryCount - refreshRetryCountLocal)
-			if !ok {
-				return
-			}
-			fullName := runtime.FuncForPC(pc).Name()
+// requestMetadataTelemetry describes the request currently being sent.
+//
+// The metadata is returned by value and travels with that one request, rather
+// than being stored on the collector the client shares. A client sends requests
+// from as many goroutines as its caller cares to use, so metadata left on the
+// collector would be overwritten by whichever request wrote it last, and a
+// request could be reported under another one's route and operation.
+//
+// Parameters:
+//   - route: The route being requested
+//
+// Returns the metadata describing this request.
+func (ac *IdsecClient) requestMetadataTelemetry(route string) collectors.IdsecRequestMetadata {
+	class, operation := requestCaller()
+	return collectors.IdsecRequestMetadata{
+		Route:     route,
+		Service:   ac.owningService,
+		Class:     class,
+		Operation: operation,
+	}
+}
 
-			// Parse class name
-			start := strings.LastIndex(fullName, "(")
-			end := strings.LastIndex(fullName, ")")
-			if start != -1 && end != -1 {
-				className := strings.TrimPrefix(fullName[start+1:end], "*")
-				metadataCollector.SetClass(className)
-			}
+// requestCallerDepth bounds the stack walk that attributes a request to its caller.
+const requestCallerDepth = 64
 
-			// Parse operation nane
-			parts := strings.Split(fullName, ".")
-			if len(parts) < 1 {
-				return
-			}
-			operationName := parts[len(parts)-1]
-			metadataCollector.SetOperation(operationName)
+// requestPlumbingReceivers are the types whose methods carry a request on a
+// caller's behalf rather than being the operation a request should be reported as.
+var requestPlumbingReceivers = []string{
+	"IdsecClient",
+	"IdsecISPServiceClient",
+	"IdsecPVWAServiceClient",
+}
+
+// paginationPackage is the helper that pages through a route for a caller, and is
+// plumbing for the same reason the clients are.
+const paginationPackage = "/pkg/common/pagination."
+
+// requestCaller returns the type and operation a request is attributed to.
+//
+// The caller is found by walking out through the SDK's own request plumbing
+// rather than by counting stack frames. The old fixed depth had to be corrected
+// by how many token refreshes were left, and still mis-attributed a request
+// whenever anything was added to the path between a service and the wire.
+//
+// Returns the calling type and its method, either of which may be empty when
+// the stack holds nothing but plumbing.
+func requestCaller() (string, string) {
+	programCounters := make([]uintptr, requestCallerDepth)
+	// Skip this function and runtime.Callers itself.
+	captured := runtime.Callers(2, programCounters)
+	if captured == 0 {
+		return "", ""
+	}
+	frames := runtime.CallersFrames(programCounters[:captured])
+	for {
+		frame, more := frames.Next()
+		class, operation := splitQualifiedFunction(frame.Function)
+		if !isRequestPlumbing(frame.Function, class) {
+			return class, operation
+		}
+		if !more {
+			return "", ""
 		}
 	}
+}
+
+// isRequestPlumbing reports whether a frame is the SDK carrying a request rather
+// than a caller making one.
+func isRequestPlumbing(function string, class string) bool {
+	if strings.Contains(function, paginationPackage) {
+		return true
+	}
+	return slices.Contains(requestPlumbingReceivers, class)
+}
+
+// splitQualifiedFunction splits a runtime function name into the type declaring
+// it and the method itself.
+//
+// A method reads as "pkg/path.(*Type).Method" and a plain function as
+// "pkg/path.Function", which has no type to report.
+func splitQualifiedFunction(function string) (string, string) {
+	operation := function
+	if lastDot := strings.LastIndex(operation, "."); lastDot != -1 {
+		operation = operation[lastDot+1:]
+	}
+	start := strings.LastIndex(function, "(")
+	end := strings.LastIndex(function, ")")
+	if start == -1 || end == -1 || end < start {
+		return "", operation
+	}
+	return strings.TrimPrefix(function[start+1:end], "*"), operation
 }
 
 // doRequest is the internal method that handles the actual HTTP request execution.
@@ -850,9 +920,12 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 		}
 		fullURL += route
 	}
+	// Read the session once, so that the body is encoded and the headers are
+	// set from the same one even if the token is refreshed mid-request.
+	session := ac.currentSession()
 	var bodyReader io.Reader
 	if body != nil {
-		if contentType, ok := ac.headers["Content-Type"]; ok && contentType == "application/x-www-form-urlencoded" {
+		if contentType, ok := session.headers["Content-Type"]; ok && contentType == "application/x-www-form-urlencoded" {
 			if formValues, ok := body.(map[string]string); ok {
 				data := url.Values{}
 				for key, value := range formValues {
@@ -872,8 +945,8 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 	}
 	telemetryHeader := ""
 	if ac.telemetry != nil {
-		ac.fillMetadataTelemetry(route, refreshRetryCountLocal)
-		encodedTelemetry, err := ac.telemetry.CollectAndEncodeMetrics()
+		encodedTelemetry, err := ac.telemetry.CollectAndEncodeMetrics(
+			ac.requestMetadataTelemetry(route))
 		if err != nil {
 			ac.logger.Debug("Failed to collect metrics: %v", err)
 		} else {
@@ -884,7 +957,7 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 	if err != nil {
 		return nil, err
 	}
-	for key, value := range ac.headers {
+	for key, value := range session.headers {
 		if strings.EqualFold(key, "Content-Type") && bodyReader == nil {
 			continue
 		}
@@ -913,6 +986,17 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 	}
 
 	ac.logger.Info("Running request '%s %s'", method, fullURL)
+	if ac.logger.LogLevel() >= Debug {
+		headerParts := make([]string, 0, len(req.Header))
+		for k, vs := range req.Header {
+			v := strings.Join(vs, ", ")
+			if strings.EqualFold(k, "Authorization") && len(v) > 10 {
+				v = v[:10] + "...<redacted>"
+			}
+			headerParts = append(headerParts, k+"="+v)
+		}
+		ac.logger.Debug("[REQ-HEADERS] %s %s: %s", method, fullURL, strings.Join(headerParts, " | "))
+	}
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
@@ -1164,16 +1248,22 @@ func (ac *IdsecClient) Options(ctx context.Context, route string) (*http.Respons
 //	// Raw session token (e.g. CyberArk PVWA REST)
 //	client.UpdateToken(sessionToken, IdsecAuthorizationTokenTypeRaw)
 func (ac *IdsecClient) UpdateToken(token string, tokenType string) {
-	ac.token = token
-	ac.tokenType = tokenType
-	if token == "" {
-		return
-	}
-	if tokenType == IdsecAuthorizationTokenTypeRaw {
-		ac.headers[ac.authHeaderName] = token
-		return
-	}
-	ac.headers[ac.authHeaderName] = fmt.Sprintf("%s %s", tokenType, token)
+	ac.updateSession(func(current *clientSession) *clientSession {
+		// The token and its header are published together, so a request never
+		// reads a refreshed token alongside the header of the previous one.
+		next := current.withHeaders(nil)
+		next.token = token
+		next.tokenType = tokenType
+		if token == "" {
+			return next
+		}
+		if tokenType == IdsecAuthorizationTokenTypeRaw {
+			next.headers[ac.authHeaderName] = token
+			return next
+		}
+		next.headers[ac.authHeaderName] = fmt.Sprintf("%s %s", tokenType, token)
+		return next
+	})
 }
 
 // GetToken returns the current authentication token.
@@ -1190,7 +1280,7 @@ func (ac *IdsecClient) UpdateToken(token string, tokenType string) {
 //	    // No authentication token is set
 //	}
 func (ac *IdsecClient) GetToken() string {
-	return ac.token
+	return ac.currentSession().token
 }
 
 // GetTokenType returns the current token type.
@@ -1205,7 +1295,7 @@ func (ac *IdsecClient) GetToken() string {
 //	tokenType := client.GetTokenType()
 //	fmt.Printf("Using %s authentication\n", tokenType)
 func (ac *IdsecClient) GetTokenType() string {
-	return ac.tokenType
+	return ac.currentSession().tokenType
 }
 
 // SetRetry configures the retry behavior for HTTP requests.

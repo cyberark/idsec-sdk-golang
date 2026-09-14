@@ -38,6 +38,6 @@ type IdsecSIADBUpdateStrongAccount struct {
 	ReconcileIsWinAccount bool `json:"reconcile_is_win_account,omitempty" mapstructure:"reconcile_is_win_account" flag:"reconcile-is-win-account" desc:"Whether to reconcile as Windows account for MSSql."`
 
 	// PasswordSecretObject Fields
-	Password        string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password of the account."`
-	SecretAccessKey string `json:"secret_access_key,omitempty" mapstructure:"secret_access_key" flag:"secret-access-key" desc:"The Secret access key of the account."`
+	Password        string `json:"password,omitempty" mapstructure:"password" flag:"password" desc:"The password of the account." secret:"true"`
+	SecretAccessKey string `json:"secret_access_key,omitempty" mapstructure:"secret_access_key" flag:"secret-access-key" desc:"The Secret access key of the account." secret:"true"`
 }

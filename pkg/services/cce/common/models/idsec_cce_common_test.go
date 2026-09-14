@@ -69,3 +69,54 @@ func TestIdsecCCEServiceInput_DecodesVersionFromConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"version":"0.0.2"`)
 }
+
+// TestIdsecCCEPropertyValue_UnmarshalJSON_Bool ensures IdsecCCEPropertyValue - a bool/string
+// union type - can be decoded directly by encoding/json when a property value is a boolean
+// (e.g. GCP's TfProject/TfOrganization decode the full API response with json.NewDecoder
+// rather than mapstructure.Decode). Before UnmarshalJSON was implemented, this failed with
+// "cannot unmarshal bool into Go struct field ... IdsecCCEPropertyValue".
+func TestIdsecCCEPropertyValue_UnmarshalJSON_Bool(t *testing.T) {
+	rawJSON := `{
+		"name": "dpa",
+		"status": "Completely added",
+		"errors": [],
+		"properties": [
+			{"name": "cce_broken_role", "value": false}
+		]
+	}`
+
+	var service IdsecCCEOnboardedService
+	require.NoError(t, json.Unmarshal([]byte(rawJSON), &service))
+
+	require.NotNil(t, service.Properties)
+	props := *service.Properties
+	require.Len(t, props, 1)
+	require.Equal(t, "cce_broken_role", props[0].Name)
+	require.NotNil(t, props[0].Value.BoolValue)
+	require.False(t, *props[0].Value.BoolValue)
+	require.Nil(t, props[0].Value.StringValue)
+}
+
+// TestIdsecCCEPropertyValue_UnmarshalJSON_String covers the string-valued case for the same
+// direct encoding/json decode path.
+func TestIdsecCCEPropertyValue_UnmarshalJSON_String(t *testing.T) {
+	rawJSON := `{"name": "azure_domain", "value": "example.com"}`
+
+	var prop IdsecCCEPropertyOutput
+	require.NoError(t, json.Unmarshal([]byte(rawJSON), &prop))
+
+	require.NotNil(t, prop.Value.StringValue)
+	require.Equal(t, "example.com", *prop.Value.StringValue)
+	require.Nil(t, prop.Value.BoolValue)
+}
+
+// TestIdsecCCEPropertyValue_MarshalJSON ensures MarshalJSON emits the raw bool/string value
+// rather than the BoolValue/StringValue struct fields.
+func TestIdsecCCEPropertyValue_MarshalJSON(t *testing.T) {
+	boolVal := true
+	prop := IdsecCCEPropertyOutput{Name: "cce_broken_role", Value: IdsecCCEPropertyValue{BoolValue: &boolVal}}
+
+	data, err := json.Marshal(prop)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"cce_broken_role","value":true}`, string(data))
+}

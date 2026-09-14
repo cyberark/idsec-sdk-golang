@@ -18,6 +18,11 @@ import (
 const (
 	discoveryServiceDomainName = "platform-discovery"
 	discoveryTimeout           = 30
+
+	discoveryRetryAttempts = 3
+	discoveryRetryDelay    = 1
+	discoveryRetryMaxDelay = 4
+	discoveryRetryBackoff  = 2
 )
 
 // DefaultHeaders returns the default headers for HTTP requests to identity.
@@ -40,31 +45,62 @@ func DefaultSystemHeaders() map[string]string {
 
 // ResolveTenantFqdnFromTenantSubdomain resolves the tenant's FQDN URL from its subdomain.
 // The resolved URL is based on the current working environment, which is provided in the `tenantSubdomain` argument.
+//
+// The call is retried up to discoveryRetryAttempts times with exponential backoff to handle
+// transient failures (e.g. timeouts under concurrent load against the platform-discovery service).
 func ResolveTenantFqdnFromTenantSubdomain(tenantSubdomain string, rootDomain string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout*time.Second)
-	defer cancel()
 	client := common.NewSimpleIdsecClient(fmt.Sprintf("https://%s.%s", discoveryServiceDomainName, rootDomain))
 	client.SetHeaders(map[string]string{
 		"Content-Type": "application/json",
 	})
-	response, err := client.Get(ctx, fmt.Sprintf("api/identity-endpoint/%s", tenantSubdomain), nil)
+	return resolveFqdnWithClient(tenantSubdomain, client)
+}
+
+// resolveFqdnWithClient performs the discovery call with retry, using the provided HTTP client.
+// It is extracted to allow unit tests to supply a client that points at a local test server.
+func resolveFqdnWithClient(tenantSubdomain string, client *common.IdsecClient) (string, error) {
+	var fqdn string
+	maxDelay := discoveryRetryMaxDelay
+
+	err := common.RetryCall(
+		func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout*time.Second)
+			defer cancel()
+
+			response, err := client.Get(ctx, fmt.Sprintf("api/identity-endpoint/%s", tenantSubdomain), nil)
+			if err != nil {
+				return fmt.Errorf("getting tenant FQDN failed from platform discovery: %v", err)
+			}
+			defer func(Body io.ReadCloser) {
+				if closeErr := Body.Close(); closeErr != nil {
+					common.GlobalLogger.Warning("Error closing response body")
+				}
+			}(response.Body)
+
+			if response.StatusCode != http.StatusOK {
+				return fmt.Errorf("getting tenant FQDN failed from platform discovery [%d] - [%s]", response.StatusCode, response.Status)
+			}
+
+			var parsedResponse identity.TenantEndpointResponse
+			if err := json.NewDecoder(response.Body).Decode(&parsedResponse); err != nil {
+				return fmt.Errorf("getting tenant FQDN failed from platform discovery to be parsed / validated")
+			}
+			fqdn = parsedResponse.Endpoint
+			return nil
+		},
+		discoveryRetryAttempts,
+		discoveryRetryDelay,
+		&maxDelay,
+		discoveryRetryBackoff,
+		0,
+		func(err error, delay int) {
+			common.GlobalLogger.Warning("platform discovery FQDN resolution failed, retrying in %ds: %v", delay, err)
+		},
+	)
 	if err != nil {
-		return "", fmt.Errorf("getting tenant FQDN failed from platform discovery: %v", err)
+		return "", err
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			common.GlobalLogger.Warning("Error closing response body")
-		}
-	}(response.Body)
-	if response.StatusCode == http.StatusOK {
-		var parsedResponse identity.TenantEndpointResponse
-		if err := json.NewDecoder(response.Body).Decode(&parsedResponse); err != nil {
-			return "", fmt.Errorf("getting tenant FQDN failed from platform discovery to be parsed / validated")
-		}
-		return parsedResponse.Endpoint, nil
-	}
-	return "", fmt.Errorf("getting tenant FQDN failed from platform discovery [%d] - [%s]", response.StatusCode, response.Status)
+	return fqdn, nil
 }
 
 // ResolveTenantFqdnFromTenantSuffix resolves the tenant's FQDN URL from its suffix.

@@ -45,7 +45,7 @@ func TestMarshalCookies(t *testing.T) {
 		{
 			name: "success_marshals_single_cookie",
 			setupJar: func() *cookiejar.Jar {
-				jar, _ := cookiejar.New(nil)
+				jar := NewInMemoryCookieJar()
 				parsedURL, _ := url.Parse("https://example.com")
 				jar.SetCookies(parsedURL, []*http.Cookie{
 					{Name: "session", Value: "abc123"},
@@ -74,7 +74,7 @@ func TestMarshalCookies(t *testing.T) {
 		{
 			name: "success_marshals_multiple_cookies",
 			setupJar: func() *cookiejar.Jar {
-				jar, _ := cookiejar.New(nil)
+				jar := NewInMemoryCookieJar()
 				parsedURL, _ := url.Parse("https://example.com")
 				jar.SetCookies(parsedURL, []*http.Cookie{
 					{Name: "session", Value: "abc123"},
@@ -98,7 +98,7 @@ func TestMarshalCookies(t *testing.T) {
 		{
 			name: "success_marshals_empty_cookie_jar",
 			setupJar: func() *cookiejar.Jar {
-				jar, _ := cookiejar.New(nil)
+				jar := NewInMemoryCookieJar()
 				return jar
 			},
 			validateFunc: func(t *testing.T, result []byte) {
@@ -116,7 +116,7 @@ func TestMarshalCookies(t *testing.T) {
 		{
 			name: "success_marshals_cookie_with_all_attributes",
 			setupJar: func() *cookiejar.Jar {
-				jar, _ := cookiejar.New(nil)
+				jar := NewInMemoryCookieJar()
 				parsedURL, _ := url.Parse("https://example.com")
 				expires := time.Now().Add(24 * time.Hour)
 				jar.SetCookies(parsedURL, []*http.Cookie{
@@ -160,7 +160,7 @@ func TestMarshalCookies(t *testing.T) {
 		{
 			name: "success_returns_valid_json",
 			setupJar: func() *cookiejar.Jar {
-				jar, _ := cookiejar.New(nil)
+				jar := NewInMemoryCookieJar()
 				parsedURL, _ := url.Parse("https://example.com")
 				jar.SetCookies(parsedURL, []*http.Cookie{
 					{Name: "test", Value: "value"},
@@ -333,7 +333,7 @@ func TestUnmarshalCookies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			jar, _ := cookiejar.New(nil)
+			jar := NewInMemoryCookieJar()
 			err := UnmarshalCookies(tt.cookiesData, jar)
 
 			if tt.expectedError {
@@ -386,8 +386,8 @@ func TestNewSimpleIdsecClient(t *testing.T) {
 			name:    "success_initializes_with_empty_token",
 			baseURL: "example.com",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.token != "" {
-					t.Errorf("Expected empty token, got '%s'", client.token)
+				if client.currentSession().token != "" {
+					t.Errorf("Expected empty token, got '%s'", client.currentSession().token)
 				}
 			},
 		},
@@ -395,8 +395,8 @@ func TestNewSimpleIdsecClient(t *testing.T) {
 			name:    "success_initializes_with_empty_token_type",
 			baseURL: "example.com",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.tokenType != "" {
-					t.Errorf("Expected empty token type, got '%s'", client.tokenType)
+				if client.currentSession().tokenType != "" {
+					t.Errorf("Expected empty token type, got '%s'", client.currentSession().tokenType)
 				}
 			},
 		},
@@ -431,7 +431,7 @@ func TestNewSimpleIdsecClient(t *testing.T) {
 			name:    "success_initializes_headers_map",
 			baseURL: "example.com",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers == nil {
+				if client.currentSession().headers == nil {
 					t.Error("Expected non-nil headers map")
 				}
 			},
@@ -440,7 +440,7 @@ func TestNewSimpleIdsecClient(t *testing.T) {
 			name:    "success_sets_user_agent_header",
 			baseURL: "example.com",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; !exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; !exists {
 					t.Error("Expected User-Agent header to be set")
 				}
 			},
@@ -492,11 +492,11 @@ func TestNewIdsecClient(t *testing.T) {
 				if client.BaseURL != "https://api.example.com" {
 					t.Errorf("Expected base URL 'https://api.example.com', got '%s'", client.BaseURL)
 				}
-				if client.token != "test-token" {
-					t.Errorf("Expected token 'test-token', got '%s'", client.token)
+				if client.currentSession().token != "test-token" {
+					t.Errorf("Expected token 'test-token', got '%s'", client.currentSession().token)
 				}
-				if client.tokenType != "Bearer" {
-					t.Errorf("Expected token type 'Bearer', got '%s'", client.tokenType)
+				if client.currentSession().tokenType != "Bearer" {
+					t.Errorf("Expected token type 'Bearer', got '%s'", client.currentSession().tokenType)
 				}
 				if client.authHeaderName != "Authorization" {
 					t.Errorf("Expected auth header name 'Authorization', got '%s'", client.authHeaderName)
@@ -541,7 +541,7 @@ func TestNewIdsecClient(t *testing.T) {
 			token:           "",
 			tokenType:       "",
 			authHeaderName:  "Authorization",
-			cookieJar:       func() *cookiejar.Jar { jar, _ := cookiejar.New(nil); return jar }(),
+			cookieJar:       NewInMemoryCookieJar(),
 			refreshCallback: nil,
 			owningService:   "",
 			enableTelemetry: false,
@@ -563,8 +563,8 @@ func TestNewIdsecClient(t *testing.T) {
 			enableTelemetry: false,
 			validateFunc: func(t *testing.T, client *IdsecClient) {
 				expected := "Bearer abc123"
-				if client.headers["Authorization"] != expected {
-					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.headers["Authorization"])
+				if client.currentSession().headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.currentSession().headers["Authorization"])
 				}
 			},
 		},
@@ -579,7 +579,7 @@ func TestNewIdsecClient(t *testing.T) {
 			owningService:   "",
 			enableTelemetry: false,
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["Authorization"]; exists {
+				if _, exists := client.currentSession().headers["Authorization"]; exists {
 					t.Error("Expected no Authorization header with empty token")
 				}
 			},
@@ -627,7 +627,7 @@ func TestNewIdsecClient(t *testing.T) {
 			owningService:   "",
 			enableTelemetry: false,
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers == nil {
+				if client.currentSession().headers == nil {
 					t.Error("Expected non-nil headers map")
 				}
 			},
@@ -643,7 +643,7 @@ func TestNewIdsecClient(t *testing.T) {
 			owningService:   "",
 			enableTelemetry: false,
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; !exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; !exists {
 					t.Error("Expected User-Agent header to be set")
 				}
 			},
@@ -723,8 +723,8 @@ func TestIdsecClient_SetHeader(t *testing.T) {
 			key:   "Content-Type",
 			value: "application/json",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers["Content-Type"] != "application/json" {
-					t.Errorf("Expected Content-Type 'application/json', got '%s'", client.headers["Content-Type"])
+				if client.currentSession().headers["Content-Type"] != "application/json" {
+					t.Errorf("Expected Content-Type 'application/json', got '%s'", client.currentSession().headers["Content-Type"])
 				}
 			},
 		},
@@ -733,8 +733,8 @@ func TestIdsecClient_SetHeader(t *testing.T) {
 			key:   "User-Agent",
 			value: "custom-agent",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers["User-Agent"] != "custom-agent" {
-					t.Errorf("Expected User-Agent 'custom-agent', got '%s'", client.headers["User-Agent"])
+				if client.currentSession().headers["User-Agent"] != "custom-agent" {
+					t.Errorf("Expected User-Agent 'custom-agent', got '%s'", client.currentSession().headers["User-Agent"])
 				}
 			},
 		},
@@ -743,8 +743,8 @@ func TestIdsecClient_SetHeader(t *testing.T) {
 			key:   "X-Custom-Header",
 			value: "custom-value",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers["X-Custom-Header"] != "custom-value" {
-					t.Errorf("Expected X-Custom-Header 'custom-value', got '%s'", client.headers["X-Custom-Header"])
+				if client.currentSession().headers["X-Custom-Header"] != "custom-value" {
+					t.Errorf("Expected X-Custom-Header 'custom-value', got '%s'", client.currentSession().headers["X-Custom-Header"])
 				}
 			},
 		},
@@ -753,8 +753,8 @@ func TestIdsecClient_SetHeader(t *testing.T) {
 			key:   "Empty-Header",
 			value: "",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers["Empty-Header"] != "" {
-					t.Errorf("Expected Empty-Header '', got '%s'", client.headers["Empty-Header"])
+				if client.currentSession().headers["Empty-Header"] != "" {
+					t.Errorf("Expected Empty-Header '', got '%s'", client.currentSession().headers["Empty-Header"])
 				}
 			},
 		},
@@ -787,13 +787,13 @@ func TestIdsecClient_SetHeaders(t *testing.T) {
 				"Accept":       "application/json",
 			},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; exists {
 					t.Error("Expected User-Agent header to be removed")
 				}
-				if client.headers["Content-Type"] != "application/json" {
+				if client.currentSession().headers["Content-Type"] != "application/json" {
 					t.Error("Expected Content-Type to be set")
 				}
-				if client.headers["Accept"] != "application/json" {
+				if client.currentSession().headers["Accept"] != "application/json" {
 					t.Error("Expected Accept to be set")
 				}
 			},
@@ -802,8 +802,8 @@ func TestIdsecClient_SetHeaders(t *testing.T) {
 			name:    "success_sets_empty_headers_map",
 			headers: map[string]string{},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if len(client.headers) != 0 {
-					t.Errorf("Expected 0 headers, got %d", len(client.headers))
+				if len(client.currentSession().headers) != 0 {
+					t.Errorf("Expected 0 headers, got %d", len(client.currentSession().headers))
 				}
 			},
 		},
@@ -813,10 +813,10 @@ func TestIdsecClient_SetHeaders(t *testing.T) {
 				"X-Custom": "value",
 			},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if len(client.headers) != 1 {
-					t.Errorf("Expected 1 header, got %d", len(client.headers))
+				if len(client.currentSession().headers) != 1 {
+					t.Errorf("Expected 1 header, got %d", len(client.currentSession().headers))
 				}
-				if client.headers["X-Custom"] != "value" {
+				if client.currentSession().headers["X-Custom"] != "value" {
 					t.Error("Expected X-Custom to be set")
 				}
 			},
@@ -850,13 +850,13 @@ func TestIdsecClient_UpdateHeaders(t *testing.T) {
 				"Accept":       "application/json",
 			},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; !exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; !exists {
 					t.Error("Expected User-Agent header to be preserved")
 				}
-				if client.headers["Content-Type"] != "application/json" {
+				if client.currentSession().headers["Content-Type"] != "application/json" {
 					t.Error("Expected Content-Type to be added")
 				}
-				if client.headers["Accept"] != "application/json" {
+				if client.currentSession().headers["Accept"] != "application/json" {
 					t.Error("Expected Accept to be added")
 				}
 			},
@@ -867,8 +867,8 @@ func TestIdsecClient_UpdateHeaders(t *testing.T) {
 				"User-Agent": "new-agent",
 			},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.headers["User-Agent"] != "new-agent" {
-					t.Errorf("Expected User-Agent 'new-agent', got '%s'", client.headers["User-Agent"])
+				if client.currentSession().headers["User-Agent"] != "new-agent" {
+					t.Errorf("Expected User-Agent 'new-agent', got '%s'", client.currentSession().headers["User-Agent"])
 				}
 			},
 		},
@@ -876,7 +876,7 @@ func TestIdsecClient_UpdateHeaders(t *testing.T) {
 			name:    "success_handles_empty_headers_map",
 			headers: map[string]string{},
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; !exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; !exists {
 					t.Error("Expected User-Agent header to be preserved")
 				}
 			},
@@ -964,7 +964,7 @@ func TestIdsecClient_RemoveHeader(t *testing.T) {
 			},
 			key: "X-Custom",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["X-Custom"]; exists {
+				if _, exists := client.currentSession().headers["X-Custom"]; exists {
 					t.Error("Expected X-Custom header to be removed")
 				}
 			},
@@ -974,7 +974,7 @@ func TestIdsecClient_RemoveHeader(t *testing.T) {
 			setupFunc: func(client *IdsecClient) {},
 			key:       "User-Agent",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if _, exists := client.headers["User-Agent"]; exists {
+				if _, exists := client.currentSession().headers["User-Agent"]; exists {
 					t.Error("Expected User-Agent header to be removed")
 				}
 			},
@@ -1334,15 +1334,15 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			token:     "abc123",
 			tokenType: "Bearer",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.token != "abc123" {
-					t.Errorf("Expected token 'abc123', got '%s'", client.token)
+				if client.currentSession().token != "abc123" {
+					t.Errorf("Expected token 'abc123', got '%s'", client.currentSession().token)
 				}
-				if client.tokenType != "Bearer" {
-					t.Errorf("Expected token type 'Bearer', got '%s'", client.tokenType)
+				if client.currentSession().tokenType != "Bearer" {
+					t.Errorf("Expected token type 'Bearer', got '%s'", client.currentSession().tokenType)
 				}
 				expected := "Bearer abc123"
-				if client.headers["Authorization"] != expected {
-					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.headers["Authorization"])
+				if client.currentSession().headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.currentSession().headers["Authorization"])
 				}
 			},
 		},
@@ -1352,8 +1352,8 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			tokenType: "Basic",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
 				expected := "Basic base64encoded"
-				if client.headers["Authorization"] != expected {
-					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.headers["Authorization"])
+				if client.currentSession().headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.currentSession().headers["Authorization"])
 				}
 			},
 		},
@@ -1363,8 +1363,8 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			tokenType: "API-Key",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
 				expected := "API-Key api-key-value"
-				if client.headers["Authorization"] != expected {
-					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.headers["Authorization"])
+				if client.currentSession().headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header '%s', got '%s'", expected, client.currentSession().headers["Authorization"])
 				}
 			},
 		},
@@ -1373,12 +1373,12 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			token:     "pas-session-token-only",
 			tokenType: IdsecAuthorizationTokenTypeRaw,
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.tokenType != IdsecAuthorizationTokenTypeRaw {
-					t.Errorf("Expected token type %q, got %q", IdsecAuthorizationTokenTypeRaw, client.tokenType)
+				if client.currentSession().tokenType != IdsecAuthorizationTokenTypeRaw {
+					t.Errorf("Expected token type %q, got %q", IdsecAuthorizationTokenTypeRaw, client.currentSession().tokenType)
 				}
 				expected := "pas-session-token-only"
-				if client.headers["Authorization"] != expected {
-					t.Errorf("Expected Authorization header %q, got %q", expected, client.headers["Authorization"])
+				if client.currentSession().headers["Authorization"] != expected {
+					t.Errorf("Expected Authorization header %q, got %q", expected, client.currentSession().headers["Authorization"])
 				}
 			},
 		},
@@ -1387,11 +1387,11 @@ func TestIdsecClient_UpdateToken(t *testing.T) {
 			token:     "",
 			tokenType: "",
 			validateFunc: func(t *testing.T, client *IdsecClient) {
-				if client.token != "" {
-					t.Errorf("Expected empty token, got '%s'", client.token)
+				if client.currentSession().token != "" {
+					t.Errorf("Expected empty token, got '%s'", client.currentSession().token)
 				}
-				if client.tokenType != "" {
-					t.Errorf("Expected empty token type, got '%s'", client.tokenType)
+				if client.currentSession().tokenType != "" {
+					t.Errorf("Expected empty token type, got '%s'", client.currentSession().tokenType)
 				}
 			},
 		},

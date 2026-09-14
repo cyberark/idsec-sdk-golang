@@ -492,6 +492,7 @@ func (ai *IdsecIdentity) identityIdpAuthStatus(sessionID string) (*identity.IdpA
 	if err != nil {
 		return nil, err
 	}
+	ai.logger.Debug("[IDP-POLL] raw OobAuthStatus response: %s", string(bodyBytes))
 	var parsedRes identity.IdpAuthStatusResponse
 	if err := json.Unmarshal(bodyBytes, &parsedRes); err != nil {
 		return nil, err
@@ -501,7 +502,7 @@ func (ai *IdsecIdentity) identityIdpAuthStatus(sessionID string) (*identity.IdpA
 
 func (ai *IdsecIdentity) performPinCodeIdpAuthentication(startAuthResponse *identity.StartAuthResponse, profile *models.IdsecProfile, interactive bool) error {
 	if !interactive {
-		return errors.New("non-interactive mode is not supported for OOB PIN code authentication")
+		return fmt.Errorf("%w: OOB PIN code authentication requires interactive mode", authcommon.ErrMFARequired)
 	}
 	var answer string
 	prompt := &survey.Password{
@@ -579,16 +580,28 @@ func (ai *IdsecIdentity) performIdpAuthentication(startAuthResponse *identity.St
 		if err != nil {
 			return err
 		}
+		ai.logger.Debug("[IDP-POLL] iteration: Success=%v State=%q Token(len)=%d Auth(len)=%d",
+			idpAuthStatus.Success,
+			idpAuthStatus.Result.State,
+			len(idpAuthStatus.Result.Token),
+			len(idpAuthStatus.Result.Auth))
 		if !idpAuthStatus.Success {
-			return errors.New("failed to perform idp authentication")
+			return fmt.Errorf("idp authentication failed: %s", idpAuthStatus.Message)
 		}
-		if idpAuthStatus.Result.State == "Success" && idpAuthStatus.Result.Token != "" {
+		if idpAuthStatus.Result.State == "NotFound" {
+			return errors.New("idp authentication session expired or was not found; the browser authentication may not have completed successfully")
+		}
+		if (idpAuthStatus.Result.State == "Success" || idpAuthStatus.Result.State == "LoginSuccess") && (idpAuthStatus.Result.Token != "" || idpAuthStatus.Result.Auth != "") {
+			token := idpAuthStatus.Result.Token
+			if token == "" {
+				token = idpAuthStatus.Result.Auth
+			}
 			ai.sessionDetails = &identity.AdvanceAuthResult{
-				Token:         idpAuthStatus.Result.Token,
+				Token:         token,
 				TokenLifetime: idpAuthStatus.Result.TokenLifetime,
 				RefreshToken:  idpAuthStatus.Result.RefreshToken,
 			}
-			ai.session.UpdateToken(idpAuthStatus.Result.Token, "Bearer")
+			ai.session.UpdateToken(token, "Bearer")
 			delta := ai.sessionDetails.TokenLifetime
 			if delta == 0 {
 				delta = authcommon.DefaultTokenLifetimeSeconds
@@ -1003,7 +1016,7 @@ func (ai *IdsecIdentity) AuthIdentity(profile *models.IdsecProfile, interactive 
 	}
 
 	if !interactive {
-		return errors.New("user interaction is not supported while not interactive and mfa type given was not found")
+		return fmt.Errorf("%w: user interaction is not supported while not interactive and mfa type given was not found", authcommon.ErrMFARequired)
 	}
 
 	for _, challenge := range startAuthResponse.Result.Challenges[currentChallengeIdx:] {

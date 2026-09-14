@@ -711,6 +711,14 @@ func (s *IdsecIdentityRolesService) Get(getRole *rolesmodels.IdsecIdentityGetRol
 	return role, nil
 }
 
+// GetByName retrieves a role by its name.
+// It is a convenience wrapper around Get that accepts only a name, using the
+// directory-service query path to locate and return the full role details.
+// Returns an error if no role with the given name exists.
+func (s *IdsecIdentityRolesService) GetByName(getRole *rolesmodels.IdsecIdentityGetRoleByName) (*rolesmodels.IdsecIdentityRole, error) {
+	return s.Get(&rolesmodels.IdsecIdentityGetRole{RoleName: getRole.RoleName})
+}
+
 // Stats retrieves statistics about roles in the identity service.
 func (s *IdsecIdentityRolesService) Stats() (*rolesmodels.IdsecIdentityRolesStats, error) {
 	s.Logger.Info("Retrieving identity roles statistics")

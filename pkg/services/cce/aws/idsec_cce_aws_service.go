@@ -2,10 +2,8 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"reflect"
 	"strings"
 	"time"
 
@@ -573,7 +571,7 @@ func (s *IdsecCCEAWSService) reconcileDesiredServices(
 		case service.Version != "" && service.Version != currentVersion:
 			servicesToSend = append(servicesToSend, service)
 			s.Logger.Info("Service '%s' version changed (%s -> %s) and will be UPGRADED", service.ServiceName, currentVersion, service.Version)
-		case serviceParamsChanged(desiredParams, currentServiceParams[service.ServiceName]):
+		case cceinternal.ServiceParamsChanged(desiredParams, currentServiceParams[service.ServiceName]):
 			servicesToSend = append(servicesToSend, service)
 			s.Logger.Info("Service '%s' parameters changed and will be UPDATED", service.ServiceName)
 		default:
@@ -592,7 +590,8 @@ func (s *IdsecCCEAWSService) reconcileDesiredServices(
 // caller has none at all (the standalone account path: TfIdsecCCEAWSUpdateAccount has no ServiceParameters
 // field) or simply none for this particular service - there is nothing to merge and the service's resources
 // are the desired parameters. In that case service.Resources is returned as-is (no throwaway copy). The
-// result is only ever read by callers (serviceParamsChanged), so this aliasing is safe; do not mutate it.
+// result is only ever read by callers (cceinternal.ServiceParamsChanged), so this aliasing is safe; do not
+// mutate it.
 func mergedDesiredServiceParams(service ccemodels.IdsecCCEServiceInput,
 	serviceParameters map[string]map[string]interface{}) map[string]interface{} {
 	extraParams := serviceParameters[service.ServiceName]
@@ -607,41 +606,6 @@ func mergedDesiredServiceParams(service ccemodels.IdsecCCEServiceInput,
 		merged[key] = value
 	}
 	return merged
-}
-
-// serviceParamsChanged reports whether the desired user-controlled parameters for an already-onboarded
-// service differ from what is currently deployed. Only keys present in `desired` are inspected, so
-// server-managed extras stored alongside the user's parameters (e.g. generated role ARNs) never produce a
-// false positive that would re-send an unchanged service and trigger a 501. `desired` uses the caller's key
-// casing (e.g. "SecretsManagerRegions") and is normalized to the snake_case form the API returns before
-// comparison. Returns true when any desired key is missing from `current` or holds a different value.
-func serviceParamsChanged(desired, current map[string]interface{}) bool {
-	if len(desired) == 0 {
-		return false
-	}
-	normalized, ok := common.ConvertToSnakeCase(desired, nil).(map[string]interface{})
-	if !ok {
-		return true
-	}
-	for key, desiredVal := range normalized {
-		currentVal, exists := current[key]
-		if !exists || !jsonValuesEqual(desiredVal, currentVal) {
-			return true
-		}
-	}
-	return false
-}
-
-// jsonValuesEqual compares two decoded-JSON values for equality by marshaling them back to JSON. This
-// normalizes ordering-insensitive maps and typed slices (e.g. []interface{} vs []string) that
-// reflect.DeepEqual would otherwise report as different. Falls back to reflect.DeepEqual if marshaling fails.
-func jsonValuesEqual(a, b interface{}) bool {
-	aBytes, errA := json.Marshal(a)
-	bBytes, errB := json.Marshal(b)
-	if errA != nil || errB != nil {
-		return reflect.DeepEqual(a, b)
-	}
-	return string(aBytes) == string(bBytes)
 }
 
 // parseAccountServices extracts service information from the account JSON response.
@@ -794,7 +758,7 @@ func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 		// (omitempty), but no caller of this path populates it, so it's never sent here in practice.
 		if fullyDeployedMap[serviceName] || waitingMap[serviceName] {
 			desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
-			if serviceParamsChanged(desiredParams, currentServiceParams[serviceName]) {
+			if cceinternal.ServiceParamsChanged(desiredParams, currentServiceParams[serviceName]) {
 				servicesToAdd = append(servicesToAdd, service)
 				s.Logger.Info("Service '%s' parameters changed and will be UPDATED", serviceName)
 			} else {

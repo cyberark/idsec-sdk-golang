@@ -373,6 +373,8 @@ func (s *IdsecCCEAWSService) addOrganizationAccount(input *awsmodels.IdsecCCEAWS
 	requestBody := map[string]interface{}{
 		"accountId": input.AccountID,
 		"services":  input.Services,
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
+		"onboardingType": ccemodels.TerraformProvider,
 	}
 
 	url := fmt.Sprintf(pathOrganizationAccountURL, input.ParentOrganizationID)

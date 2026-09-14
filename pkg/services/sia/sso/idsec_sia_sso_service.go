@@ -24,6 +24,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/profiles"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	ssomodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sia/sso/models"
+	"github.com/cyberark/idsec-sdk-golang/pkg/validation"
 )
 
 const (
@@ -435,6 +436,11 @@ func (s *IdsecSIASSOService) ShortLivedOracleWallet(getShortLivedOracleWallet *s
 // ShortLivedRdpFile generates a short-lived RDP file for the user to connect to remote desktops.
 func (s *IdsecSIASSOService) ShortLivedRdpFile(getShortLivedRDPFile *ssomodels.IdsecSIASSOGetShortLivedRDPFile) error {
 	s.Logger.Info("Generating short lived rdp file")
+	// Validated before the cache lookup, so an invalid request is rejected outright
+	// rather than being served a previously cached file
+	if err := validation.ValidateStruct(getShortLivedRDPFile); err != nil {
+		return err
+	}
 	if getShortLivedRDPFile.AllowCaching {
 		result, err := s.loadFromCache("rdp_file")
 		if err == nil && result != nil {
@@ -451,6 +457,9 @@ func (s *IdsecSIASSOService) ShortLivedRdpFile(getShortLivedRDPFile *ssomodels.I
 	}
 	if getShortLivedRDPFile.TargetUser != "" {
 		tokenParameters["targetUser"] = getShortLivedRDPFile.TargetUser
+	}
+	if getShortLivedRDPFile.VaultedAccountID != "" {
+		tokenParameters["vaultedAccountID"] = getShortLivedRDPFile.VaultedAccountID
 	}
 	response, err := s.ISPClient().Post(context.Background(), acquireSsoTokenURL, map[string]interface{}{
 		"token_type":            "rdp_file",

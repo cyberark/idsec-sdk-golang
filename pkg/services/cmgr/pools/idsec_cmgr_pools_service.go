@@ -298,6 +298,30 @@ func (s *IdsecCmgrPoolsService) Get(getPool *poolsmodels.IdsecCmgrGetPool) (*poo
 	return &pool, nil
 }
 
+// GetByName retrieves a specific pool by its name from the connector management
+// service. It uses the API name filter (EQ, case-sensitive) to minimise the
+// response set, then confirms an exact match in the result. Returns (nil, nil)
+// if no pool with the given name exists.
+func (s *IdsecCmgrPoolsService) GetByName(getPool *poolsmodels.IdsecCmgrGetPoolByName) (*poolsmodels.IdsecCmgrPool, error) {
+	s.Logger.Info("Retrieving pool by name [%s]", getPool.Name)
+	poolsChan, err := s.ListBy(&poolsmodels.IdsecCmgrPoolsFilter{
+		IdsecCmgrPoolsCommonFilter: poolsmodels.IdsecCmgrPoolsCommonFilter{
+			Filter: fmt.Sprintf(`name:"%s"`, getPool.Name),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for page := range poolsChan {
+		for _, pool := range page.Items {
+			if pool.Name == getPool.Name {
+				return pool, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // Stats retrieves statistics about pools in the connector management service.
 func (s *IdsecCmgrPoolsService) Stats() (*poolsmodels.IdsecCmgrPoolsStats, error) {
 	s.Logger.Info("Retrieving pools stats")

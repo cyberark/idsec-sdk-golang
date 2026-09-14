@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -118,6 +119,29 @@ func (v *IdsecCCEPropertyValue) Deserialize(data interface{}) error {
 	}
 
 	return fmt.Errorf("property value must be a boolean or string, got: %T", data)
+}
+
+// UnmarshalJSON implements json.Unmarshaler so IdsecCCEPropertyValue - a bool/string union type,
+// not a plain struct - can be decoded directly by encoding/json (e.g. via json.NewDecoder), in
+// addition to the mapstructure.Decode + Deserialize() path used by services that call
+// DeserializeJSONSnake. Without this, decoding a boolean-valued property directly with
+// encoding/json fails with "cannot unmarshal bool into Go struct field ... IdsecCCEPropertyValue".
+func (v *IdsecCCEPropertyValue) UnmarshalJSON(data []byte) error {
+	var raw interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	return v.Deserialize(raw)
+}
+
+// MarshalJSON implements json.Marshaler, emitting the underlying bool or string value directly
+// instead of the BoolValue/StringValue struct fields.
+func (v IdsecCCEPropertyValue) MarshalJSON() ([]byte, error) {
+	value, err := v.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 // IdsecCCEPropertyOutput represents a property with a name and value.

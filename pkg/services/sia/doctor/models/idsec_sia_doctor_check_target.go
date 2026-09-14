@@ -128,9 +128,9 @@ type IdsecSIADoctorTarget struct {
 	// Shell selects the script interpreter for the SSH CA check: "bash" (default) or "kornShell".
 	Shell              string `json:"shell" mapstructure:"shell" flag:"shell" default:"bash" desc:"Shell for SSH CA check: bash or kornShell."`
 	Username           string `json:"username" mapstructure:"username" flag:"username" desc:"Username for direct connection to target."`
-	Password           string `json:"password" mapstructure:"password" flag:"password" desc:"Password for direct connection to target."`
+	Password           string `json:"password" mapstructure:"password" flag:"password" desc:"Password for direct connection to target." secret:"true"`
 	PrivateKeyPath     string `json:"private_key_path" mapstructure:"private_key_path" flag:"private-key-path" desc:"SSH private key path for direct connection."`
-	PrivateKeyContents string `json:"private_key_contents" mapstructure:"private_key_contents" flag:"private-key-contents" desc:"SSH private key PEM contents for direct connection."`
+	PrivateKeyContents string `json:"private_key_contents" mapstructure:"private_key_contents" flag:"private-key-contents" desc:"SSH private key PEM contents for direct connection." secret:"true"`
 	// WinRMProtocol is used when OSType is "windows": "http" or "https" (default "https").
 	WinRMProtocol string `json:"winrm_protocol" mapstructure:"winrm_protocol" flag:"winrm-protocol" default:"https" desc:"WinRM protocol for Windows targets."`
 }

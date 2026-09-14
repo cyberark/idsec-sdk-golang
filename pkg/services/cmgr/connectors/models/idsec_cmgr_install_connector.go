@@ -13,9 +13,9 @@ type IdsecCmgrInstall struct {
 	// Remote-execution fields
 	TargetMachine      string `json:"target_machine" mapstructure:"target_machine" flag:"target-machine" required:"true" desc:"The target machine on which to install the connector."`
 	Username           string `json:"username" mapstructure:"username" flag:"username" required:"true" desc:"The username used to connect to the target machine."`
-	Password           string `json:"password,omitempty" mapstructure:"password,omitempty" flag:"password" desc:"The password used to connect to the target machine."`
+	Password           string `json:"password,omitempty" mapstructure:"password,omitempty" flag:"password" desc:"The password used to connect to the target machine." secret:"true"`
 	PrivateKeyPath     string `json:"private_key_path,omitempty" mapstructure:"private_key_path,omitempty" flag:"private-key-path" desc:"The private key file path used to connect to the target machine via SSH."`
-	PrivateKeyContents string `json:"private_key_contents,omitempty" mapstructure:"private_key_contents,omitempty" flag:"private-key-contents" desc:"The private key contents used to connect to the target machine via SSH."`
+	PrivateKeyContents string `json:"private_key_contents,omitempty" mapstructure:"private_key_contents,omitempty" flag:"private-key-contents" desc:"The private key contents used to connect to the target machine via SSH." secret:"true"`
 	RetryCount         int    `json:"retry_count" mapstructure:"retry_count" flag:"retry-count" desc:"The number of times to retry connecting to the target machine." default:"10"`
 	RetryDelay         int    `json:"retry_delay" mapstructure:"retry_delay" flag:"retry-delay" desc:"The number of seconds to wait between retries." default:"5"`
 	WinRMProtocol      string `json:"winrm_protocol" mapstructure:"winrm_protocol" flag:"winrm-protocol" desc:"The protocol to use for WinRM connections (http, https)." default:"https" choices:"http,https"`

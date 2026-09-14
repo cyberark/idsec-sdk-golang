@@ -4,6 +4,47 @@ import (
 	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
 )
 
+// IdsecCCEGCPAddOutput is the output returned after adding a GCP manual onboarding.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: GcpProgrammaticGeneralOnboardOutput
+type IdsecCCEGCPAddOutput struct {
+	// ID is the onboarding ID for the created resource.
+	ID string `json:"id" mapstructure:"id" desc:"CCE onboarding ID for the created resource."`
+}
+
+// TfIdsecCCEGCPResources represents the Workload Identity Federation resources required for organization onboarding.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+type TfIdsecCCEGCPResources struct {
+	// The {4,32} quantifier's comma must be written as the UTF-8 hex escape 0x2C (see go-playground/validator's
+	// doc.go) or it gets misread as a tag separator and panics when the struct is first validated.
+	WorkloadIdentityPoolID     string `json:"workloadIdentityPoolId" mapstructure:"workload_identity_pool_id" validate:"required,pattern=^[a-z0-9-]{40x2C32}$" desc:"GCP workload identity pool ID."`
+	WorkloadIdentityProviderID string `json:"workloadIdentityProviderId" mapstructure:"workload_identity_provider_id" validate:"required,pattern=^[a-z0-9-]{40x2C32}$" desc:"GCP workload identity provider ID."`
+	TargetServiceAccountEmail  string `json:"targetServiceAccountEmail" mapstructure:"target_service_account_email" validate:"required,email" desc:"GCP target service account email."`
+}
+
+// TfIdsecCCEGCPAddOrganization is the input for adding a GCP organization manually.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: GcpProgrammaticGeneralOnboardInput
+type TfIdsecCCEGCPAddOrganization struct {
+	// DeploymentProjectID is the GCP project ID of the "hub" project used to host the
+	// Workload Identity Federation resources for the organization.
+	// GCP project IDs are lowercase strings (e.g. "my-hub-project-42"), not numbers.
+	// The {4,28} quantifier comma is hex-escaped (0x2C) to avoid go-playground/validator
+	// misreading it as a tag separator (see go-playground/validator doc.go).
+	DeploymentProjectID string `json:"deploymentProjectId" mapstructure:"deployment_project_id" validate:"required,pattern=^[a-z][a-z0-9-]{40x2C28}[a-z0-9]$" desc:"GCP project ID of the hub project used to create the Workload Identity Federation resources."`
+	// OrganizationID is the GCP organization identifier (numeric).
+	OrganizationID string `json:"organizationId" mapstructure:"organization_id" validate:"required,pattern=^[1-9][0-9]{70x2C18}$" desc:"GCP organization ID (8-19 numeric digits, no leading zero) that the project belongs to."`
+	// ProjectNumber is the numeric GCP project number.
+	ProjectNumber string `json:"projectNumber" mapstructure:"project_number" validate:"required,number" desc:"GCP project number."`
+	// Services is the list of services to onboard with their resource configurations.
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEResources contains the Workload Identity Federation resources required for organization onboarding.
+	CCEResources TfIdsecCCEGCPResources `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE WIF resources: workload_identity_pool_id, workload_identity_provider_id, target_service_account_email."`
+}
+
 // TfIdsecCCEGCPGetOrganization is the input for getting GCP organization details.
 // ⚠️  DEPRECATED: This struct is deprecated and should not be used.
 // ⚠️  It exists only for compatibility with Terraform provider.
@@ -39,4 +80,24 @@ type TfIdsecCCEGCPOrganization struct {
 	Services []string `json:"services,omitempty" mapstructure:"services,omitempty" desc:"List of services (SIA, SCA, SecretsHub, CDS)."`
 	// ServicesData contains detailed information about each onboarded service.
 	ServicesData []ccemodels.IdsecCCEOnboardedService `json:"servicesData,omitempty" mapstructure:"services_data,omitempty" desc:"Detailed information about each onboarded service."`
+}
+
+// TfIdsecCCEGCPUpdateOrganization is the input for updating a GCP organization's services.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: Custom input combining POST/DELETE /api/gcp/manual/{id}/services
+type TfIdsecCCEGCPUpdateOrganization struct {
+	// ID is the organization's onboarding ID.
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID."`
+	// Services is the desired list of services with their resource configurations.
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to onboard (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+}
+
+// TfIdsecCCEGCPDeleteOrganization is the input for deleting a GCP organization.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: Input for DELETE /api/gcp/manual/{id}
+type TfIdsecCCEGCPDeleteOrganization struct {
+	// ID is the organization's onboarding ID.
+	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID."`
 }

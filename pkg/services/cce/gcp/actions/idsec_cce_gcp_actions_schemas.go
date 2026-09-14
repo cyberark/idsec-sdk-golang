@@ -11,7 +11,13 @@ var ActionToSchemaMap = map[string]interface{}{
 	// Workspaces data source
 	"tf-workspaces": &gcpmodels.TfIdsecCCEGCPGetWorkspacesTerraform{},
 	// Project actions
-	"tf-project": &gcpmodels.TfIdsecCCEGCPGetProject{},
+	"tf-project":        &gcpmodels.TfIdsecCCEGCPGetProject{},
+	"tf-add-project":    &gcpmodels.TfIdsecCCEGCPAddProject{},
+	"tf-update-project": &gcpmodels.TfIdsecCCEGCPUpdateProject{},
+	"tf-delete-project": &gcpmodels.TfIdsecCCEGCPDeleteProject{},
 	// Organization actions
-	"tf-organization": &gcpmodels.TfIdsecCCEGCPGetOrganization{},
+	"tf-add-organization":    &gcpmodels.TfIdsecCCEGCPAddOrganization{},
+	"tf-organization":        &gcpmodels.TfIdsecCCEGCPGetOrganization{},
+	"tf-update-organization": &gcpmodels.TfIdsecCCEGCPUpdateOrganization{},
+	"tf-delete-organization": &gcpmodels.TfIdsecCCEGCPDeleteOrganization{},
 }

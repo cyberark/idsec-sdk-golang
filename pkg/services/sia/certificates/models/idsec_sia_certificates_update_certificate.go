@@ -4,7 +4,7 @@ package models
 type IdsecSIACertificatesUpdateCertificate struct {
 	CertificateID   string                 `json:"certificate_id" mapstructure:"certificate_id" flag:"certificate-id" desc:"The ID of the certificate to update."`
 	CertType        string                 `json:"cert_type,omitempty" mapstructure:"cert_type,omitempty" flag:"cert-type" desc:"The certificate type (PEM, DER)." choices:"PEM,DER"`
-	CertPassword    string                 `json:"cert_password,omitempty" mapstructure:"cert_password,omitempty" flag:"cert-password" desc:"The encryption password for the certificate."`
+	CertPassword    string                 `json:"cert_password,omitempty" mapstructure:"cert_password,omitempty" flag:"cert-password" desc:"The encryption password for the certificate." secret:"true"`
 	CertName        string                 `json:"cert_name,omitempty" mapstructure:"cert_name,omitempty" flag:"cert-name" desc:"The name of the certificate."`
 	CertDescription string                 `json:"cert_description,omitempty" mapstructure:"cert_description,omitempty" flag:"cert-description" desc:"The description of the certificate."`
 	DomainName      string                 `json:"domain_name,omitempty" mapstructure:"domain_name,omitempty" flag:"domain-name" desc:"The domain to which the certificate is assigned."`

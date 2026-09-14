@@ -63,7 +63,12 @@ type IdsecLogger struct {
 	fileOutput             io.Writer
 	fileLogLevel           int
 	isFileLoggingEnabled   bool
-	fileLoggingResolved    bool
+	// fileLoggingOnce resolves the file logging configuration on first use.
+	//
+	// A logger belongs to a client, and a client logs from every goroutine its
+	// caller sends requests from, so the first two requests would otherwise
+	// resolve the configuration concurrently and race over the result.
+	fileLoggingOnce sync.Once
 }
 
 // NewIdsecLogger creates a new instance of IdsecLogger with the specified configuration.
@@ -304,11 +309,9 @@ func (l *IdsecLogger) SetVerbose(value bool) {
 
 // ensureFileLoggingResolved lazily resolves file logging once per logger instance.
 func (l *IdsecLogger) ensureFileLoggingResolved() {
-	if l.fileLoggingResolved {
-		return
-	}
-	l.fileLoggingResolved = true
-	l.fileOutput, l.fileLogLevel, l.isFileLoggingEnabled = resolveFileLoggingConfig()
+	l.fileLoggingOnce.Do(func() {
+		l.fileOutput, l.fileLogLevel, l.isFileLoggingEnabled = resolveFileLoggingConfig()
+	})
 }
 
 // logToFile writes one sanitized log line to file if file logging is enabled.

@@ -492,8 +492,41 @@ func (s *IdsecSIAAccessService) ConnectorSetupScript(getConnectorSetupScript *ac
 	return &setupScript, nil
 }
 
+// k8sEphemeralHelmReleaseName is the fixed helm release name used for K8s ephemeral connector deployments.
+const k8sEphemeralHelmReleaseName = "sia-connector"
+
+// installK8SEphemeralConnector runs the setup script locally (rather than over SSH/WinRM to a
+// target machine). The script is already fully configured by the backend, since the K8s details
+// were sent as part of the setup-script API request, so it is run as-is.
+func (s *IdsecSIAAccessService) installK8SEphemeralConnector(installScript string) error {
+	s.Logger.Info("Running K8s ephemeral connector setup script locally")
+	if err := common.ExecuteCommand(installScript); err != nil {
+		return fmt.Errorf("failed to run K8s ephemeral connector setup script: %w", err)
+	}
+	return nil
+}
+
+// uninstallK8SEphemeralConnector uninstalls a K8s ephemeral connector directly via helm,
+// using the fixed k8sEphemeralHelmReleaseName as the helm release name.
+func (s *IdsecSIAAccessService) uninstallK8SEphemeralConnector(namespace string) error {
+	s.Logger.Info("Uninstalling K8s ephemeral connector [%s] via helm from namespace [%s]", k8sEphemeralHelmReleaseName, namespace)
+	if err := common.ExecuteCommandArgs("helm", "uninstall", k8sEphemeralHelmReleaseName, "--namespace", namespace); err != nil {
+		return fmt.Errorf("failed to uninstall K8s ephemeral connector via helm: %w", err)
+	}
+	return nil
+}
+
 // InstallConnector installs the connector on the target machine.
+//
+// When installConnector.ConnectorOS is k8s-ephemeral, there is no single target machine to
+// connect to: the connector is a helm deployment that may run as multiple replicas, so the setup
+// script (already configured server-side from installConnector.K8SDetails, sent via the
+// setup-script API call) is executed locally, and no single connector ID is returned (the caller
+// should look up the resulting connector(s) separately if needed).
 func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.IdsecSIAInstallConnector) (*accessmodels.IdsecSIAAccessConnectorID, error) {
+	if installConnector.ConnectorOS != commonmodels.OSTypeK8SEphemeral && (installConnector.TargetMachine == "" || installConnector.Username == "") {
+		return nil, fmt.Errorf("target_machine and username are required when connector_os is %q", installConnector.ConnectorOS)
+	}
 	s.Logger.Info(
 		"Installing connector on machine [%s] of type [%s]",
 		installConnector.TargetMachine,
@@ -503,10 +536,19 @@ func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.
 		ConnectorOS:     installConnector.ConnectorOS,
 		ConnectorPoolID: installConnector.ConnectorPoolID,
 		ConnectorType:   installConnector.ConnectorType,
+		K8SDetails:      installConnector.K8SDetails,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve connector setup script: %w", err)
 	}
+
+	if installConnector.ConnectorOS == commonmodels.OSTypeK8SEphemeral {
+		if err := s.installK8SEphemeralConnector(installationScript.BashCmd); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
 	return s.installConnectorOnMachine(
 		installationScript.BashCmd,
 		installConnector.ConnectorOS,
@@ -522,7 +564,20 @@ func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.
 }
 
 // UninstallConnector uninstalls the connector from the target machine.
+//
+// When uninstallConnector.ConnectorOS is k8s-ephemeral, there is no target machine to connect to
+// and no single ConnectorID to remove from the platform, since a helm release can back multiple
+// replica connectors: the connector(s) are instead uninstalled directly via
+// 'helm uninstall sia-connector --namespace <k8s-namespace>', and the platform records for
+// ephemeral connectors self-expire once they stop checking in, so no DeleteConnector call is made.
 func (s *IdsecSIAAccessService) UninstallConnector(uninstallConnector *accessmodels.IdsecSIAUninstallConnector) error {
+	if uninstallConnector.ConnectorOS == commonmodels.OSTypeK8SEphemeral {
+		if uninstallConnector.K8SNamespace == "" {
+			return fmt.Errorf("k8s_namespace is required when connector_os is %q", uninstallConnector.ConnectorOS)
+		}
+		s.Logger.Info("Uninstalling K8s ephemeral connector(s) of type [%s] from namespace [%s]", uninstallConnector.ConnectorOS, uninstallConnector.K8SNamespace)
+		return s.uninstallK8SEphemeralConnector(uninstallConnector.K8SNamespace)
+	}
 	s.Logger.Info(
 		"Uninstalling connector [%s] from machine",
 		uninstallConnector.ConnectorID,

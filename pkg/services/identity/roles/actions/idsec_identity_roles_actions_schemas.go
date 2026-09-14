@@ -15,6 +15,7 @@ var ActionToSchemaMap = map[string]interface{}{
 	"list":                     nil,
 	"list-by":                  &rolesmodels.IdsecIdentityRolesFilter{},
 	"get":                      &rolesmodels.IdsecIdentityGetRole{},
+	"get-by-name":              &rolesmodels.IdsecIdentityGetRoleByName{},
 	"stats":                    nil,
 	"get-member":               &rolesmodels.IdsecIdentityGetRoleMember{},
 	"list-members":             &rolesmodels.IdsecIdentityListRoleMembers{},

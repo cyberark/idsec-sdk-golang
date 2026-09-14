@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	cookiejar "github.com/juju/persistent-cookiejar"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/models"
@@ -203,7 +202,7 @@ func TestNewIdsecISPServiceClient(t *testing.T) {
 			cleanup := tt.setupMock()
 			defer cleanup()
 
-			cookieJar, _ := cookiejar.New(nil)
+			cookieJar := common.NewInMemoryCookieJar()
 			result, err := NewIdsecISPServiceClient(
 				tt.serviceName,
 				tt.tenantSubdomain,

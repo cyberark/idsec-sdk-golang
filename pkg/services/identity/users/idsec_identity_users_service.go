@@ -593,6 +593,9 @@ func (s *IdsecIdentityUsersService) Get(user *usersmodels.IdsecIdentityGetUser) 
 	isServiceUser := false
 	isEverybodyRole := false
 	isOauthClient := false
+	forcePasswordChangeNext := false
+	passwordNeverExpire := false
+	inSysAdminRole := false
 	if val, ok := mgmtRes.attributes["InEverybodyRole"].(bool); ok {
 		isEverybodyRole = val
 		if !isEverybodyRole {
@@ -602,20 +605,32 @@ func (s *IdsecIdentityUsersService) Get(user *usersmodels.IdsecIdentityGetUser) 
 	if val, ok := mgmtRes.attributes["OauthClient"].(bool); ok {
 		isOauthClient = val
 	}
+	if val, ok := mgmtRes.attributes["ForcePasswordChangeNext"].(bool); ok {
+		forcePasswordChangeNext = val
+	}
+	if val, ok := mgmtRes.attributes["PasswordNeverExpire"].(bool); ok {
+		passwordNeverExpire = val
+	}
+	if val, ok := mgmtRes.attributes["InSysAdminRole"].(bool); ok {
+		inSysAdminRole = val
+	}
 
 	return &usersmodels.IdsecIdentityUser{
-		UserID:          userID,
-		Username:        userRow["Username"].(string),
-		DisplayName:     userRow["DisplayName"].(string),
-		Email:           userRow["Email"].(string),
-		MobileNumber:    userRow["MobileNumber"].(string),
-		Suffix:          strings.Split(userRow["Username"].(string), "@")[1],
-		LastLogin:       lastLogin,
-		InEverybodyRole: &isEverybodyRole,
-		IsServiceUser:   &isServiceUser,
-		IsOauthClient:   &isOauthClient,
-		State:           mgmtRes.attributes["State"].(string),
-		UserAttributes:  customRes.attributes.Attributes,
+		UserID:                  userID,
+		Username:                userRow["Username"].(string),
+		DisplayName:             userRow["DisplayName"].(string),
+		Email:                   userRow["Email"].(string),
+		MobileNumber:            userRow["MobileNumber"].(string),
+		Suffix:                  strings.Split(userRow["Username"].(string), "@")[1],
+		LastLogin:               lastLogin,
+		InEverybodyRole:         &isEverybodyRole,
+		IsServiceUser:           &isServiceUser,
+		IsOauthClient:           &isOauthClient,
+		State:                   mgmtRes.attributes["State"].(string),
+		UserAttributes:          customRes.attributes.Attributes,
+		ForcePasswordChangeNext: &forcePasswordChangeNext,
+		PasswordNeverExpire:     &passwordNeverExpire,
+		InSysAdminRole:          &inSysAdminRole,
 	}, nil
 }
 

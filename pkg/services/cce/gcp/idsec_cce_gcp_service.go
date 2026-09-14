@@ -96,6 +96,42 @@ func (s *IdsecCCEGCPService) TfProject(input *gcpmodels.TfIdsecCCEGCPGetProject)
 	return &project, nil
 }
 
+// TfAddProject adds a GCP Project manually.
+// After creation, it retrieves the full Project details with retry logic (3 attempts, 1 second delay).
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: POST /api/gcp/manual
+func (s *IdsecCCEGCPService) TfAddProject(input *gcpmodels.TfIdsecCCEGCPAddProject) (*gcpmodels.TfIdsecCCEGCPProject, error) {
+	return s.tfAddProject(input)
+}
+
+// TfUpdateProject updates a GCP Project's services.
+// Compares the desired services in the input with the current services on the Project,
+// then adds new services and removes services that are no longer desired.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: POST/DELETE /api/gcp/manual/{id}/services
+func (s *IdsecCCEGCPService) TfUpdateProject(input *gcpmodels.TfIdsecCCEGCPUpdateProject) (*gcpmodels.TfIdsecCCEGCPProject, error) {
+	return s.tfUpdateProject(input)
+}
+
+// TfDeleteProject deletes a GCP Project.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: DELETE /api/gcp/manual/{id}
+func (s *IdsecCCEGCPService) TfDeleteProject(input *gcpmodels.TfIdsecCCEGCPDeleteProject) error {
+	return s.tfDeleteProject(input)
+}
+
+// TfAddOrganization adds a GCP organization manually.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// After creation, it retrieves the full organization details with retry logic (3 attempts, 1 second delay).
+// API: POST /api/gcp/manual
+func (s *IdsecCCEGCPService) TfAddOrganization(input *gcpmodels.TfIdsecCCEGCPAddOrganization) (*gcpmodels.TfIdsecCCEGCPOrganization, error) {
+	return s.tfAddOrganization(input)
+}
+
 // TfOrganization retrieves GCP organization details by onboarding ID.
 // ⚠️  DEPRECATED: This function is deprecated and should not be used.
 // ⚠️  It exists only for compatibility with Terraform provider.
@@ -121,6 +157,24 @@ func (s *IdsecCCEGCPService) TfOrganization(input *gcpmodels.TfIdsecCCEGCPGetOrg
 	}
 
 	return &organization, nil
+}
+
+// TfUpdateOrganization updates a GCP organization's services.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// Compares the desired services in the input with the current services on the organization,
+// then adds new services and removes services that are no longer desired.
+// API: POST/DELETE /api/gcp/manual/{id}/services
+func (s *IdsecCCEGCPService) TfUpdateOrganization(input *gcpmodels.TfIdsecCCEGCPUpdateOrganization) (*gcpmodels.TfIdsecCCEGCPOrganization, error) {
+	return s.tfUpdateOrganization(input)
+}
+
+// TfDeleteOrganization deletes a GCP organization.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: DELETE /api/gcp/manual/{id}
+func (s *IdsecCCEGCPService) TfDeleteOrganization(input *gcpmodels.TfIdsecCCEGCPDeleteOrganization) error {
+	return s.tfDeleteOrganization(input)
 }
 
 // tfInternalWorkspaces retrieves GCP workspaces with pagination support.

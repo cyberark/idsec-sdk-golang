@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
-	browser "github.com/EDDYCJY/fake-useragent"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +38,16 @@ var (
 	repoPath = "cyberark/idsec-sdk-golang"
 )
 
+// chromeVersion is the Chrome major version embedded in the User-Agent string.
+// Update this constant when a new Chrome major release ships and the WAF
+// bot-control baseline needs refreshing.
+const chromeVersion = "151.0.0.0"
+
+// cachedBrowserUA holds the browser portion of the User-Agent string, computed
+// once at process startup so that all SDK calls within a session use an
+// identical UA prefix.
+var cachedBrowserUA string
+
 func init() {
 	// If version is still the default value, try to read from VERSION file
 	// This handles cases where the binary wasn't built with ldflags
@@ -46,6 +56,27 @@ func init() {
 			version = v
 		}
 	}
+	cachedBrowserUA = buildBrowserUA()
+}
+
+// buildBrowserUA constructs a Chrome desktop User-Agent string that matches the
+// actual OS of the running process. runtime.GOOS drives the platform token so
+// that a Windows host reports a Windows UA, macOS reports a Mac UA, and
+// everything else falls back to a Linux UA.
+func buildBrowserUA() string {
+	var platform string
+	switch runtime.GOOS {
+	case "windows":
+		platform = "Windows NT 10.0; Win64; x64"
+	case "darwin":
+		platform = "Macintosh; Intel Mac OS X 10_15_7"
+	default: // linux, freebsd, etc.
+		platform = "X11; Linux x86_64"
+	}
+	return fmt.Sprintf(
+		"Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36",
+		platform, chromeVersion,
+	)
 }
 
 // readVersionFile attempts to read the VERSION file from the repository root using os.Root for security.
@@ -110,10 +141,13 @@ var (
 	trustedCaCertsBundlePath  = ""
 	currentTool               = IdsecToolSDK
 	currentCorrelationID      = ""
-	isCollectionTelemetry     = true
-	proxyAddress              = ""
-	proxyUsername             = ""
-	proxyPassword             = ""
+	// currentCorrelationIDLock guards currentCorrelationID, which is generated
+	// on first use and then read by every request that reports telemetry.
+	currentCorrelationIDLock sync.RWMutex
+	isCollectionTelemetry    = true
+	proxyAddress             = ""
+	proxyUsername            = ""
+	proxyPassword            = ""
 )
 
 const (
@@ -813,6 +847,8 @@ func SetIdsecToolInUse(tool IdsecTool) {
 //	correlationID := GenerateCorrelationID()
 //	fmt.Println(correlationID) // Outputs a new UUID string
 func GenerateCorrelationID() string {
+	currentCorrelationIDLock.Lock()
+	defer currentCorrelationIDLock.Unlock()
 	currentCorrelationID = uuid.New().String()
 	return currentCorrelationID
 }
@@ -830,28 +866,37 @@ func GenerateCorrelationID() string {
 //	correlationID := CorrelationID()
 //	fmt.Println(correlationID) // Outputs the current or newly generated UUID string
 func CorrelationID() string {
+	currentCorrelationIDLock.RLock()
+	correlationID := currentCorrelationID
+	currentCorrelationIDLock.RUnlock()
+	if correlationID != "" {
+		return correlationID
+	}
+
+	currentCorrelationIDLock.Lock()
+	defer currentCorrelationIDLock.Unlock()
+	// Another caller may have generated one while this one waited for the lock,
+	// and every request in a process is meant to report the same ID.
 	if currentCorrelationID == "" {
-		return GenerateCorrelationID()
+		currentCorrelationID = uuid.New().String()
 	}
 	return currentCorrelationID
 }
 
 // UserAgent returns the user agent string for the Idsec SDK in Golang.
 //
-// UserAgent generates a composite user agent string by combining a Chrome browser
-// user agent (obtained from the fake-useragent library) with the current IDSEC SDK
-// version. This provides proper identification for HTTP requests made by the SDK
-// while maintaining compatibility with web services that expect browser-like
-// user agents.
+// The browser prefix (cachedBrowserUA) is built once at process startup by
+// buildBrowserUA() and reflects the actual OS of the running host. The SDK
+// tool name and version are appended on each call so that callers using
+// SetIdsecToolInUse or SetIdsecVersion always see the current values.
 //
-// Returns a formatted user agent string in the format:
-// "{Chrome User Agent} Idsec-SDK-Golang/{version}"
+// Returns a string in the format:
+// "{Chrome User Agent} {tool}/{version}"
 //
-// Example:
+// Example (on macOS):
 //
 //	userAgent := UserAgent()
-//	// userAgent might be:
-//	// "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Idsec-SDK-Golang/1.2.3"
+//	// "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Idsec-SDK-Golang/1.2.3"
 func UserAgent() string {
-	return browser.Chrome() + fmt.Sprintf(" %s/%s", IdsecToolInUse(), IdsecVersion())
+	return cachedBrowserUA + fmt.Sprintf(" %s/%s", IdsecToolInUse(), IdsecVersion())
 }

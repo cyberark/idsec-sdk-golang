@@ -2,40 +2,37 @@ Copyright (c) 2025 CyberArk Software Ltd. All rights reserved
 
 idsec-sdk-golang is using the following open source components:
 
-1) fake-useragent (https://github.com/EDDYCJY/fake-useragent) : Apache-2.0 License eddycjy (eddycjy@gmail.com)
+1) winrm (https://github.com/masterzen/winrm) : Apache-2.0 License Author masterzen
 
-2) winrm (https://github.com/masterzen/winrm) : Apache-2.0 License Author masterzen
+2) testify (https://github.com/stretchr/testify) : MIT License Copyright (c) 2012-2020 Mat Ryer, Tyler Bunnell and contributors.
 
-3) testify (https://github.com/stretchr/testify) : MIT License Copyright (c) 2012-2020 Mat Ryer, Tyler Bunnell and contributors.
+3) uuid (https://github.com/google/uuid) : BSD-3-Clause Copyright (c) 2009,2014 Google Inc. All rights reserved.
 
-4) uuid (https://github.com/google/uuid) : BSD-3-Clause Copyright (c) 2009,2014 Google Inc. All rights reserved.
+4) persistent-cookiejar (https://github.com/juju/persistent-cookiejar) : BSD-3-Clause Copyright (c) 2012 The Go Authors. All rights reserved.
 
-5) persistent-cookiejar (https://github.com/juju/persistent-cookiejar) : BSD-3-Clause Copyright (c) 2012 The Go Authors. All rights reserved.
+5) survey (https://github.com/Iilun/survey) : MIT License Copyright (c) 2018 Alec Aivazis
 
-6) survey (https://github.com/Iilun/survey) : MIT License Copyright (c) 2018 Alec Aivazis
+6) jwt (https://github.com/golang-jwt/jwt) : MIT License Copyright (c) 2012 Dave Grijalva Copyright (c) 2021 golang-jwt maintainers
 
-7) jwt (https://github.com/golang-jwt/jwt) : MIT License Copyright (c) 2012 Dave Grijalva Copyright (c) 2021 golang-jwt maintainers
+7) mapstructure (https://github.com/mitchellh/mapstructure) : MIT License Copyright (c) 2013 Mitchell Hashimoto
 
-8) mapstructure (https://github.com/mitchellh/mapstructure) : MIT License Copyright (c) 2013 Mitchell Hashimoto
+8) webbrowser (https://github.com/toqueteos/webbrowser) : MIT License The MIT License (MIT) Copyright (c) 2012-23 by Carlos Cobo and contributors.
 
-9) webbrowser (https://github.com/toqueteos/webbrowser) : MIT License The MIT License (MIT) Copyright (c) 2012-23 by Carlos Cobo and contributors.
+9) strcase (https://github.com/iancoleman/strcase) : MIT License Copyright (c) 2015 Ian Coleman Copyright (c) 2018 Ma_124
 
-10) strcase (https://github.com/iancoleman/strcase) : MIT License Copyright (c) 2015 Ian Coleman Copyright (c) 2018 Ma_124
+10) keyring (https://github.com/99designs/keyring) : MIT License Copyright (c) 2015 99designs
 
-11) keyring (https://github.com/99designs/keyring) : MIT License Copyright (c) 2015 99designs
+11) mapstructure (https://github.com/go-viper/mapstructure) : MIT License Copyright (c) 2013 Mitchell Hashimoto
 
-12) mapstructure (https://github.com/go-viper/mapstructure) : MIT License Copyright (c) 2013 Mitchell Hashimoto
-
-13) aws-sdk-go-v2 (https://github.com/aws/aws-sdk-go-v2) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-14) aws-sdk-go-v2-credentials (https://github.com/aws/aws-sdk-go-v2/credentials) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-15) aws-sdk-go-v2-service-sts (https://github.com/aws/aws-sdk-go-v2/service/sts) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-16) smithy-go (https://github.com/aws/smithy-go) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-17) azure-sdk-for-go-sdk-azcore (https://github.com/Azure/azure-sdk-for-go/sdk/azcore) : MIT License Copyright (c) Microsoft Corporation.
-18) azure-sdk-for-go-sdk-azidentity (https://github.com/Azure/azure-sdk-for-go/sdk/azidentity) : MIT License Copyright (c) Microsoft Corporation.
-19) azure-sdk-for-go-sdk-resourcemanager-authorization-armauthorization (https://github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization) : MIT License Copyright (c) Microsoft Corporation.
-20) validator (https://github.com/go-playground/validator) : MIT License Copyright (c) 2015 Dean Karn
-21) go-jose (https://github.com/go-jose/go-jose) : Apache-2.0 License Copyright 2014 Square Inc.
-22) go4 (https://github.com/juju/go4) : Apache-2.0 License Copyright 2004
+12) aws-sdk-go-v2 (https://github.com/aws/aws-sdk-go-v2) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+13) aws-sdk-go-v2-credentials (https://github.com/aws/aws-sdk-go-v2/credentials) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+14) aws-sdk-go-v2-service-sts (https://github.com/aws/aws-sdk-go-v2/service/sts) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+15) smithy-go (https://github.com/aws/smithy-go) : Apache-2.0 License Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+16) azure-sdk-for-go-sdk-azcore (https://github.com/Azure/azure-sdk-for-go/sdk/azcore) : MIT License Copyright (c) Microsoft Corporation.
+17) azure-sdk-for-go-sdk-azidentity (https://github.com/Azure/azure-sdk-for-go/sdk/azidentity) : MIT License Copyright (c) Microsoft Corporation.
+18) azure-sdk-for-go-sdk-resourcemanager-authorization-armauthorization (https://github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization) : MIT License Copyright (c) Microsoft Corporation.
+19) validator (https://github.com/go-playground/validator) : MIT License Copyright (c) 2015 Dean Karn
+20) go-jose (https://github.com/go-jose/go-jose) : Apache-2.0 License Copyright 2014 Square Inc.
 
 =====================================================================
 1) Apache-2.0 License

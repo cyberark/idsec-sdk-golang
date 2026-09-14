@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -261,6 +262,101 @@ func TestTfUpdateEntra_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "entra-123", result.ID)
+}
+
+// TestTfUpdateEntra_UpsertsChangedServiceInput is a regression guard for two related bugs
+// (mirroring the AWS fix in idsec_cce_aws_account_test.go), now applied to Azure's Entra
+// (organization-level) update path:
+//  1. the original "silent no-op on version change": a name-only diff sends only brand-new
+//     service names, so bumping the version of an already-onboarded service produced a green
+//     apply with no API call and no server change; and
+//  2. the follow-up "501 on unchanged service": naively re-sending the full desired list makes
+//     the API reject already-onboarded services that are not an upgrade (e.g. dpa) with a 501,
+//     because the add/update-services endpoint only supports adding new services or upgrading a
+//     version/resources - not re-submitting an unchanged service.
+//
+// So the update must send only new and version-changed services: here dpa is unchanged
+// (0.0.3 -> 0.0.3) and must be omitted, while sca is upgraded (0.0.3 -> 0.0.4) and must be sent.
+func TestTfUpdateEntra_UpsertsChangedServiceInput(t *testing.T) {
+	// dpa and sca are already onboarded at 0.0.3; the GET exposes their versions under "servicesData".
+	getCurrentResponseJSON := `{
+		"id": "entra-123",
+		"services": ["dpa", "sca"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []},
+			{"name": "sca", "version": "0.0.3", "status": "Completely added", "errors": []}
+		]
+	}`
+	getUpdatedResponseJSON := `{
+		"id": "entra-123",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012"
+	}`
+
+	var postBody string
+	var postCount, deleteCount int
+	getCallCount := 0
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "GET" && r.URL.Path == "/api/azure/manual/entra/entra-123" && getCallCount == 0 {
+					getCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getCurrentResponseJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual/entra-123/services"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "DELETE" && r.URL.Path == "/api/azure/manual/entra-123/services"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/entra/entra-123" && getCallCount > 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getUpdatedResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfUpdateEntra(&azuremodels.TfIdsecCCEAzureUpdateEntra{
+		ID: "entra-123",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]interface{}{}},
+			{ServiceName: ccemodels.SCA, Version: "0.0.4", Resources: map[string]interface{}{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "a version change on one service must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"sca"`, "the upgraded service (sca) must be sent")
+	require.Contains(t, postBody, `"version":"0.0.4"`, "the new sca version must be sent")
+	require.NotContains(t, postBody, `"serviceName":"dpa"`,
+		"the unchanged service (dpa) must NOT be sent, or the API rejects the request with 501")
+	require.Zero(t, deleteCount, "a version change on an existing service must not delete any service")
 }
 
 func TestTfDeleteEntra_Success(t *testing.T) {

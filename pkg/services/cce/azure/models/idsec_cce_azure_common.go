@@ -4,13 +4,6 @@ import (
 	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
 )
 
-// IdsecCCEAzureAddOutput is the output returned after adding an Azure manual onboarding.
-// OPENAPI-CORRELATION: AzureProgrammaticGeneralOnboardOutput
-type IdsecCCEAzureAddOutput struct {
-	// ID is the onboarding ID for the created resource.
-	ID string `json:"id" mapstructure:"id" desc:"CCE onboarding ID for the created resource."`
-}
-
 // IdsecCCEAzureAddManualServices is the input for adding services to an Azure manual onboarding.
 // OPENAPI-CORRELATION: AzureProgrammaticAddServicesBodyInput + path parameter
 type IdsecCCEAzureAddManualServices struct {
