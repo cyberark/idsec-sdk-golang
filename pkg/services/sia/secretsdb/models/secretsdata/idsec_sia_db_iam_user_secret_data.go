@@ -7,7 +7,7 @@ type IdsecSIADBIAMUserSecretData struct {
 	Region          string                 `json:"region,omitempty" mapstructure:"region" desc:"Region associated with the iam user"`
 	Username        string                 `json:"username" mapstructure:"username" desc:"Username portion in the ARN of the iam user"`
 	AccessKeyID     string                 `json:"access_key_id" mapstructure:"access_key_id" desc:"Access key id of the user"`
-	SecretAccessKey string                 `json:"secret_access_key" mapstructure:"secret_access_key" desc:"Secret access key of the user"`
+	SecretAccessKey string                 `json:"secret_access_key" mapstructure:"secret_access_key" desc:"Secret access key of the user" secret:"true"`
 	Metadata        map[string]interface{} `json:"metadata,omitempty" mapstructure:"metadata" desc:"Extra secret details"`
 }
 

@@ -59,7 +59,7 @@ func decodeWithMapToStringHook(input, output interface{}) error {
 type idsecSIAVMSecretAPIResponse struct {
 	SecretID      string                               `json:"secret_id" mapstructure:"secret_id"`
 	TenantID      string                               `json:"tenant_id,omitempty" mapstructure:"tenant_id,omitempty"`
-	Secret        vmsecretsmodels.IdsecSIAVMSecretData `json:"secret,omitempty" mapstructure:"secret,omitempty"`
+	Secret        vmsecretsmodels.IdsecSIAVMSecretData `json:"secret,omitempty" mapstructure:"secret,omitempty" secret:"true"`
 	SecretType    string                               `json:"secret_type" mapstructure:"secret_type"`
 	SecretDetails string                               `json:"secret_details" mapstructure:"secret_details"`
 	IsActive      bool                                 `json:"is_active" mapstructure:"is_active"`

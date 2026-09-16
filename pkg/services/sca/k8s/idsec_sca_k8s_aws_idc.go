@@ -54,7 +54,7 @@ var (
 // JSON tags match the AWS IDC OIDC API (camelCase).
 type awsIDCStartDeviceAuthRequest struct {
 	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
+	ClientSecret string `json:"clientSecret" secret:"true"`
 	StartURL     string `json:"startUrl"`
 }
 
@@ -73,9 +73,9 @@ type awsIDCStartDeviceAuthResponse struct {
 // set); the unused field is omitted so a single struct covers both flows.
 type awsIDCCreateTokenRequest struct {
 	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
+	ClientSecret string `json:"clientSecret" secret:"true"`
 	DeviceCode   string `json:"deviceCode,omitempty"`
-	RefreshToken string `json:"refreshToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty" secret:"true"`
 	GrantType    string `json:"grantType"`
 }
 
@@ -83,8 +83,8 @@ type awsIDCCreateTokenRequest struct {
 // only when the registered client includes the refresh_token grant type; AWS may
 // also rotate it on each refresh_token grant.
 type awsIDCCreateTokenResponse struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
+	AccessToken  string `json:"accessToken" secret:"true"`
+	RefreshToken string `json:"refreshToken" secret:"true"`
 	TokenType    string `json:"tokenType"`
 	ExpiresIn    int64  `json:"expiresIn"`
 }
@@ -98,14 +98,14 @@ type awsIDCErrorResponse struct {
 // awsIDCRoleCredentials mirrors the SSO portal roleCredentials object.
 type awsIDCRoleCredentials struct {
 	AccessKeyID     string `json:"accessKeyId"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	SessionToken    string `json:"sessionToken"`
+	SecretAccessKey string `json:"secretAccessKey" secret:"true"`
+	SessionToken    string `json:"sessionToken" secret:"true"`
 	Expiration      int64  `json:"expiration"`
 }
 
 // awsIDCGetRoleCredentialsResponse is the /federation/credentials reply.
 type awsIDCGetRoleCredentialsResponse struct {
-	RoleCredentials awsIDCRoleCredentials `json:"roleCredentials"`
+	RoleCredentials awsIDCRoleCredentials `json:"roleCredentials" secret:"true"`
 }
 
 // AWSIDCOIDCCache stores optional callbacks for reusing a cached SSO OIDC access

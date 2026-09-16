@@ -4,7 +4,7 @@ package secretsdata
 type IdsecSIADBUserPasswordSecretData struct {
 	IdsecSIADBSecretData
 	Username string                 `json:"username,omitempty" mapstructure:"username" desc:"Name or id of the user"`
-	Password string                 `json:"password,omitempty" mapstructure:"password" desc:"Password of the user"`
+	Password string                 `json:"password,omitempty" mapstructure:"password" desc:"Password of the user" secret:"true"`
 	Metadata map[string]interface{} `json:"metadata,omitempty" mapstructure:"metadata" desc:"Extra secret details"`
 }
 

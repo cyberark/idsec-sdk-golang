@@ -48,9 +48,9 @@ type IdsecIdentityWebappAppsConfiguration struct {
 	ADAttribute               *string                          `json:"ad_attribute,omitempty" mapstructure:"ad_attribute,omitempty" flag:"ad-attribute" desc:"Active Directory attribute used for user assignment"`
 	UserMapScript             *string                          `json:"user_map_script,omitempty" mapstructure:"user_map_script,omitempty" flag:"user-map-script" desc:"User map script for the webapp"`
 	UserNameStrategy          *string                          `json:"user_name_strategy,omitempty" mapstructure:"user_name_strategy,omitempty" flag:"user-name-strategy" desc:"User name strategy"`
-	UserPassScript            *string                          `json:"user_pass_script,omitempty" mapstructure:"user_pass_script,omitempty" flag:"user-pass-script" desc:"User password script for the webapp"`
+	UserPassScript            *string                          `json:"user_pass_script,omitempty" mapstructure:"user_pass_script,omitempty" flag:"user-pass-script" desc:"User password script for the webapp" secret:"true"`
 	Username                  *string                          `json:"username,omitempty" mapstructure:"username,omitempty" flag:"username" desc:"Username for the webapp"`
-	Password                  *string                          `json:"password,omitempty" mapstructure:"password,omitempty" flag:"password" desc:"Password for the webapp"`
+	Password                  *string                          `json:"password,omitempty" mapstructure:"password,omitempty" flag:"password" desc:"Password for the webapp" secret:"true"`
 	OAuthProfile              *IdsecIdentityWebappOAuthProfile `json:"oauth_profile,omitempty" mapstructure:"oauth_profile,omitempty" flag:"oauth-profile" desc:"OAuth profile (optional)"`
 	OpenIDConnectScript       *string                          `json:"open_id_connect_script,omitempty" mapstructure:"open_id_connect_script,omitempty" flag:"open-id-connect-script" desc:"OpenID Connect script"`
 	AdditionalIdentifierValue *string                          `json:"additional_identifier_value,omitempty" mapstructure:"additional_identifier_value,omitempty" flag:"additional-identifier-value" desc:"Additional identifier value for the webapp"`

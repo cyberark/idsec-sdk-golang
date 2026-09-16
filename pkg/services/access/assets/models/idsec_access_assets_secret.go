@@ -9,5 +9,5 @@ type IdsecAccessAssetsSecretRequest struct {
 // IdsecAccessAssetsSecretResponse represents the response containing the asset secret.
 type IdsecAccessAssetsSecretResponse struct {
 	AssetID string  `json:"assetId" mapstructure:"asset_id" desc:"Identifier of the asset"`
-	Secret  *string `json:"secret" mapstructure:"secret" desc:"The secret value"`
+	Secret  *string `json:"secret" mapstructure:"secret" desc:"The secret value" secret:"true"`
 }

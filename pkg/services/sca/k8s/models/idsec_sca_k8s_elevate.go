@@ -73,10 +73,10 @@ type IdsecSCAK8sElevateResult struct {
 	RoleName          string                           `json:"roleName,omitempty"`
 	SessionID         string                           `json:"sessionId"`
 	SessionExpTime    string                           `json:"sessionExpTime,omitempty"`
-	AccessCredentials string                           `json:"accessCredentials,omitempty"`
-	EKSToken          string                           `json:"eksToken,omitempty"`       // server-provided EKS bearer token (AWS IAM direct)
-	OrganizationID    string                           `json:"organizationId,omitempty"` // mirrored from response body
-	TargetID          string                           `json:"targetId,omitempty"`       // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
+	AccessCredentials string                           `json:"accessCredentials,omitempty" secret:"true"`
+	EKSToken          string                           `json:"eksToken,omitempty" secret:"true"` // server-provided EKS bearer token (AWS IAM direct)
+	OrganizationID    string                           `json:"organizationId,omitempty"`         // mirrored from response body
+	TargetID          string                           `json:"targetId,omitempty"`               // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
 	ClientDetails     *IdsecSCAK8sElevateClientDetails `json:"clientDetails,omitempty"`
 }
 

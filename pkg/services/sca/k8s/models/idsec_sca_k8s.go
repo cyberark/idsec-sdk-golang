@@ -16,14 +16,14 @@ const (
 // IdsecSCAK8sDpaSsoAcquireResponse is the JSON body from POST /api/adb/sso/acquire
 // for DPA-K8S short-lived client certificates (SCA proxy flow).
 type IdsecSCAK8sDpaSsoAcquireResponse struct {
-	Token    IdsecSCAK8sDpaSsoAcquireToken    `json:"token" mapstructure:"token" desc:"Short-lived client certificate material issued by DPA SSO acquire."`
+	Token    IdsecSCAK8sDpaSsoAcquireToken    `json:"token" mapstructure:"token" desc:"Short-lived client certificate material issued by DPA SSO acquire." secret:"true"`
 	Metadata IdsecSCAK8sDpaSsoAcquireMetadata `json:"metadata" mapstructure:"metadata" desc:"Session and tenant metadata for the acquired certificate."`
 }
 
 // IdsecSCAK8sDpaSsoAcquireToken holds the certificate and key returned in the acquire response token object.
 type IdsecSCAK8sDpaSsoAcquireToken struct {
 	ClientCertificate string `json:"client_certificate" mapstructure:"client_certificate" desc:"PEM-encoded client certificate for the DPA K8s proxy."`
-	PrivateKey        string `json:"private_key" mapstructure:"private_key" desc:"PEM-encoded private key matching client_certificate."`
+	PrivateKey        string `json:"private_key" mapstructure:"private_key" desc:"PEM-encoded private key matching client_certificate." secret:"true"`
 }
 
 // IdsecSCAK8sDpaSsoAcquireMetadata holds DPA SSO session metadata from the acquire response.

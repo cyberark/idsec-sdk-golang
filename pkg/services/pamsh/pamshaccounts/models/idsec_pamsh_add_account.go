@@ -29,7 +29,7 @@ func (s IdsecPamshAddAccountSecretManagement) MarshalJSON() ([]byte, error) {
 // IdsecPamshAddAccount represents the details required to add an account.
 type IdsecPamshAddAccount struct {
 	SecretManagement          *IdsecPamshAccountSecretManagement `json:"secret_management,omitempty" mapstructure:"secret_management,omitempty" desc:"Secret management configuration for the account"`
-	Secret                    string                             `json:"secret" mapstructure:"secret" desc:"The secret value." flag:"secret"`
+	Secret                    string                             `json:"secret" mapstructure:"secret" desc:"The secret value." flag:"secret" secret:"true"`
 	Name                      string                             `json:"name" mapstructure:"name,omitempty" desc:"Name of the account" flag:"name"`
 	SafeName                  string                             `json:"safe_name" mapstructure:"safe_name" desc:"The Safe where the account will be created" flag:"safe-name" validate:"required"`
 	PlatformID                string                             `json:"platform_id,omitempty" mapstructure:"platform_id,omitempty" desc:"The platform assigned to this account" flag:"platform-id"`

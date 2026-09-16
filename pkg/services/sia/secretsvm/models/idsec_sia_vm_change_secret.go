@@ -6,7 +6,7 @@ type IdsecSIAVMChangeSecret struct {
 	SecretName                                  string `json:"secret_name,omitempty" mapstructure:"secret_name,omitempty" flag:"secret-name" desc:"The new name of the Secret."`
 	IsActive                                    *bool  `json:"is_active,omitempty" mapstructure:"is_active,omitempty" flag:"is-active" desc:"Indicates whether the Secret is active."`
 	ProvisionerUsername                         string `json:"provisioner_username,omitempty" mapstructure:"provisioner_username,omitempty" flag:"provisioner-username" desc:"If provisioner user type Secret, the new username."`
-	ProvisionerPassword                         string `json:"provisioner_password,omitempty" mapstructure:"provisioner_password,omitempty" flag:"provisioner-password" desc:"If provisioner user type Secret, the new password."`
+	ProvisionerPassword                         string `json:"provisioner_password,omitempty" mapstructure:"provisioner_password,omitempty" flag:"provisioner-password" desc:"If provisioner user type Secret, the new password." secret:"true"`
 	PCloudAccountSafe                           string `json:"pcloud_account_safe,omitempty" mapstructure:"pcloud_account_safe,omitempty" flag:"pcloud-account-safe" desc:"If Priviledge Cloud account type Secret, the new account Safe."`
 	PCloudAccountName                           string `json:"pcloud_account_name,omitempty" mapstructure:"pcloud_account_name,omitempty" flag:"pcloud-account-name" desc:"If Priviledge Cloud account type Secret, the new account name."`
 	AccountDomain                               string `json:"account_domain,omitempty" mapstructure:"account_domain,omitempty" flag:"account-domain" desc:"Account domain of the secret (defaults to 'local')."`

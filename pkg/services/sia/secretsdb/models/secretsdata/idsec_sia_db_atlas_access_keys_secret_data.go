@@ -4,7 +4,7 @@ package secretsdata
 type IdsecSIADBAtlasAccessKeysSecretData struct {
 	IdsecSIADBSecretData
 	PublicKey  string                 `json:"public_key" mapstructure:"public_key" desc:"Public part of mongo atlas access keys"`
-	PrivateKey string                 `json:"private_key" mapstructure:"private_key" desc:"Private part of mongo atlas access keys"`
+	PrivateKey string                 `json:"private_key" mapstructure:"private_key" desc:"Private part of mongo atlas access keys" secret:"true"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty" mapstructure:"metadata" desc:"Extra secret details"`
 }
 

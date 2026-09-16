@@ -12,7 +12,7 @@ package models
 //
 // Reference: https://kubernetes.io/docs/reference/config-api/client-authentication.v1beta1/
 type IdsecSCAK8sExecCredentialStatus struct {
-	Token                 string `json:"token,omitempty"`
+	Token                 string `json:"token,omitempty" secret:"true"`
 	ExpirationTimestamp   string `json:"expirationTimestamp,omitempty"`
 	ClientCertificateData string `json:"clientCertificateData,omitempty"`
 	ClientKeyData         string `json:"clientKeyData,omitempty"`

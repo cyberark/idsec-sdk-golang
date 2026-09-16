@@ -101,7 +101,7 @@ type IdsecSCACloudAccessElevateResult struct {
 	WorkspaceID       string                              `json:"workspaceId" mapstructure:"workspaceId"`
 	RoleID            string                              `json:"roleId" mapstructure:"roleId"`
 	SessionID         string                              `json:"sessionId,omitempty" mapstructure:"sessionId,omitempty"`
-	AccessCredentials string                              `json:"accessCredentials,omitempty" mapstructure:"accessCredentials,omitempty"`
+	AccessCredentials string                              `json:"accessCredentials,omitempty" mapstructure:"accessCredentials,omitempty" secret:"true"`
 	ErrorInfo         *scamodels.IdsecSCAElevateErrorInfo `json:"errorInfo,omitempty" mapstructure:"errorInfo,omitempty"`
 }
 

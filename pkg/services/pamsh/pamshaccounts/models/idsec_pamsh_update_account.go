@@ -3,7 +3,7 @@ package models
 // IdsecPamshUpdateAccount represents the details required to update an account.
 type IdsecPamshUpdateAccount struct {
 	SecretManagement          *IdsecPamshAccountSecretManagement `json:"secret_management,omitempty" mapstructure:"secret_management,omitempty" desc:"Secret management configuration for the account"`
-	Secret                    string                             `json:"secret" mapstructure:"secret" desc:"The secret of the account to update" flag:"secret"`
+	Secret                    string                             `json:"secret" mapstructure:"secret" desc:"The secret of the account to update" flag:"secret" secret:"true"`
 	AccountID                 string                             `json:"id" mapstructure:"id" desc:"The unique ID of the account to updatee" flag:"account-id" validate:"required"`
 	Name                      string                             `json:"name,omitempty" mapstructure:"name,omitempty" desc:"Name of the account to update" flag:"name"`
 	Address                   string                             `json:"address,omitempty" mapstructure:"address,omitempty" desc:"The name or address of the machine where the account is used" flag:"address"`

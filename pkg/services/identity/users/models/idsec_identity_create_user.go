@@ -7,7 +7,7 @@ type IdsecIdentityCreateUser struct {
 	Email                   string `json:"email" mapstructure:"email" flag:"email" desc:"Email of the user" validate:"email"`
 	MobileNumber            string `json:"mobile_number,omitempty" mapstructure:"mobile_number" flag:"mobile-number" desc:"Mobile number of the user"`
 	Suffix                  string `json:"suffix,omitempty" mapstructure:"suffix" flag:"suffix" desc:"Suffix to use for the username, will use the default tenant one if not given"`
-	Password                string `json:"password" mapstructure:"password" flag:"password" desc:"Password of the user"`
+	Password                string `json:"password" mapstructure:"password" flag:"password" desc:"Password of the user" secret:"true"`
 	InEverybodyRole         *bool  `json:"in_everybody_role,omitempty" mapstructure:"in_everybody_role" flag:"in-everybody-role" desc:"Whether to add the user to the 'Everybody' role"`
 	InSysAdminRole          *bool  `json:"in_sysadmin_role,omitempty" mapstructure:"in_sysadmin_role" flag:"in-sysadmin-role" desc:"Whether to add the user to the 'SysAdmin' role"`
 	ForcePasswordChangeNext *bool  `json:"force_password_change_next,omitempty" mapstructure:"force_password_change_next" flag:"force-password-change-next" desc:"Whether to force the user to change their password on next login"`

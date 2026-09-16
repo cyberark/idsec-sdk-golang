@@ -47,7 +47,7 @@ type IdsecSecHubSecretStoreData struct {
 	EngineAPIVersion   string `json:"engine_api_version,omitempty" mapstructure:"engine_api_version,omitempty" desc:"The API version of the engine in HashiCorp Vault. Valid values: 1, 2"`
 	AuthenticationPath string `json:"authentication_path,omitempty" mapstructure:"authentication_path,omitempty" flag:"hashi-authentication-path" desc:"HASHI, HASHI ENT: The authentication path configured in HashiCorp Vault for Secrets Hub to authenticate and access secrets. Example: 'auth/secrets-hub/login' for an authentication path of 'secrets-hub'"`
 	// Privilege Cloud and Self-Hosted Specific Fields
-	Password        string `json:"password,omitempty" mapstructure:"password,omitempty" desc:"SELF HOSTED: The password of the user in PAM 'SecretsHub'" flag:"sh-password"`
+	Password        string `json:"password,omitempty" mapstructure:"password,omitempty" desc:"SELF HOSTED: The password of the user in PAM 'SecretsHub'" flag:"sh-password" secret:"true"`
 	URL             string `json:"url,omitempty" mapstructure:"url,omitempty" flag:"sh-url" desc:"SELF HOSTED: The URL of your PAM Self-Hosted PVWA, or the load balancer for the PVWA"`
 	UserName        string `json:"username,omitempty" mapstructure:"username,omitempty" flag:"sh-username" desc:"SELF HOSTED: The user used for Secrets Hub to get secrets from PAM source. Should be 'SecretsHub'. This user should be created by REST API in PAM."`
 	ConnectorID     string `json:"connector_id,omitempty" mapstructure:"connector_id,omitempty" desc:"SELF HOSTED: The connector unique identifier used to connect Secrets Hub and the Cloud Vendor." flag:"sh-connector-id"`
