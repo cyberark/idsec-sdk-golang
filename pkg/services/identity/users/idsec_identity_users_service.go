@@ -614,6 +614,10 @@ func (s *IdsecIdentityUsersService) Get(user *usersmodels.IdsecIdentityGetUser) 
 	if val, ok := mgmtRes.attributes["InSysAdminRole"].(bool); ok {
 		inSysAdminRole = val
 	}
+	state := ""
+	if val, ok := mgmtRes.attributes["State"].(string); ok {
+		state = val
+	}
 
 	return &usersmodels.IdsecIdentityUser{
 		UserID:                  userID,
@@ -626,7 +630,7 @@ func (s *IdsecIdentityUsersService) Get(user *usersmodels.IdsecIdentityGetUser) 
 		InEverybodyRole:         &isEverybodyRole,
 		IsServiceUser:           &isServiceUser,
 		IsOauthClient:           &isOauthClient,
-		State:                   mgmtRes.attributes["State"].(string),
+		State:                   state,
 		UserAttributes:          customRes.attributes.Attributes,
 		ForcePasswordChangeNext: &forcePasswordChangeNext,
 		PasswordNeverExpire:     &passwordNeverExpire,

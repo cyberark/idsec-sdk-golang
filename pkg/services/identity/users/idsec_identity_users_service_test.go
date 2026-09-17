@@ -133,6 +133,17 @@ const (
 		}
 	}`
 
+	// UserMgmtAttrsNoStateResponseJSON simulates a federated/directory user whose
+	// account state is controlled by the external directory and is therefore absent
+	// from the platform's management-attributes response.
+	UserMgmtAttrsNoStateResponseJSON = `{
+		"success": true,
+		"Result": {
+			"InEverybodyRole": true,
+			"OauthClient": false
+		}
+	}`
+
 	ListUsersResponseJSON = `{
 		"success": true,
 		"Result": {
@@ -1029,6 +1040,39 @@ func TestGet(t *testing.T) {
 				}
 				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsOauthClientResponseJSON), nil
+				}
+				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
+				}
+			},
+		},
+		{
+			// Federated/directory users have no platform-managed State field.
+			// A missing key in the mgmt-attrs map must not panic (regression for nil interface assertion).
+			name: "success_get_user_missing_state_field",
+			getUser: &usersmodels.IdsecIdentityGetUser{
+				UserID: "user-123",
+			},
+			mockPostResponse: MockHTTPResponse(http.StatusOK, UserQueryResponseJSON),
+			mockPostError:    nil,
+			expectedUser: &usersmodels.IdsecIdentityUser{
+				UserID:          "user-123",
+				Username:        "john.doe@example.com",
+				DisplayName:     "John Doe",
+				Email:           "john.doe@example.com",
+				MobileNumber:    "+1234567890",
+				InEverybodyRole: boolPtr(true),
+				IsServiceUser:   boolPtr(false),
+				IsOauthClient:   boolPtr(false),
+				State:           "",
+			},
+			expectedError: false,
+			setupMock: func(service *IdsecIdentityUsersService) {
+				service.DoRedrockQueryPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserQueryResponseJSON), nil
+				}
+				service.DoPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+					return MockHTTPResponse(http.StatusOK, UserMgmtAttrsNoStateResponseJSON), nil
 				}
 				service.DoUserAttributesPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
 					return MockHTTPResponse(http.StatusOK, UserAttributesEmptyResponseJSON), nil
