@@ -904,58 +904,77 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 	return s.parseAccountResponse(response.Body)
 }
 
+// buildUpdateOperations renders the PATCH body for an account update. Every operation is gated on
+// exactly one field: a nil pointer means the caller did not supply that field, so it is left out.
+//
+// The gates are deliberately flat. These are independent JSON-pointer paths, and nesting one check
+// inside another -- as this function used to -- drops the inner field whenever the outer one was
+// not supplied. With OnlyDiffOnUpdate on the Terraform side that is no longer a corner case: an
+// apply that changes only manual_management_reason supplies nothing else. Do not re-nest them.
+func buildUpdateOperations(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) []map[string]interface{} {
+	operations := make([]map[string]interface{}, 0, 9)
+	replace := func(path string, value interface{}) {
+		operations = append(operations, map[string]interface{}{"op": "replace", "path": path, "value": value})
+	}
+
+	if updateAccount.Name != nil {
+		replace("/name", *updateAccount.Name)
+	}
+	if updateAccount.Address != nil {
+		replace("/address", *updateAccount.Address)
+	}
+	if updateAccount.Username != nil {
+		replace("/username", *updateAccount.Username)
+	}
+	if updateAccount.PlatformID != nil {
+		replace("/platformId", *updateAccount.PlatformID)
+	}
+	if updateAccount.PlatformAccountProperties != nil {
+		// ConvertToCamelCase reproduces what SerializeJSONCamel did to this map, inner keys
+		// included; the tenant is matched against those camelCased property names today.
+		replace("/platformAccountProperties", common.ConvertToCamelCase(updateAccount.PlatformAccountProperties, nil))
+	}
+	if updateAccount.AutomaticManagementEnabled != nil {
+		replace("/secretManagement/automaticManagementEnabled", *updateAccount.AutomaticManagementEnabled)
+	}
+	if updateAccount.ManualManagementReason != nil {
+		replace("/secretManagement/manualManagementReason", *updateAccount.ManualManagementReason)
+	}
+	if updateAccount.RemoteMachines != nil {
+		replace("/remoteMachinesAccess/remoteMachines", strings.Join(updateAccount.RemoteMachines, ";"))
+	}
+	if updateAccount.AccessRestrictedToRemoteMachines != nil {
+		replace("/remoteMachinesAccess/accessRestrictedToRemoteMachines", *updateAccount.AccessRestrictedToRemoteMachines)
+	}
+	return operations
+}
+
+// resolveUpdateSecret returns the secret to write to the vault, or "" for "leave the credential
+// alone". Unlike the previous inline version it does not write back into updateAccount: mutating
+// the caller's request struct is surprising, and more so now that Secret is a pointer.
+func resolveUpdateSecret(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) (string, error) {
+	if updateAccount.Secret != nil && *updateAccount.Secret != "" {
+		return *updateAccount.Secret, nil
+	}
+	if updateAccount.SecretFile != nil && *updateAccount.SecretFile != "" {
+		contents, err := os.ReadFile(*updateAccount.SecretFile)
+		if err != nil {
+			return "", err
+		}
+		return string(contents), nil
+	}
+	return "", nil
+}
+
 // Update updates an existing IdsecPCloudAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/UpdateAccount%20v10.htm
 func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecPCloudUpdateAccount) (*accountsmodels.IdsecPCloudAccount, error) {
 	s.Logger.Info("Updating account [%s]", updateAccount.AccountID)
-	if updateAccount.SecretFile != "" && updateAccount.Secret == "" {
-		secret, err := os.ReadFile(updateAccount.SecretFile)
-		if err != nil {
-			return nil, err
-		}
-		updateAccount.Secret = string(secret)
-	}
-	updateAccountJSON, err := common.SerializeJSONCamel(updateAccount)
+	secret, err := resolveUpdateSecret(updateAccount)
 	if err != nil {
 		return nil, err
 	}
-	delete(updateAccountJSON, "secret")
-	delete(updateAccountJSON, "secretFile")
-	delete(updateAccountJSON, "accountId")
-	delete(updateAccountJSON, "automaticManagementEnabled")
-	delete(updateAccountJSON, "manualManagementReason")
-	delete(updateAccountJSON, "lastModifiedTime")
-	delete(updateAccountJSON, "remoteMachines")
-	delete(updateAccountJSON, "accessRestrictedToRemoteMachines")
-	delete(updateAccountJSON, "idsecPcloudAccountRemoteMachinesAccess")
-	delete(updateAccountJSON, "idsecPcloudAccountSecretManagement")
-	if updateAccount.AutomaticManagementEnabled != nil {
-		updateAccountJSON["secretManagement/automaticManagementEnabled"] = *updateAccount.AutomaticManagementEnabled
-		if updateAccount.ManualManagementReason != "" {
-			updateAccountJSON["secretManagement/manualManagementReason"] = updateAccount.ManualManagementReason
-		}
-		if updateAccount.LastModifiedTime != 0 {
-			updateAccountJSON["secretManagement/lastModifiedTime"] = updateAccount.LastModifiedTime
-		}
-	}
-	if updateAccount.RemoteMachines != nil {
-		updateAccountJSON["remoteMachinesAccess/remoteMachines"] = strings.Join(updateAccount.RemoteMachines, ";")
-		if updateAccount.AccessRestrictedToRemoteMachines {
-			updateAccountJSON["remoteMachinesAccess/accessRestrictedToRemoteMachines"] = updateAccount.AccessRestrictedToRemoteMachines
-		}
-	}
-	var operations []map[string]interface{}
-	for key, val := range updateAccountJSON {
-		if key == "secretFile" {
-			continue
-		}
-		operation := map[string]interface{}{
-			"op":    "replace",
-			"path":  fmt.Sprintf("/%s", key),
-			"value": val,
-		}
-		operations = append(operations, operation)
-	}
+	operations := buildUpdateOperations(updateAccount)
 	var account *accountsmodels.IdsecPCloudAccount
 	if len(operations) == 0 {
 		pcloudAccount, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{
@@ -984,10 +1003,10 @@ func (s *IdsecPCloudAccountsService) Update(updateAccount *accountsmodels.IdsecP
 			return nil, err
 		}
 	}
-	if updateAccount.Secret != "" {
+	if secret != "" {
 		err = s.UpdateCredentialsInVault(&accountsmodels.IdsecPCloudUpdateAccountCredentialsInVault{
 			AccountID:      updateAccount.AccountID,
-			NewCredentials: updateAccount.Secret,
+			NewCredentials: secret,
 		})
 		if err != nil {
 			return nil, err

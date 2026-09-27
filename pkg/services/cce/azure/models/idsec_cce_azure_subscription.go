@@ -14,6 +14,10 @@ type TfIdsecCCEAzureAddSubscription struct {
 	SubscriptionID   string                           `json:"id" mapstructure:"subscription_id" validate:"required" desc:"Azure subscription ID."`
 	SubscriptionName string                           `json:"subscriptionName" mapstructure:"subscription_name" validate:"required" desc:"Azure subscription name."`
 	Services         []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the latest version is used.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the latest version is used."`
+	// CCEResources is an optional map of CCE resource identifiers (e.g. appId). Not required for STANDALONE (subscription) deployment type.
+	CCEResources map[string]interface{} `json:"cceResources,omitempty" mapstructure:"cce_resources" desc:"CCE resources. Must contain 'appId' (string, UUID) — the Azure application ID."`
 }
 
 // TfIdsecCCEAzureSubscription represents the details of an Azure Subscription.
@@ -33,6 +37,8 @@ type TfIdsecCCEAzureSubscription struct {
 	EntraName           string                            `json:"entraName,omitempty" mapstructure:"entra_name,omitempty" desc:"Microsoft Entra tenant name."`
 	ManagementGroupId   string                            `json:"managementGroupId,omitempty" mapstructure:"management_group_id,omitempty" desc:"Azure management group ID."`
 	ManagementGroupName string                            `json:"managementGroupName,omitempty" mapstructure:"management_group_name,omitempty" desc:"Azure management group name."`
+	// CCEVersion is the current version of the base CCE infrastructure.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureGetSubscription is the input for getting Azure Subscription details.
@@ -49,7 +55,9 @@ type TfIdsecCCEAzureUpdateSubscription struct {
 	// ID is the Subscription's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE subscription onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAzureDeleteSubscription is the input for deleting an Azure Subscription.

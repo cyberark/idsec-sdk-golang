@@ -227,6 +227,47 @@ const (
 			}
 		}
 	}`
+
+	// Specific-role query response using the field names the directory service
+	// actually returns on the wire (_ID, AdministrativeRights), so the decoded
+	// role can be asserted on field by field.
+	RoleQueryWireNamesResponseJSON = `{
+		"success": true,
+		"Result": {
+			"Roles": {
+				"Results": [
+					{
+						"Row": {
+							"_ID": "role-123",
+							"Name": "AdminRole",
+							"Description": "Test Role Description",
+							"RoleType": "PrincipalList",
+							"AdministrativeRights": [
+								{
+									"Path": "/admin/path1"
+								}
+							]
+						}
+					}
+				]
+			}
+		}
+	}`
+
+	// The directory service omits the Roles section entirely when no role matched
+	// the query filter, which decodes to a nil Result.Roles pointer.
+	MissingRolesSectionResponseJSON = `{
+		"success": true,
+		"Result": {}
+	}`
+
+	// Same no-match situation, but with the Roles section explicitly null.
+	NullRolesSectionResponseJSON = `{
+		"success": true,
+		"Result": {
+			"Roles": null
+		}
+	}`
 	TenantSuffixResponseJSON = `{
 		"success": true,
 		"Result": {
@@ -1117,6 +1158,136 @@ func TestRemoveMember(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("Expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+// TestGet covers the role lookup path through fetchRoleInfo. The no-match cases
+// matter most: the directory service can return a successful response with no
+// Roles section, which decodes to a nil Result.Roles. Dereferencing it used to
+// panic on a background goroutine and take the whole process down, so these
+// cases assert the lookup surfaces a plain error instead.
+func TestGet(t *testing.T) {
+	tests := []struct {
+		name                              string
+		getRole                           *rolesmodels.IdsecIdentityGetRole
+		mockDirectoryServiceQueryResponse *http.Response
+		mockPostError                     error
+		expectedError                     bool
+		expectedErrorContains             string
+		expectedRole                      *rolesmodels.IdsecIdentityRole
+	}{
+		{
+			name:                              "success_get_role_by_name",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleName: "AdminRole"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, RoleQueryWireNamesResponseJSON),
+			expectedRole: &rolesmodels.IdsecIdentityRole{
+				RoleID:      "role-123",
+				RoleName:    "AdminRole",
+				Description: "Test Role Description",
+				RoleType:    "PrincipalList",
+				AdminRights: []string{"/admin/path1"},
+			},
+		},
+		{
+			name:                              "success_get_role_by_id",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleID: "role-123"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, RoleQueryWireNamesResponseJSON),
+			expectedRole: &rolesmodels.IdsecIdentityRole{
+				RoleID:      "role-123",
+				RoleName:    "AdminRole",
+				Description: "Test Role Description",
+				RoleType:    "PrincipalList",
+				AdminRights: []string{"/admin/path1"},
+			},
+		},
+		{
+			name:                  "error_no_role_id_or_name_given",
+			getRole:               &rolesmodels.IdsecIdentityGetRole{},
+			expectedError:         true,
+			expectedErrorContains: "either role ID or role name must be given",
+		},
+		{
+			name:                              "error_roles_section_missing_from_response",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleName: "does-not-exist"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, MissingRolesSectionResponseJSON),
+			expectedError:                     true,
+			expectedErrorContains:             "no role found for given name",
+		},
+		{
+			name:                              "error_roles_section_null_in_response",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleName: "does-not-exist"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, NullRolesSectionResponseJSON),
+			expectedError:                     true,
+			expectedErrorContains:             "no role found for given name",
+		},
+		{
+			name:                              "error_roles_section_empty_in_response",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleName: "does-not-exist"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, EmptyResultResponseJSON),
+			expectedError:                     true,
+			expectedErrorContains:             "no role found for given name",
+		},
+		{
+			name:                              "error_query_failure_response",
+			getRole:                           &rolesmodels.IdsecIdentityGetRole{RoleName: "AdminRole"},
+			mockDirectoryServiceQueryResponse: MockHTTPResponse(http.StatusOK, ErrorResponseJSON),
+			expectedError:                     true,
+			expectedErrorContains:             "failed to query for directory services role",
+		},
+		{
+			name:          "error_http_request_failed",
+			getRole:       &rolesmodels.IdsecIdentityGetRole{RoleName: "AdminRole"},
+			mockPostError: errors.New("network error"),
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewIdsecIdentityRolesService(MockISPAuth())
+			if err != nil {
+				t.Fatalf("Failed to create IdsecIdentityRolesService: %v", err)
+			}
+			service.DoDirectoryServiceQueryPost = MockPostFunc(tt.mockDirectoryServiceQueryResponse, tt.mockPostError)
+			service.DirectoriesService.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, DirectoryListResponseJSON), nil)
+			service.DoGet = MockGetFunc(MockHTTPResponse(http.StatusOK, EmptyRoleAttributesArrayJSON), nil)
+
+			result, err := service.Get(tt.getRole)
+
+			if tt.expectedError {
+				if err == nil {
+					t.Fatalf("Expected error, got nil (role: %+v)", result)
+				}
+				if tt.expectedErrorContains != "" && !strings.Contains(err.Error(), tt.expectedErrorContains) {
+					t.Errorf("Expected error containing %q, got %q", tt.expectedErrorContains, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Expected no error, got %v", err)
+			}
+			if result == nil {
+				t.Fatalf("Expected role result, got nil")
+			}
+			if result.RoleID != tt.expectedRole.RoleID {
+				t.Errorf("Expected RoleID %q, got %q", tt.expectedRole.RoleID, result.RoleID)
+			}
+			if result.RoleName != tt.expectedRole.RoleName {
+				t.Errorf("Expected RoleName %q, got %q", tt.expectedRole.RoleName, result.RoleName)
+			}
+			if result.Description != tt.expectedRole.Description {
+				t.Errorf("Expected Description %q, got %q", tt.expectedRole.Description, result.Description)
+			}
+			if result.RoleType != tt.expectedRole.RoleType {
+				t.Errorf("Expected RoleType %q, got %q", tt.expectedRole.RoleType, result.RoleType)
+			}
+			if !reflect.DeepEqual(result.AdminRights, tt.expectedRole.AdminRights) {
+				t.Errorf("Expected AdminRights %v, got %v", tt.expectedRole.AdminRights, result.AdminRights)
 			}
 		})
 	}

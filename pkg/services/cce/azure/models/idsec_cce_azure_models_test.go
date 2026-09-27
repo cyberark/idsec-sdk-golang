@@ -37,6 +37,14 @@ func TestTfIdsecCCEAzureUpdateSubscription_IDRequired(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("empty_services_passes", func(t *testing.T) {
+		err := validation.ValidateStruct(&TfIdsecCCEAzureUpdateSubscription{
+			ID:       "subscription-123",
+			Services: []ccemodels.IdsecCCEServiceInput{},
+		})
+		require.NoError(t, err, "empty services must be allowed for CCE-only version updates")
+	})
 }
 
 // TestTfIdsecCCEAzureUpdateManagementGroup_IDRequired ensures the management
@@ -58,6 +66,14 @@ func TestTfIdsecCCEAzureUpdateManagementGroup_IDRequired(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("empty_services_passes", func(t *testing.T) {
+		err := validation.ValidateStruct(&TfIdsecCCEAzureUpdateManagementGroup{
+			ID:       "mgmt-group-123",
+			Services: []ccemodels.IdsecCCEServiceInput{},
+		})
+		require.NoError(t, err, "empty services must be allowed for CCE-only version updates")
+	})
 }
 
 // TestTfIdsecCCEAzureUpdateEntra_IDRequired ensures the Entra tenant onboarding
@@ -78,5 +94,13 @@ func TestTfIdsecCCEAzureUpdateEntra_IDRequired(t *testing.T) {
 			Services: validServices(),
 		})
 		require.NoError(t, err)
+	})
+
+	t.Run("empty_services_passes", func(t *testing.T) {
+		err := validation.ValidateStruct(&TfIdsecCCEAzureUpdateEntra{
+			ID:       "entra-123",
+			Services: []ccemodels.IdsecCCEServiceInput{},
+		})
+		require.NoError(t, err, "empty services must be allowed for CCE-only version updates")
 	})
 }

@@ -13,6 +13,8 @@ type TfIdsecCCEAzureAddManagementGroup struct {
 	ManagementGroupID string                           `json:"id" mapstructure:"management_group_id" validate:"required" desc:"Management group ID."`
 	Services          []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	CCEResources      map[string]interface{}           `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE resources. Must contain 'appId' (string, UUID) — the Azure application ID."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the latest version is used.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the latest version is used."`
 }
 
 // TfIdsecCCEAzureManagementGroup represents the details of an Azure Management Group.
@@ -29,6 +31,8 @@ type TfIdsecCCEAzureManagementGroup struct {
 	ConsentData       []map[string]interface{}          `json:"consentData,omitempty" mapstructure:"consent_data,omitempty" desc:"Consent data for service applications."`
 	EntraID           string                            `json:"entraId" mapstructure:"entra_id" desc:"Microsoft Entra tenant ID."`
 	ManagementGroupID string                            `json:"managementGroupId" mapstructure:"management_group_id" desc:"Azure management group ID."`
+	// CCEVersion is the current version of the base CCE infrastructure.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureGetManagementGroup is the input for getting Azure Management Group details.
@@ -45,7 +49,9 @@ type TfIdsecCCEAzureUpdateManagementGroup struct {
 	// ID is the Management Group's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE management group onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAzureDeleteManagementGroup is the input for deleting an Azure Management Group.

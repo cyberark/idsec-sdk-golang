@@ -76,6 +76,7 @@ import (
 	pamshsafes "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshsafes"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	applications "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/applications"
+	localgroups "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/localgroups"
 	platforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/platforms"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
 	targetplatforms "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/targetplatforms"
@@ -500,6 +501,16 @@ func (api *IdsecAPI) PcloudApplications() (*applications.IdsecPCloudApplications
 		return nil, err
 	}
 	return (*service).(*applications.IdsecPCloudApplicationsService), nil
+}
+
+func (api *IdsecAPI) PcloudLocalgroups() (*localgroups.IdsecPCloudLocalGroupsService, error) {
+	service, err := api.services.service(localgroups.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return localgroups.ServiceGenerator(api.loadServiceAuthenticators(localgroups.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*localgroups.IdsecPCloudLocalGroupsService), nil
 }
 
 func (api *IdsecAPI) PcloudPlatforms() (*platforms.IdsecPCloudPlatformsService, error) {

@@ -52,7 +52,7 @@ func (s *IdsecCCEGCPService) tfAddProject(input *gcpmodels.TfIdsecCCEGCPAddProje
 func (s *IdsecCCEGCPService) tfUpdateProject(input *gcpmodels.TfIdsecCCEGCPUpdateProject) (*gcpmodels.TfIdsecCCEGCPProject, error) {
 	s.Logger.Info("Updating GCP Project [%s]", input.ID)
 
-	// Step 1: Get current Project services
+	// Step 1: Get current Project services (GCP doesn't support CCE version, ignore it)
 	currentServiceNames, err := s.manual().CurrentServiceNames(fmt.Sprintf(pathProjectGetURL, input.ID))
 	if err != nil {
 		return nil, err

@@ -177,6 +177,18 @@ func firstServiceVersion(t *testing.T, r *http.Request) string {
 	return version
 }
 
+// captureCCEVersion returns a callback that captures the cceVersion from the request body.
+func captureCCEVersion(version *string) func(*http.Request) {
+	return func(r *http.Request) {
+		var payload map[string]interface{}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &payload)
+		if v, ok := payload["cceVersion"].(string); ok {
+			*version = v
+		}
+	}
+}
+
 func TestTfAddAccount_IncludesServiceVersion(t *testing.T) {
 	createResponseJSON := `{"id": "1111aaaa2222bbbb3333cccc"}`
 	readResponseJSON := `{
@@ -230,6 +242,57 @@ func TestTfAddAccount_IncludesServiceVersion(t *testing.T) {
 	require.Equal(t, "2.1.0", capturedVersion, "service version must be included in the create account request payload")
 }
 
+func TestTfAddAccount_IncludesCCEVersion(t *testing.T) {
+	createResponseJSON := `{"id": "1111aaaa2222bbbb3333cccc"}`
+	readResponseJSON := `{
+		"id": "1111aaaa2222bbbb3333cccc",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["sca"],
+		"displayName": "Test Account",
+		"status": "Completely added"
+	}`
+
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/api/aws/programmatic/account")
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest:    captureCCEVersion(&capturedCCEVersion),
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "1111aaaa2222bbbb3333cccc")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: readResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfAddAccount(&awsmodels.TfIdsecCCEAWSAddAccount{
+		AccountID:  "123456789012",
+		CCEVersion: "1.0.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]any{
+					"ScaRoleArn": "arn:aws:iam::123456789012:role/SCARole",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", capturedCCEVersion, "CCE version must be included in the create account request payload")
+}
+
 func TestTfAddAccountServices_IncludesServiceVersion(t *testing.T) {
 	var capturedVersion string
 	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
@@ -263,6 +326,92 @@ func TestTfAddAccountServices_IncludesServiceVersion(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "4.0.1", capturedVersion, "service version must be included in the add services request payload")
+}
+
+// TestTfAddAccountServices_IncludesCCEVersion verifies that the cceVersion field is
+// included in the add-services request body when provided.
+func TestTfAddAccountServices_IncludesCCEVersion(t *testing.T) {
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    captureCCEVersion(&capturedCCEVersion),
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	err := service.TfAddAccountServices(&awsmodels.TfIdsecCCEAWSAddAccountServices{
+		ID:         "1111aaaa2222bbbb3333cccc",
+		CCEVersion: "2.0.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.CDS,
+				Resources: map[string]any{
+					"CdsRoleArn": "arn:aws:iam::123456789012:role/CDSRole",
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "2.0.0", capturedCCEVersion, "CCE version must be included in the add services request payload")
+}
+
+// TestTfUpdateAccount_IncludesCCEVersion verifies that when TfUpdateAccount is called
+// with CCEVersion, it is passed to the add-services API.
+func TestTfUpdateAccount_IncludesCCEVersion(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// Account has dpa onboarded; desired adds sca
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"status": "Completely added"
+	}`
+
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/account/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    captureCCEVersion(&capturedCCEVersion),
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID:         onboardingID,
+		CCEVersion: "2.5.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{}},
+			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]any{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "2.5.0", capturedCCEVersion, "CCE version must be passed through TfUpdateAccount to the add-services API")
 }
 
 // TestTfUpdateAccount_RequestsAccountByID is a regression guard for the empty-ID
@@ -1179,6 +1328,173 @@ func TestUpdateAccount_ErrorPropagation(t *testing.T) {
 		},
 	})
 	require.Error(t, err)
+}
+
+// TestTfUpdateAccount_CCEVersionOnlyChange verifies that when only CCEVersion changes
+// (no service changes), the add-services API is still called with the new CCEVersion.
+func TestTfUpdateAccount_CCEVersionOnlyChange(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// Account has dpa onboarded at 0.0.3, cceVersion is 0.0.1
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}
+		},
+		"cceVersion": "0.0.1",
+		"status": "Completely added"
+	}`
+
+	var capturedCCEVersion string
+	var postCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/account/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				captureCCEVersion(&capturedCCEVersion)(r)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Same services as current state, but different CCEVersion
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID:         onboardingID,
+		CCEVersion: "0.1.0", // Changed from 0.0.1 to 0.1.0
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "CCE version change alone must trigger an add-services call")
+	require.Equal(t, "0.1.0", capturedCCEVersion, "new CCE version must be sent in the request")
+}
+
+// TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges verifies that when neither
+// CCEVersion nor services change, no add-services API call is made.
+func TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	// Account has dpa onboarded at 0.0.3, cceVersion is 0.1.0
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}
+		},
+		"cceVersion": "0.1.0",
+		"status": "Completely added"
+	}`
+
+	var postCount, deleteCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/account/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(_ *http.Request) { postCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Same services and same CCEVersion as current state
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID:         onboardingID,
+		CCEVersion: "0.1.0", // Same as current
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Zero(t, postCount, "no service or CCE version change means no add-services call")
+	require.Zero(t, deleteCount, "no service removal means no delete-services call")
+}
+
+// TestTfAccount_ReadsCCEVersion verifies that when reading an account,
+// the CCEVersion field is populated from the API response.
+func TestTfAccount_ReadsCCEVersion(t *testing.T) {
+	responseJSON := `{
+		"id": "1111aaaa2222bbbb3333cccc",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["sca"],
+		"servicesData": [
+			{
+				"name": "sca",
+				"status": "Completely added",
+				"errors": []
+			}
+		],
+		"cceVersion": "0.1.0",
+		"displayName": "Test Account",
+		"status": "Completely added"
+	}`
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "1111aaaa2222bbbb3333cccc")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	result, err := service.TfAccount(&awsmodels.TfIdsecCCEAWSGetAccount{
+		ID: "1111aaaa2222bbbb3333cccc",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "0.1.0", result.CCEVersion, "CCEVersion must be populated from the API response")
 }
 
 func TestUpdateAccount_EmptyServicesArray_Returns400(t *testing.T) {

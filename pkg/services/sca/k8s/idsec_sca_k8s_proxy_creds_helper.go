@@ -153,10 +153,10 @@ func (s *IdsecSCAK8sService) fetchDPASSOPublicKey(kid string, diagnostics bool) 
 }
 
 // encryptProxyJWEExtension builds a compact JWE (RSA-OAEP-256 / A256GCM).
-// Payload fields included when non-empty: "k8s_token", "root_ca", "cluster_token".
+// Payload fields included when non-empty: "k8s_token", "root_ca", "cluster_context".
 // All three are independent — root_ca is sent on every flow where it is available,
 // including AWS IAM proxy (aligning with the future removal of the internal API path).
-func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA, clusterToken string) (string, error) {
+func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA, clusterContext string) (string, error) {
 	payloadMap := map[string]string{}
 	if k8sToken != "" {
 		payloadMap["k8s_token"] = k8sToken
@@ -164,8 +164,8 @@ func encryptProxyJWEExtension(pubKey *rsa.PublicKey, kid, k8sToken, rootCA, clus
 	if ca := strings.TrimSpace(rootCA); ca != "" {
 		payloadMap["root_ca"] = ca
 	}
-	if ct := strings.TrimSpace(clusterToken); ct != "" {
-		payloadMap["cluster_token"] = ct
+	if cc := strings.TrimSpace(clusterContext); cc != "" {
+		payloadMap["cluster_context"] = cc
 	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {

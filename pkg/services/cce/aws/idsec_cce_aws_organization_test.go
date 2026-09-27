@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -143,11 +144,13 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 			{
 				"name": "dpa",
 				"status": "Completely added",
+				"version": "0.0.2",
 				"errors": []
 			},
 			{
 				"name": "sca",
 				"status": "Completely added",
+				"version": "0.0.6",
 				"errors": []
 			}
 		],
@@ -204,6 +207,11 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 	require.Equal(t, "Completely added", result.ServicesData[0].Status)
 	require.Equal(t, "sca", result.ServicesData[1].Name)
 	require.Equal(t, "Completely added", result.ServicesData[1].Status)
+
+	// The per-service version is what the add-account module reads to give the member-account
+	// resource something that changes when the organization is upgraded.
+	require.Equal(t, "0.0.2", result.ServicesData[0].Version)
+	require.Equal(t, "0.0.6", result.ServicesData[1].Version)
 
 	// Verify parameters field (keys are snake_case due to DeserializeJSONSnake)
 	require.NotNil(t, result.Parameters, "Parameters should not be nil")
@@ -311,6 +319,66 @@ func TestAddOrganization_Success(t *testing.T) {
 	require.Equal(t, ccemodels.Programmatic, result.OnboardingType)
 	require.NotNil(t, result.DisplayName)
 	require.Equal(t, "Test Organization", result.DisplayName)
+}
+
+func TestTfAddOrganization_IncludesCCEVersion(t *testing.T) {
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/aws/programmatic/organization"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{"id": "abc123def456789012345678901234ab"}`,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var payload map[string]interface{}
+				_ = json.Unmarshal(body, &payload)
+				if v, ok := payload["cceVersion"].(string); ok {
+					capturedCCEVersion = v
+				}
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/aws/programmatic/organization/abc123def456789012345678901234ab"
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"id": "abc123def456789012345678901234ab",
+				"organizationRootId": "r-abc123",
+				"managementAccountId": "123456789012",
+				"organizationId": "o-abc123def456",
+				"onboardingType": "terraform_provider",
+				"region": "us-east-1",
+				"displayName": "Test Organization",
+				"status": "Completely added"
+			}`,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfAddOrganization(&awsmodels.TfIdsecCCEAWSAddOrganization{
+		OrganizationRootID:  "r-abc123",
+		ManagementAccountID: "123456789012",
+		OrganizationID:      "o-abc123def456",
+		CCEVersion:          "1.0.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole",
+				},
+			},
+		},
+		ScanOrganizationRoleArn:    "arn:aws:iam::123456789012:role/ScanRole",
+		CrossAccountRoleExternalID: "cyberark-12345678-1234-1234-1234-123456789012",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", capturedCCEVersion, "CCE version must be included in the create organization request payload")
 }
 
 func TestAddOrganization_ErrorPropagation(t *testing.T) {
@@ -739,4 +807,313 @@ func TestUpdateOrganization_SendsServiceParameterChange(t *testing.T) {
 	require.NotContains(t, postBody, `"serviceName":"sca"`,
 		"the unchanged service (sca) must NOT be sent, or the API may reject the request with 501")
 	require.Zero(t, deleteCount, "a parameter change must not delete any service")
+}
+
+// TestTfUpdateOrganization_CCEVersionOnlyChange verifies that when only CCEVersion changes
+// (no service changes), the add-services API is still called with the new CCEVersion.
+func TestTfUpdateOrganization_CCEVersionOnlyChange(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+	// Organization has dpa onboarded at 0.0.3, cceVersion is 0.0.1
+	orgJSON := `{
+		"id": "` + onboardingID + `",
+		"organizationRootId": "r-1234",
+		"managementAccountId": "123456789012",
+		"organizationId": "o-abcdef1234",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}
+		},
+		"cceVersion": "0.0.1",
+		"status": "Completely added"
+	}`
+
+	var capturedCCEVersion string
+	var postCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/organization/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: orgJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				var requestData map[string]interface{}
+				_ = json.Unmarshal(body, &requestData)
+				if version, ok := requestData["cceVersion"].(string); ok {
+					capturedCCEVersion = version
+				}
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Same services as current state, but different CCEVersion
+	_, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID:         onboardingID,
+		CCEVersion: "0.1.0", // Changed from 0.0.1 to 0.1.0
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "CCE version change alone must trigger an add-services call")
+	require.Equal(t, "0.1.0", capturedCCEVersion, "new CCE version must be sent in the request")
+}
+
+// TestTfUpdateOrganization_CCEVersionUnchanged_NoServiceChanges verifies that when neither
+// CCEVersion nor services change, no add-services API call is made.
+func TestTfUpdateOrganization_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+	// Organization has dpa onboarded at 0.0.3, cceVersion is 0.1.0
+	orgJSON := `{
+		"id": "` + onboardingID + `",
+		"organizationRootId": "r-1234",
+		"managementAccountId": "123456789012",
+		"organizationId": "o-abcdef1234",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"dpa": {"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}
+		},
+		"cceVersion": "0.1.0",
+		"status": "Completely added"
+	}`
+
+	var postCount, deleteCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/organization/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: orgJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(_ *http.Request) { postCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest:    func(r *http.Request) { deleteCount++ },
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// Same services and same CCEVersion as current state
+	_, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID:         onboardingID,
+		CCEVersion: "0.1.0", // Same as current
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Zero(t, postCount, "no service or CCE version change means no add-services call")
+	require.Zero(t, deleteCount, "no service removal means no delete-services call")
+}
+
+// TestTfUpdateOrganization_ServiceUpgradeOmitsUnchangedCCEVersion verifies that upgrading a
+// service version does not carry the unchanged cceVersion into the payload.
+//
+// cce_version is computed, so Terraform holds the deployed value in state and passes it back on
+// every update. The API treats the presence of a cceVersion as a request to upgrade 'cce' and
+// validates it against the upgrade feature flag, so echoing it unchanged made an ordinary
+// secrets_hub upgrade fail with 501 FEATURE_NOT_IMPLEMENTED on 'cce'.
+func TestTfUpdateOrganization_ServiceUpgradeOmitsUnchangedCCEVersion(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+	orgJSON := `{
+		"id": "` + onboardingID + `",
+		"organizationRootId": "r-1234",
+		"managementAccountId": "123456789012",
+		"organizationId": "o-abcdef1234",
+		"onboardingType": "terraform_provider",
+		"services": ["secrets_hub"],
+		"servicesData": [
+			{"name": "secrets_hub", "version": "0.0.7", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"secrets_hub": {"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"}
+		},
+		"cceVersion": "0.0.1",
+		"status": "Completely added"
+	}`
+
+	var postCount int
+	var postBody string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/organization/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: orgJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// secrets_hub upgrades 0.0.7 -> 0.0.8 while cceVersion stays at the deployed 0.0.1.
+	_, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID:         onboardingID,
+		CCEVersion: "0.0.1",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SecretsHub,
+				Version:     "0.0.8",
+				Resources:   map[string]any{"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "the service version upgrade must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"secrets_hub"`, "the upgraded service must be sent")
+	require.NotContains(t, postBody, "cceVersion",
+		"an unchanged cceVersion must NOT be sent, or the API gates 'cce' behind the upgrade feature flag and returns 501")
+}
+
+// TestTfOrganization_ReadsCCEVersion verifies that when reading an organization,
+// the CCEVersion field is populated from the API response.
+func TestTfOrganization_ReadsCCEVersion(t *testing.T) {
+	responseJSON := `{
+		"id": "org-123",
+		"organizationRootId": "root-456",
+		"managementAccountId": "123456789012",
+		"organizationId": "o-abc123def",
+		"onboardingType": "terraform_provider",
+		"region": "us-east-1",
+		"services": ["dpa"],
+		"servicesData": [
+			{
+				"name": "dpa",
+				"status": "Completely added",
+				"errors": []
+			}
+		],
+		"cceVersion": "0.1.0",
+		"displayName": "Test Organization",
+		"status": "Completely added"
+	}`
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	result, err := service.TfOrganization(&awsmodels.TfIdsecCCEAWSGetOrganization{
+		ID: "org-123",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "0.1.0", result.CCEVersion, "CCEVersion must be populated from the API response")
+}
+
+// TestTfUpdateOrganization_IncludesCCEVersion verifies that when TfUpdateOrganization
+// is called with CCEVersion, it is passed to the add-services API.
+func TestTfUpdateOrganization_IncludesCCEVersion(t *testing.T) {
+	const onboardingID = "org123abc456def789"
+	// Organization has dpa onboarded; desired adds sca
+	orgJSON := `{
+		"id": "` + onboardingID + `",
+		"organizationRootId": "r-1234",
+		"managementAccountId": "123456789012",
+		"organizationId": "o-abcdef1234",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"servicesData": [
+			{"name": "dpa", "version": "0.0.3", "status": "Completely added", "errors": []}
+		],
+		"status": "Completely added"
+	}`
+
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/organization/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: orgJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/organization/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var requestData map[string]interface{}
+				_ = json.Unmarshal(body, &requestData)
+				if version, ok := requestData["cceVersion"].(string); ok {
+					capturedCCEVersion = version
+				}
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateOrganization(&awsmodels.TfIdsecCCEAWSUpdateOrganization{
+		ID:         onboardingID,
+		CCEVersion: "3.0.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{}},
+			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]any{}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "3.0.0", capturedCCEVersion, "CCE version must be passed through TfUpdateOrganization to the add-services API")
 }

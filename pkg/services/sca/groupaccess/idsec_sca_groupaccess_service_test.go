@@ -377,7 +377,7 @@ func TestElevate_NonAzureCSP_ErrorMessage(t *testing.T) {
 
 func TestElevate_ExceedsMaxGroupIDs(t *testing.T) {
 	svc := &IdsecSCAGroupAccessService{}
-	ids := strings.Repeat("g,", 51)
+	ids := strings.Repeat("g,", maxGroupIDs+1)
 	ids = ids[:len(ids)-1]
 	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
 		CSP: "AZURE", DirectoryID: "dir", Groups: ids,

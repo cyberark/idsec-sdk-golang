@@ -67,6 +67,10 @@ type IdsecSCAK8sElevateClientDetails struct {
 //
 // OrganizationID mirrors the organizationId field from the Elevate response body for
 // per-result convenience (same value as IdsecSCAK8sElevateResponseBody.OrganizationID).
+//
+// CloudUserName is the cloud account the elevation was granted to. Under account
+// mapping it differs from the authenticated idsec user, so the Azure flow compares
+// it against the az login identity. Absent on older backends.
 type IdsecSCAK8sElevateResult struct {
 	WorkspaceID       string                           `json:"workspaceId"`
 	RoleID            string                           `json:"roleId,omitempty"`
@@ -77,6 +81,7 @@ type IdsecSCAK8sElevateResult struct {
 	EKSToken          string                           `json:"eksToken,omitempty" secret:"true"` // server-provided EKS bearer token (AWS IAM direct)
 	OrganizationID    string                           `json:"organizationId,omitempty"`         // mirrored from response body
 	TargetID          string                           `json:"targetId,omitempty"`               // e.g. "arn:aws:eks:us-east-1:123:cluster/name"
+	CloudUserName     string                           `json:"cloudUserName,omitempty"`          // elevated cloud account (Azure UPN) under account mapping
 	ClientDetails     *IdsecSCAK8sElevateClientDetails `json:"clientDetails,omitempty"`
 }
 

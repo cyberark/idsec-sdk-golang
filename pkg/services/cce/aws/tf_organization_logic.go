@@ -206,8 +206,9 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 		return nil, fmt.Errorf("failed to deserialize organization response: %w", err)
 	}
 
-	// Extract current services (names + per-service version + per-service parameters) from raw JSON.
+	// Extract current services (names + per-service version + per-service parameters) and CCE version from raw JSON.
 	var currentServiceNames []string
+	var currentCCEVersion string
 	currentServiceVersions := map[string]string{}
 	currentServiceParams := map[string]map[string]interface{}{}
 	if orgMap, ok := organizationJSON.(map[string]interface{}); ok {
@@ -218,6 +219,11 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 						currentServiceNames = append(currentServiceNames, svcStr)
 					}
 				}
+			}
+		}
+		if cceVersionRaw, exists := orgMap["cce_version"]; exists {
+			if cceVersionStr, ok := cceVersionRaw.(string); ok {
+				currentCCEVersion = cceVersionStr
 			}
 		}
 		currentServiceVersions = extractCurrentServiceVersions(orgMap)
@@ -263,14 +269,26 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 		}
 	}
 
-	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d\n", len(servicesToSend), len(servicesToRemove))
-	// Step 3: Add new services and push version upgrades (if any).
-	if len(servicesToSend) > 0 {
-		s.Logger.Info("Sending %d service(s) to organization [%s]", len(servicesToSend), input.ID)
+	// Step 3: Add new services, push version upgrades, or update CCE version.
+	// Detect CCE-only version change: CCEVersion is requested and differs from current
+	cceVersionChanged := input.CCEVersion != "" && input.CCEVersion != currentCCEVersion
+	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
+	// The API reads the mere presence of a cceVersion as a request to upgrade `cce`, and validates it
+	// against the upgrade feature flag alongside the already-onboarded services in the payload. Since
+	// cce_version is computed, Terraform carries the deployed value in state and passes it back on every
+	// update, so echoing it unchanged would make an ordinary service upgrade fail with
+	// 501 FEATURE_NOT_IMPLEMENTED on 'cce'. Send it only when it actually changed.
+	cceVersionToSend := ""
+	if cceVersionChanged {
+		cceVersionToSend = input.CCEVersion
+	}
+	if len(servicesToSend) > 0 || cceVersionChanged {
+		s.Logger.Info("Sending %d service(s) to organization [%s] (CCE version: %s)", len(servicesToSend), input.ID, cceVersionToSend)
 		err = s.addOrganizationServices(&awsmodels.TfIdsecCCEAWSAddOrganizationServices{
 			ID:                input.ID,
 			Services:          servicesToSend,
 			ServiceParameters: input.ServiceParameters,
+			CCEVersion:        cceVersionToSend,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to add/update services: %w", err)
@@ -316,6 +334,11 @@ func (s *IdsecCCEAWSService) addOrganizationServices(input *awsmodels.TfIdsecCCE
 	// Add serviceParameters if provided
 	if len(input.ServiceParameters) > 0 {
 		requestBody["serviceParameters"] = input.ServiceParameters
+	}
+
+	// Add cceVersion if provided
+	if input.CCEVersion != "" {
+		requestBody["cceVersion"] = input.CCEVersion
 	}
 
 	response, err := s.ISPClient().Post(context.Background(), url, requestBody)
@@ -372,7 +395,8 @@ func (s *IdsecCCEAWSService) addOrganizationAccount(input *awsmodels.IdsecCCEAWS
 
 	requestBody := map[string]interface{}{
 		"accountId": input.AccountID,
-		"services":  input.Services,
+		// Version is Terraform-state-only for member accounts; the API derives it from the parent organization.
+		"services": withoutServiceVersions(input.Services),
 		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
 		"onboardingType": ccemodels.TerraformProvider,
 	}
@@ -388,6 +412,19 @@ func (s *IdsecCCEAWSService) addOrganizationAccount(input *awsmodels.IdsecCCEAWS
 		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to add account to organization")
 	}
 
+	// The endpoint is an idempotent upsert and answers 204 with an empty body when the request already
+	// matches the account's deployed state. There is no ID to decode from the body in that case, but the
+	// caller (tfAddOrganizationAccountSync) still needs the onboarding ID to re-fetch the account, so
+	// resolve it by looking the account up among the organization's member-account workspaces.
+	if response.StatusCode == http.StatusNoContent {
+		s.Logger.Info("Account [%s] already matches the requested state, resolving its onboarding ID", input.AccountID)
+		onboardingID, findErr := s.findOrganizationAccountOnboardingID(input.ParentOrganizationID, input.AccountID)
+		if findErr != nil {
+			return nil, fmt.Errorf("account [%s] already matches the requested state but failed to resolve its onboarding ID: %w", input.AccountID, findErr)
+		}
+		return &awsmodels.IdsecCCEAWSAddedOrganizationAccount{ID: onboardingID}, nil
+	}
+
 	responseJSON, err := common.DeserializeJSONSnake(response.Body)
 	if err != nil {
 		return nil, err
@@ -400,6 +437,32 @@ func (s *IdsecCCEAWSService) addOrganizationAccount(input *awsmodels.IdsecCCEAWS
 	}
 
 	return &addedAccount, nil
+}
+
+// findOrganizationAccountOnboardingID resolves the CCE onboarding ID of a member account of an
+// organization, given the account's AWS account ID. This is needed when the add-account endpoint answers
+// 204 No Content (idempotent no-op): the response has no body to decode the onboarding ID from, but the
+// account is - by definition of the 204 - already onboarded under this organization, so it is
+// discoverable via the workspaces listing.
+// API: GET /api/aws/workspaces (filtered by parent_id, paginated internally)
+func (s *IdsecCCEAWSService) findOrganizationAccountOnboardingID(organizationID, accountID string) (string, error) {
+	workspaces, err := s.TfWorkspaces(&awsmodels.TfIdsecCCEAWSGetWorkspacesTerraform{
+		ParentID:               organizationID,
+		WorkspaceType:          "aws_account",
+		IncludeEmptyWorkspaces: true,
+		IncludeSuspended:       true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list accounts for organization [%s]: %w", organizationID, err)
+	}
+
+	for _, workspace := range workspaces.Workspaces {
+		if workspace.Data.PlatformID == accountID {
+			return workspace.Data.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("account [%s] not found under organization [%s]", accountID, organizationID)
 }
 
 // isAccountNotFoundError checks if the error indicates a 404 Not Found response.

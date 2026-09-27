@@ -19,3 +19,15 @@ func captureFirstServiceVersion(version *string) func(*http.Request) {
 		}
 	}
 }
+
+// captureCCEVersion returns a callback that captures the cceVersion from the request body.
+// Safe to use inside OnRequest (no testify calls in the HTTP handler goroutine).
+func captureCCEVersion(version *string) func(*http.Request) {
+	return func(r *http.Request) {
+		var payload map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if v, ok := payload["cceVersion"].(string); ok {
+			*version = v
+		}
+	}
+}

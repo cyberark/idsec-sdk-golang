@@ -13,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/golang-jwt/jwt/v5"
 
+	scak8sazurecommonhelper "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/azure/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -26,7 +27,7 @@ const (
 	aksExecCredRefreshBuffer = 60 * time.Second // subtract from JWT exp for ExecCredential.expirationTimestamp
 )
 
-// AzureTokenProvider: AKS token via local az session; validates az identity vs idsec Elevate JWT (claim match only).
+// AzureTokenProvider: AKS token via local az session; validates az identity vs the Elevate cloudUserName.
 type AzureTokenProvider struct{}
 
 func (p *AzureTokenProvider) CSP() string { return k8smodels.CSPAzure }
@@ -36,15 +37,11 @@ func (p *AzureTokenProvider) GenerateToken(
 	result *k8smodels.IdsecSCAK8sElevateResult,
 	ctx *IdsecSCAK8sClusterContext,
 ) (*k8smodels.IdsecSCAK8sExecCredential, error) {
-	if result == nil {
-		return nil, fmt.Errorf("elevate result cannot be nil")
-	}
 	if ctx == nil {
 		return nil, fmt.Errorf("cluster context cannot be nil")
 	}
 
-	subscriptionID := AzureSubscriptionFromTargetID(result.TargetID)
-	accessToken, err := EnsureAzureCLISession(ctx.OrganizationID, ctx.ElevateToken, subscriptionID, ctx.Diagnostics)
+	accessToken, err := EnsureAzureCLISession(ctx.OrganizationID, result, ctx.Diagnostics)
 	if err != nil {
 		return nil, err
 	}
@@ -52,9 +49,22 @@ func (p *AzureTokenProvider) GenerateToken(
 }
 
 // EnsureAzureCLISession obtains an AKS token via az; may run az login / account set.
-// When elevateToken is set, validates az user vs idsec JWT. diagnostics gates stderr logs.
-func EnsureAzureCLISession(organizationID, elevateToken, subscriptionID string, diagnostics bool) (string, error) {
-	subscriptionID = strings.TrimSpace(subscriptionID)
+// Subscription and expected cloud user are both derived from the Elevate result.
+// diagnostics gates stderr logs.
+func EnsureAzureCLISession(
+	organizationID string,
+	result *k8smodels.IdsecSCAK8sElevateResult,
+	diagnostics bool,
+) (string, error) {
+	if result == nil {
+		return "", fmt.Errorf("elevate result cannot be nil")
+	}
+	cloudUserName := strings.TrimSpace(result.CloudUserName)
+	subscriptionID := strings.TrimSpace(AzureSubscriptionFromTargetID(result.TargetID))
+
+	// Announced before the session is resolved so the requirement is stated
+	// whether az is already signed in or a fresh login is about to run.
+	announceExpectedAzureCloudUser(cloudUserName)
 
 	accessToken, err := acquireAKSToken(organizationID)
 	if err != nil && subscriptionID != "" && azureCLIErrNeedsSubscription(err) {
@@ -86,10 +96,8 @@ func EnsureAzureCLISession(organizationID, elevateToken, subscriptionID string, 
 		}
 	}
 
-	if strings.TrimSpace(elevateToken) != "" {
-		if err := validateAzureCLIIdentity(elevateToken, accessToken); err != nil {
-			return "", err
-		}
+	if err := validateAzureCLIIdentity(cloudUserName, accessToken); err != nil {
+		return "", err
 	}
 	return accessToken, nil
 }
@@ -104,15 +112,19 @@ func azureCLIErrNeedsSubscription(err error) bool {
 }
 
 // VerifyAzureCLISession acquires an AKS token via az without interactive login; use after cache hit before trusting token.
-func VerifyAzureCLISession(organizationID, elevateToken string) (string, error) {
+func VerifyAzureCLISession(organizationID string, result *k8smodels.IdsecSCAK8sElevateResult) (string, error) {
+	if result == nil {
+		return "", fmt.Errorf("elevate result cannot be nil")
+	}
+	cloudUserName := strings.TrimSpace(result.CloudUserName)
+	announceExpectedAzureCloudUser(cloudUserName)
+
 	accessToken, err := acquireAKSToken(organizationID)
 	if err != nil {
 		return "", fmt.Errorf("no active az login session: %w", err)
 	}
-	if strings.TrimSpace(elevateToken) != "" {
-		if err := validateAzureCLIIdentity(elevateToken, accessToken); err != nil {
-			return "", err
-		}
+	if err := validateAzureCLIIdentity(cloudUserName, accessToken); err != nil {
+		return "", err
 	}
 	return accessToken, nil
 }
@@ -180,19 +192,26 @@ func runAzAccountSet(subscriptionID string) error {
 	return nil
 }
 
-type azureJWTIdentity struct {
-	UPN   string
-	Email string
+// announceExpectedAzureCloudUser tells the user which account the az session must
+// belong to, whether one already exists or 'az login' is about to run. Written to
+// stderr because stdout carries the kubectl ExecCredential JSON, and emitted
+// unfiltered so a restrictive log level cannot hide it.
+func announceExpectedAzureCloudUser(cloudUserName string) {
+	if cloudUserName == "" {
+		return
+	}
+	KubectlLoginLogLine(os.Stderr, KubectlLoginLogLevelWarning,
+		"az login must use the elevated user %s; any other account will be rejected.",
+		cloudUserName,
+	)
 }
 
-// validateAzureCLIIdentity: unverified JWT claim match (email if both set, else UPN) — catches idsec vs az user mismatch before AKS.
-func validateAzureCLIIdentity(elevateToken, azureAccessToken string) error {
-	elevateID, err := extractAzureJWTIdentity(
-		elevateToken,
-		[]string{"preferred_username", "unique_name", "upn"},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to extract identity from Elevate API token: %w", err)
+// validateAzureCLIIdentity fails when the az login account is not the elevated
+// cloud user. Skipped when the Elevate API did not return cloudUserName, so the
+// CLI keeps working against backends that predate the field.
+func validateAzureCLIIdentity(cloudUserName, azureAccessToken string) error {
+	if cloudUserName == "" {
+		return nil
 	}
 
 	azureID, err := extractAzureJWTIdentity(
@@ -203,40 +222,29 @@ func validateAzureCLIIdentity(elevateToken, azureAccessToken string) error {
 		return fmt.Errorf("failed to extract identity from Azure access token: %w", err)
 	}
 
-	if azureIdentitiesMatch(elevateID, azureID) {
+	if scak8sazurecommonhelper.CloudUserMatches(cloudUserName, azureID) {
 		return nil
 	}
 
-	return fmt.Errorf(
-		"az login account does not match the idsec elevated user; " +
-			"run 'az login' with the same account you used for 'idsec login'",
+	return fmt.Errorf( //nolint:staticcheck // ST1005: surfaced verbatim to the user as a sentence.
+		"az is logged in as %s, which is not the elevated user; "+
+			"run 'az logout'; az login must use %s user.",
+		azureID.Name(), cloudUserName,
 	)
 }
 
-func azureIdentitiesMatch(elevate, azure azureJWTIdentity) bool {
-	if elevate.Email != "" && azure.Email != "" {
-		if strings.EqualFold(elevate.Email, azure.Email) {
-			return true
-		}
-	}
-	if elevate.UPN != "" && azure.UPN != "" {
-		return strings.EqualFold(elevate.UPN, azure.UPN)
-	}
-	return false
-}
-
-func extractAzureJWTIdentity(tokenString string, upnClaimKeys []string) (azureJWTIdentity, error) {
+func extractAzureJWTIdentity(tokenString string, upnClaimKeys []string) (scak8sazurecommonhelper.JWTIdentity, error) {
 	claims, err := parseJWTMapClaims(tokenString)
 	if err != nil {
-		return azureJWTIdentity{}, err
+		return scak8sazurecommonhelper.JWTIdentity{}, err
 	}
 
-	id := azureJWTIdentity{
+	id := scak8sazurecommonhelper.JWTIdentity{
 		UPN:   firstStringClaim(claims, upnClaimKeys...),
 		Email: firstStringClaim(claims, "email"),
 	}
 	if id.UPN == "" && id.Email == "" {
-		return azureJWTIdentity{}, fmt.Errorf("no identity claim found (upn keys=%v, email)", upnClaimKeys)
+		return scak8sazurecommonhelper.JWTIdentity{}, fmt.Errorf("no identity claim found (upn keys=%v, email)", upnClaimKeys)
 	}
 	return id, nil
 }

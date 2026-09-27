@@ -37,12 +37,6 @@ type IdsecSCAK8sClusterContext struct {
 	// Forwarded to the SCA Elevate API target body as "namespace". Empty when omitted.
 	Namespace string
 
-	// ElevateToken is the raw idsec session JWT used as the Bearer token for
-	// the SCA Elevate API call. AzureTokenProvider decodes it to extract the
-	// elevated user's identity for validation against the az login session.
-	// Empty for non-Azure CSPs.
-	ElevateToken string
-
 	// K8sToken is the cluster API token used for DPA proxy JWE encryption on
 	// Azure / AWS IDC paths: AKS access token (az CLI) or EKS bearer token (STS
 	// presign). Encrypted into the DPA jwe_extension_value JWE under JSON key
@@ -56,11 +50,13 @@ type IdsecSCAK8sClusterContext struct {
 	// Unused on direct and AWS IAM-role proxy paths.
 	RootCA string
 
-	// ClusterToken is the base64-encoded cluster token injected by SIA into the
-	// kubeconfig exec block via --cluster-token. When non-empty it is passed
-	// as-is into the DPA JWE payload as "cluster_token" (SIA decodes it after
-	// decrypting the JWE). Optional; absence preserves previous behavior on all flows.
-	ClusterToken string
+	// ClusterContext is the base64-encoded JSON blob of cluster-identifying
+	// parameters (clusterId, region, ...) injected by SIA into the kubeconfig
+	// exec block via --cluster-context (legacy kubeconfigs pass --cluster-token).
+	// When non-empty it is passed as-is into the DPA JWE payload as
+	// "cluster_context" (SIA decodes it after decrypting the JWE). Optional;
+	// absence preserves previous behavior on all flows.
+	ClusterContext string
 
 	// Diagnostics enables kubectl-login stderr diagnostics from token providers.
 	Diagnostics bool

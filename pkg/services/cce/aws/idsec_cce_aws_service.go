@@ -386,8 +386,9 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 		return nil, err
 	}
 
-	// Extract current services (names + per-service version + per-service parameters) from raw JSON.
+	// Extract current services (names + per-service version + per-service parameters) and CCE version from raw JSON.
 	var currentServiceNames []string
+	var currentCCEVersion string
 	currentServiceVersions := map[string]string{}
 	currentServiceParams := map[string]map[string]interface{}{}
 	if orgMap, ok := accountJSON.(map[string]interface{}); ok {
@@ -398,6 +399,11 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 						currentServiceNames = append(currentServiceNames, svcStr)
 					}
 				}
+			}
+		}
+		if cceVersionRaw, exists := orgMap["cce_version"]; exists {
+			if cceVersionStr, ok := cceVersionRaw.(string); ok {
+				currentCCEVersion = cceVersionStr
 			}
 		}
 		currentServiceVersions = extractCurrentServiceVersions(orgMap)
@@ -443,13 +449,16 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 		}
 	}
 
-	// Step 3: Add new services and push version upgrades (if any).
-	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d\n", len(servicesToSend), len(servicesToRemove))
-	if len(servicesToSend) > 0 {
-		s.Logger.Info("Sending %d service(s) to account [%s]", len(servicesToSend), input.ID)
+	// Step 3: Add new services, push version upgrades, or update CCE version.
+	// Detect CCE-only version change: CCEVersion is requested and differs from current
+	cceVersionChanged := input.CCEVersion != "" && input.CCEVersion != currentCCEVersion
+	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
+	if len(servicesToSend) > 0 || cceVersionChanged {
+		s.Logger.Info("Sending %d service(s) to account [%s] (CCE version: %s)", len(servicesToSend), input.ID, input.CCEVersion)
 		err = s.TfAddAccountServices(&awsmodels.TfIdsecCCEAWSAddAccountServices{
-			ID:       input.ID,
-			Services: servicesToSend,
+			ID:         input.ID,
+			Services:   servicesToSend,
+			CCEVersion: input.CCEVersion,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to add/update services: %w", err)
@@ -560,7 +569,7 @@ func (s *IdsecCCEAWSService) reconcileDesiredServices(
 	currentServiceParams map[string]map[string]interface{},
 	desiredServiceParameters map[string]map[string]interface{},
 ) []ccemodels.IdsecCCEServiceInput {
-	var servicesToSend []ccemodels.IdsecCCEServiceInput
+	servicesToSend := make([]ccemodels.IdsecCCEServiceInput, 0)
 	for _, service := range desiredServices {
 		currentVersion := currentServiceVersions[service.ServiceName]
 		desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
@@ -698,10 +707,11 @@ func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID stri
 
 // determineServicesToAddWithStatus decides which desired services to (re)send to the
 // organization add-account endpoint. It returns:
-//   - every service that is brand-new to the account (not onboarded yet), and
-//   - every already-onboarded service in a settled state ("Completely added" or "Waiting for
-//     deployment") whose user-controlled parameters (resources + terraform service_parameters)
-//     actually changed, so that an in-place resources/parameters change is pushed to the API.
+//   - every service that is brand-new to the account (not onboarded yet),
+//   - every service in "Waiting for deployment", unconditionally, and
+//   - every already-onboarded service in "Completely added" whose user-controlled parameters
+//     (resources + terraform service_parameters) actually changed, so that an in-place
+//     resources/parameters change is pushed to the API.
 //
 // The add-account endpoint is an idempotent resource UPSERT: it diffs the requested resources
 // against what is stored and is a no-op when nothing changed. Sending only genuinely-changed
@@ -748,15 +758,23 @@ func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 			continue
 		}
 
-		// Already-onboarded service in a settled state: re-send it only when its user-controlled
-		// parameters actually changed, so the endpoint's idempotent resource diff applies the change
-		// (and we avoid re-sending unchanged services).
-		//
-		// Note: unlike TfUpdateAccount/tfUpdateOrganization, we don't diff service.Version here —
-		// member-account services don't have an independently settable version; it's inherited
-		// from the parent organization. Version is technically still a field on IdsecCCEServiceInput
-		// (omitempty), but no caller of this path populates it, so it's never sent here in practice.
-		if fullyDeployedMap[serviceName] || waitingMap[serviceName] {
+		// Service pending deployment: re-send it unconditionally. This is the organization
+		// version-upgrade case — upgrading an organization bumps the parent's product version and
+		// flips every member account to "Waiting for deployment" without changing any resource, so
+		// there is nothing in the payload to diff against. The version cannot be used as the signal
+		// either: the backend bumps the account's version column at org-upgrade time, so the API
+		// already reports the new version while the deployment is still pending. The status is the
+		// only reliable indicator that work is outstanding.
+		if waitingMap[serviceName] {
+			servicesToAdd = append(servicesToAdd, service)
+			s.Logger.Info("Service '%s' is waiting for deployment and will be RE-SENT", serviceName)
+			continue
+		}
+
+		// Already-deployed service: re-send it only when its user-controlled parameters actually
+		// changed, so the endpoint's idempotent resource diff applies the change (and we avoid
+		// re-sending unchanged services).
+		if fullyDeployedMap[serviceName] {
 			desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
 			if cceinternal.ServiceParamsChanged(desiredParams, currentServiceParams[serviceName]) {
 				servicesToAdd = append(servicesToAdd, service)
@@ -774,6 +792,22 @@ func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 	return servicesToAdd
 }
 
+// withoutServiceVersions returns a copy of the services with Version cleared.
+//
+// A member account has no independently settable version: the add-account endpoint derives it from
+// the parent organization's products and its ServiceInput schema has no version field at all.
+// Terraform still carries a version on each service so that an organization upgrade produces a plan
+// diff on the account resource (see determineServicesToAddWithStatus), but that value is state-only
+// and must not be sent to the API.
+func withoutServiceVersions(services []ccemodels.IdsecCCEServiceInput) []ccemodels.IdsecCCEServiceInput {
+	stripped := make([]ccemodels.IdsecCCEServiceInput, len(services))
+	for i, service := range services {
+		service.Version = ""
+		stripped[i] = service
+	}
+	return stripped
+}
+
 // addServicesToOrganizationAccount adds new services to an account using the organization API endpoint.
 // This is Step 3 of the TfUpdateOrganizationAccount flow.
 func (s *IdsecCCEAWSService) addServicesToOrganizationAccount(
@@ -787,7 +821,9 @@ func (s *IdsecCCEAWSService) addServicesToOrganizationAccount(
 	// Use the organization API to add services to the account
 	requestBody := map[string]interface{}{
 		"accountId": accountID,
-		"services":  servicesToAdd,
+		"services":  withoutServiceVersions(servicesToAdd),
+		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
+		"onboardingType": ccemodels.TerraformProvider,
 	}
 
 	// Add service parameters if provided
@@ -1003,6 +1039,11 @@ func (s *IdsecCCEAWSService) TfAddAccountServices(input *awsmodels.TfIdsecCCEAWS
 		"services": input.Services,
 		// Explicitly set the onboarding type to terraform_provider so the API enforces that this account was onboarded via Terraform.
 		"onboardingType": ccemodels.TerraformProvider,
+	}
+
+	// Add cceVersion if provided
+	if input.CCEVersion != "" {
+		requestBody["cceVersion"] = input.CCEVersion
 	}
 
 	response, err := s.ISPClient().Post(context.Background(), url, requestBody)

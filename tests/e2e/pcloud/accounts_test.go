@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 	safesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes/models"
@@ -161,7 +162,7 @@ func TestAccountLifecycle(t *testing.T) {
 		t.Logf("Step 3: Updating account: %s", account.AccountID)
 		updatedAccount, err := accountsSvc.Update(&accountsmodels.IdsecPCloudUpdateAccount{
 			AccountID: account.AccountID,
-			Address:   "updated.example.com",
+			Address:   common.Ptr("updated.example.com"),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "updated.example.com", updatedAccount.Address)

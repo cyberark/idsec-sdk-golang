@@ -17,6 +17,8 @@ type TfIdsecCCEAWSAddAccount struct {
 	AccountDisplayName string `json:"accountDisplayName,omitempty" mapstructure:"account_display_name" desc:"Optional name for the account shown in the CCE UI."`
 	// DeploymentRegion is the AWS region where resources will be created (e.g., "us-east-1"). If not specified, the tenant region will be used.
 	DeploymentRegion string `json:"deploymentRegion,omitempty" mapstructure:"deployment_region" desc:"AWS region where the account is deployed, for example, us-east-1. If not specified, the tenant region is used."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the latest version is used.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the latest version is used."`
 	// OnboardingType is set programmatically and never populated from user input
 	// The mapstructure:"-" tag tells mapstructure to ignore this field
 	OnboardingType *string `json:"onboardingType,omitempty" mapstructure:"-" desc:"The method used to deploy resources in AWS (set to use Terraform Provider, not from user input)." possible_values:"standard, programmatic,terraform_provider."`
@@ -29,7 +31,9 @@ type TfIdsecCCEAWSUpdateAccount struct {
 	// ID is the GUID of the onboarded account without hyphens
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"GUID of the added account without hyphens. For example, ef858a2d8f8f4f1781578089bb4ea010."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add to the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add to the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAWSAddedAccount is the output returned after adding an AWS account.
@@ -77,6 +81,8 @@ type TfIdsecCCEAWSAccount struct {
 	OrganizationName string `json:"organizationName,omitempty" mapstructure:"organization_name" desc:"Display name of the parent AWS organization shown in the CCE UI."`
 	// DuplicatedServices lists services that are deployed both in this account and in a parent organization  (nullable).
 	DuplicatedServices *[]string `json:"duplicatedServices,omitempty" mapstructure:"duplicated_services" desc:"Service resources deployed to this account and to the parent organization."`
+	// CCEVersion is the current version of the base CCE infrastructure.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
 // TfIdsecCCEAWSDeleteAccount is the input for deleting an AWS account.
@@ -94,7 +100,9 @@ type TfIdsecCCEAWSAddAccountServices struct {
 	// ID is the account's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE account onboarding ID."`
 	// Services is the list of services to add with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add to the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add to the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAWSDeleteAccountServices is the input for deleting services from an AWS account.

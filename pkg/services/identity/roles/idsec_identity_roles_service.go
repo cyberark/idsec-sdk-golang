@@ -616,10 +616,12 @@ func (s *IdsecIdentityRolesService) fetchRoleInfo(searchRoleItem string) (*roles
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
-	allRoles := queryResponse.Result.Roles.Results
-	if len(allRoles) == 0 {
+	// The directory service omits the Roles section entirely when nothing matched,
+	// so Roles may be nil even on an otherwise successful response.
+	if queryResponse.Result.Roles == nil || len(queryResponse.Result.Roles.Results) == 0 {
 		return nil, fmt.Errorf("no role found for given name")
 	}
+	allRoles := queryResponse.Result.Roles.Results
 	adminRights := []string{}
 	for _, right := range allRoles[0].Row.AdminRights {
 		adminRights = append(adminRights, right.Path)

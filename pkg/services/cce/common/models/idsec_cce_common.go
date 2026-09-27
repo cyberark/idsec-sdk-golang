@@ -43,6 +43,7 @@ type IdsecCCEOnboardedService struct {
 	Errors     []string                  `json:"errors" mapstructure:"errors" desc:"Any errors that occurred during onboarding"`
 	Properties *[]IdsecCCEPropertyOutput `json:"properties,omitempty" mapstructure:"properties" desc:"Additional properties for the service"`
 	Suspended  *bool                     `json:"suspended,omitempty" mapstructure:"suspended" desc:"Whether the service is suspended"`
+	Version    string                    `json:"version,omitempty" mapstructure:"version" desc:"Deployed version of the service"`
 }
 
 // Deserialize fixes up union types in already-populated service data.
@@ -219,6 +220,15 @@ type IdsecCCEPageOutput struct {
 	PageSize     int  `json:"page_size" mapstructure:"page_size" desc:"Number of items per page"`
 	IsLastPage   bool `json:"is_last_page" mapstructure:"is_last_page" desc:"Whether this is the last page of results"`
 	TotalRecords int  `json:"total_records" mapstructure:"total_records" desc:"Total number of records across all pages"`
+}
+
+// IdsecCCEAwsWorkloadFederation represents AWS IAM role-based workload federation identity details.
+// Used by services (e.g. dpa) that authenticate via an AWS IAM role rather than OIDC.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used directly.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: AwsWorkloadFederation
+type IdsecCCEAwsWorkloadFederation struct {
+	GlobalRoleARN string `json:"global_role_arn,omitempty" mapstructure:"global_role_arn,omitempty" desc:"AWS IAM role ARN used for workload identity federation"`
 }
 
 // IdsecCCEWorkloadFederation represents workload federation identity details shared across platforms.

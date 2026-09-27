@@ -12,6 +12,8 @@ type TfIdsecCCEAzureAddEntra struct {
 	EntraID      string                           `json:"entraId" mapstructure:"entra_id" validate:"required,uuid" desc:"Microsoft Entra tenant ID (UUID format)."`
 	Services     []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	CCEResources map[string]interface{}           `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE resources. Must contain 'appId' (string, UUID) — the Azure application ID."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the latest version is used.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the latest version is used."`
 }
 
 // TfIdsecCCEAzureEntra represents the details of an Azure Entra tenant.
@@ -27,6 +29,8 @@ type TfIdsecCCEAzureEntra struct {
 	Status         string                            `json:"status" mapstructure:"status" desc:"Onboarding status (For example, Completely added, Partially added, Failed to add)."`
 	ConsentData    []map[string]interface{}          `json:"consentData,omitempty" mapstructure:"consent_data,omitempty" desc:"Consent data for service applications."`
 	EntraID        string                            `json:"entraId" mapstructure:"entra_id" desc:"Microsoft Entra tenant ID."`
+	// CCEVersion is the current version of the base CCE infrastructure.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureGetEntra is the input for getting Azure Entra tenant details.
@@ -43,7 +47,9 @@ type TfIdsecCCEAzureUpdateEntra struct {
 	// ID is the Entra tenant's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE Microsoft Entra tenant onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add to the Microsoft Entra tenant (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add to the Microsoft Entra tenant (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAzureDeleteEntra is the input for deleting an Azure Entra tenant.

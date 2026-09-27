@@ -27,6 +27,8 @@ type TfIdsecCCEAWSOrganization struct {
 	Parameters          map[string]map[string]interface{} `json:"parameters,omitempty" mapstructure:"parameters" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
 	Status              string                            `json:"status,omitempty" mapstructure:"status,omitempty" choices:"Removing,Deploying resources,Waiting for deployment,Partially added,Failed to add,Service Error,Completely added" desc:"Onboarding status of the organization."`
 	LastSuccessfulScan  string                            `json:"lastSuccessfulScan,omitempty" mapstructure:"last_successful_scan,omitempty" desc:"Timestamp of the last successful organization scan (RFC3339 format)."`
+	// CCEVersion is the current version of the base CCE infrastructure.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
 // TfIdsecCCEAWSAddOrganization is the input for adding an AWS organization programmatically.
@@ -43,6 +45,8 @@ type TfIdsecCCEAWSAddOrganization struct {
 	ScanOrganizationRoleArn    string                            `json:"scanOrganizationRoleArn" mapstructure:"scan_organization_role_arn" validate:"required,pattern=arn:aws:iam::\\d{12}:role/.+"`
 	CrossAccountRoleExternalID string                            `json:"crossAccountRoleExternalId" mapstructure:"cross_account_role_external_id" validate:"required,pattern=^(cyberark0x7CIdira0x7CCCE)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"`
 	DeploymentRegion           string                            `json:"deploymentRegion,omitempty" mapstructure:"region,omitempty"`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the latest version is used.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the latest version is used."`
 }
 
 // TfIdsecCCEAWSAddOrganizationOutput is the output from adding an AWS organization.
@@ -61,9 +65,11 @@ type TfIdsecCCEAWSUpdateOrganization struct {
 	// ID is the organization's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID (for example, ef858a2d8f8f4f1781578089bb4ea010)"`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	// ServiceParameters contains service-specific parameters, keyed by service name.
 	ServiceParameters map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAWSAddOrganizationServices is the input for adding services to an AWS organization.
@@ -74,9 +80,11 @@ type TfIdsecCCEAWSAddOrganizationServices struct {
 	// ID is the organization's onboarding ID.
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID."`
 	// Services is the list of services to add with their resource configurations.
-	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add and their associated resources."`
+	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add and their associated resources."`
 	// ServiceParameters contains service-specific parameters, keyed by service name.
 	ServiceParameters map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
+	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAWSDeleteOrganizationServices is the input for deleting services from an AWS organization.

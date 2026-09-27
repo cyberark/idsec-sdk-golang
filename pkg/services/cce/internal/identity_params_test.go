@@ -127,6 +127,52 @@ func TestParseIdentityParamsResponse_MalformedServiceEntry(t *testing.T) {
 	require.Contains(t, result.IdentityParams, "good_service")
 }
 
+func TestParseIdentityParamsResponse_AwsRoleARN(t *testing.T) {
+	body := []byte(`{
+		"tenantId": "tenant-aws-123",
+		"dpa": {
+			"global_role_arn": "arn:aws:iam::403839327297:role/DiscoveryServiceRole"
+		}
+	}`)
+
+	result, err := ParseIdentityParamsResponse(body, common.GlobalLogger)
+	require.NoError(t, err)
+	require.Equal(t, "tenant-aws-123", result.TenantID)
+	require.Len(t, result.IdentityParams, 1)
+	require.Equal(t, "403839327297", result.IdentityParams["dpa"].IdentityAppID)
+	require.Equal(t, "arn:aws:iam::403839327297:role/DiscoveryServiceRole", result.IdentityParams["dpa"].IdentityUserID)
+	require.Empty(t, result.IdentityParams["dpa"].IdentityAppIssuer)
+	require.Empty(t, result.IdentityParams["dpa"].IdentityAppAudience)
+}
+
+func TestParseIdentityParamsResponse_MixedOidcAndAwsServices(t *testing.T) {
+	body := []byte(`{
+		"tenantId": "tenant-mixed",
+		"cloud_onboarding": {
+			"identity_user_id": "onboard-user",
+			"identity_app_id": "onboard-app",
+			"identity_app_issuer": "https://issuer.example.com/onboard",
+			"identity_app_audience": "api://onboard-audience"
+		},
+		"dpa": {
+			"global_role_arn": "arn:aws:iam::403839327297:role/DiscoveryServiceRole"
+		}
+	}`)
+
+	result, err := ParseIdentityParamsResponse(body, common.GlobalLogger)
+	require.NoError(t, err)
+	require.Equal(t, "tenant-mixed", result.TenantID)
+	require.Len(t, result.IdentityParams, 2)
+
+	// OIDC service unchanged
+	require.Equal(t, "onboard-app", result.IdentityParams["cloud_onboarding"].IdentityAppID)
+	require.Equal(t, "onboard-user", result.IdentityParams["cloud_onboarding"].IdentityUserID)
+
+	// AWS service mapped from global_role_arn
+	require.Equal(t, "403839327297", result.IdentityParams["dpa"].IdentityAppID)
+	require.Equal(t, "arn:aws:iam::403839327297:role/DiscoveryServiceRole", result.IdentityParams["dpa"].IdentityUserID)
+}
+
 func TestParseIdentityParamsResponse_PartialWIFFields(t *testing.T) {
 	body := []byte(`{
 		"tenantId": "partial-tenant",

@@ -156,6 +156,87 @@ func TestAddOrganizationAccountSync_Success(t *testing.T) {
 	require.Equal(t, mockOnboardingType, account.OnboardingType)
 }
 
+func TestAddOrganizationAccountSync_NoContentResolvesOnboardingID(t *testing.T) {
+	// The add-account endpoint is an idempotent upsert: if the request already matches the account's
+	// deployed state (e.g. a retried Create after a previous apply already onboarded it), it answers
+	// 204 No Content with no body. The onboarding ID must then be resolved via the workspaces listing
+	// so the caller can still fetch full account details and populate the Terraform resource ID.
+	workspacesJSON := `{
+		"workspaces": [
+			{
+				"key": "` + mockAccountOnboardingID + `",
+				"data": {
+					"id": "` + mockAccountOnboardingID + `",
+					"platform_id": "` + mockAWSAccountID + `",
+					"display_name": "Member Account",
+					"type": "aws_account",
+					"platform_type": "AWS"
+				},
+				"leaf": true,
+				"parent_id": "` + mockOrganizationOnboardingID + `"
+			}
+		],
+		"page": {
+			"page_number": 1,
+			"page_size": 100,
+			"is_last_page": true,
+			"total_records": 1
+		}
+	}`
+
+	var addAccountCallCount int
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/") && strings.Contains(r.URL.Path, "/account")
+			},
+			StatusCode:   http.StatusNoContent,
+			ResponseBody: "",
+			OnRequest:    func(r *http.Request) { addAccountCallCount++ },
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/workspaces")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: workspacesJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{
+		IdsecCCEAWSAddOrganizationAccount: awsmodels.IdsecCCEAWSAddOrganizationAccount{
+			ParentOrganizationID: mockOrganizationOnboardingID,
+			AccountID:            mockAWSAccountID,
+			Services: []ccemodels.IdsecCCEServiceInput{
+				{
+					ServiceName: ccemodels.DPA,
+					Resources: map[string]interface{}{
+						"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+					},
+				},
+			},
+		},
+	}
+
+	account, err := service.TfAddOrganizationAccountSync(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+	require.Equal(t, mockAWSAccountID, account.AccountID)
+	require.Equal(t, 1, addAccountCallCount)
+}
+
 func TestAddOrganizationAccountSync_With404AndQuickRetry(t *testing.T) {
 	// Test the retry logic with fast intervals
 	// This test verifies that the sync function polls Organization endpoint for scan completion
@@ -1196,4 +1277,171 @@ func TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange
 	require.Equal(t, 1, postCallCount, "a resources change on a fully-deployed service must trigger the add-account call")
 	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the fully-deployed service must be re-sent")
 	require.Contains(t, capturedPostBody, "DpaRoleUPDATED", "the re-sent service must carry the new resources")
+}
+
+// mockAccountWaitingAfterOrgUpgradeJSON is an account as it looks immediately after its parent
+// organization was upgraded: the service is pending deployment, but its stored parameters are
+// byte-identical to what Terraform is about to send, because an org version bump changes no
+// resources. Note the version already reads as the NEW version - the backend bumps the account's
+// version column at org-upgrade time - which is why the status, not the version, is the signal.
+const mockAccountWaitingAfterOrgUpgradeJSON = `{
+	"id": "` + mockAccountOnboardingID + `",
+	"account_id": "` + mockAWSAccountID + `",
+	"organization_id": "` + mockOrganizationOnboardingID + `",
+	"onboarding_type": "` + mockOnboardingType + `",
+	"services": ["dpa"],
+	"services_data": [
+		{
+			"name": "dpa",
+			"status": "Waiting for deployment",
+			"version": "0.0.7",
+			"errors": []
+		}
+	],
+	"parameters": {
+		"dpa": {
+			"DpaRoleArn": "arn:aws:iam::` + mockAWSAccountID + `:role/DpaRole"
+		}
+	},
+	"status": "Waiting for deployment"
+}`
+
+// TestTfUpdateOrganizationAccount_ResendsWaitingServiceWithNoResourceChange is the EV-143045
+// regression guard. Upgrading an organization bumps the parent's product version and flips every
+// member account to "Waiting for deployment" without changing a single resource. The SDK used to
+// re-send an already-onboarded service only when its parameters changed, so this produced an empty
+// service list, no API call, and a green apply while the account stayed stuck. A service in
+// "Waiting for deployment" must now be re-sent unconditionally.
+func TestTfUpdateOrganizationAccount_ResendsWaitingServiceWithNoResourceChange(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountWaitingAfterOrgUpgradeJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				// Terraform carries the parent organization's version so that an org upgrade
+				// produces a plan diff, but the resources are unchanged.
+				Version: "0.0.7",
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	}
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "a service waiting for deployment must be re-sent even with identical resources")
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the waiting service must be in the POST body")
+}
+
+// TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload pins the contract that a member
+// account's service version is Terraform-state-only. It exists solely to make an organization
+// upgrade visible to Terraform's plan; the API derives the real version from the parent
+// organization and its ServiceInput schema has no version field, so it must never be sent.
+func TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountWaitingAfterOrgUpgradeJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Version:     "0.0.7",
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	}
+
+	_, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the service itself must still be sent")
+	require.NotContains(t, capturedPostBody, `"version"`, "the Terraform-state-only version must not reach the API")
+	require.NotContains(t, capturedPostBody, "0.0.7", "the Terraform-state-only version must not reach the API")
+	require.Contains(t, capturedPostBody, `"onboardingType":"terraform_provider"`,
+		"the add-services request must carry onboardingType so the API allows the change on a terraform_provider onboarding")
 }

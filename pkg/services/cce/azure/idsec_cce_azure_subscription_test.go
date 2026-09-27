@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -128,6 +129,171 @@ func TestTfAddSubscription_IncludesServiceVersion(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "2.1.0", capturedVersion, "service version must be included in the create subscription request payload")
+}
+
+func TestTfAddSubscription_IncludesCCEVersion(t *testing.T) {
+	createResponseJSON := `{"id": "subscription-123"}`
+	getResponseJSON := `{
+		"id": "subscription-123",
+		"onboardingType": "terraform_provider",
+		"region": "westus",
+		"displayName": "Test Subscription",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012",
+		"subscriptionId": "sub-12345678-1234-1234-1234-123456789012"
+	}`
+
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest:    captureCCEVersion(&capturedCCEVersion),
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/subscription/subscription-123"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfAddSubscription(&azuremodels.TfIdsecCCEAzureAddSubscription{
+		EntraID:          "12345678-1234-1234-1234-123456789012",
+		EntraTenantName:  "TestTenant",
+		SubscriptionID:   "sub-12345678-1234-1234-1234-123456789012",
+		SubscriptionName: "Test Subscription",
+		CCEVersion:       "1.0.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources:   map[string]interface{}{"appId": "app-123"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", capturedCCEVersion, "CCE version must be included in the create subscription request payload")
+}
+
+func TestTfAddSubscription_IncludesCCEResources(t *testing.T) {
+	createResponseJSON := `{"id": "subscription-123"}`
+	getResponseJSON := `{
+		"id": "subscription-123",
+		"onboardingType": "terraform_provider",
+		"region": "westus",
+		"displayName": "Test Subscription",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012",
+		"subscriptionId": "sub-12345678-1234-1234-1234-123456789012"
+	}`
+
+	var capturedBody map[string]interface{}
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &capturedBody)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/subscription/subscription-123"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfAddSubscription(&azuremodels.TfIdsecCCEAzureAddSubscription{
+		EntraID:          "12345678-1234-1234-1234-123456789012",
+		EntraTenantName:  "TestTenant",
+		SubscriptionID:   "sub-12345678-1234-1234-1234-123456789012",
+		SubscriptionName: "Test Subscription",
+		CCEResources:     map[string]interface{}{"appId": "a822b25b-e407-4331-a52b-f43f076cfd22"},
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources:   map[string]interface{}{"appId": "app-123"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, capturedBody["cceResources"], "cceResources must be included in the create subscription request payload")
+	cceResources, ok := capturedBody["cceResources"].(map[string]interface{})
+	require.True(t, ok, "cceResources must be a map")
+	require.Equal(t, "a822b25b-e407-4331-a52b-f43f076cfd22", cceResources["appId"], "appId must match the provided value")
+}
+
+func TestTfAddSubscription_OmitsCCEResourcesWhenNil(t *testing.T) {
+	createResponseJSON := `{"id": "subscription-123"}`
+	getResponseJSON := `{
+		"id": "subscription-123",
+		"onboardingType": "terraform_provider",
+		"region": "westus",
+		"displayName": "Test Subscription",
+		"status": "Completely added",
+		"entraId": "12345678-1234-1234-1234-123456789012",
+		"subscriptionId": "sub-12345678-1234-1234-1234-123456789012"
+	}`
+
+	var capturedBody map[string]interface{}
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && r.URL.Path == "/api/azure/manual"
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: createResponseJSON,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &capturedBody)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && r.URL.Path == "/api/azure/manual/subscription/subscription-123"
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: getResponseJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAzureService(client)
+
+	_, err := service.TfAddSubscription(&azuremodels.TfIdsecCCEAzureAddSubscription{
+		EntraID:          "12345678-1234-1234-1234-123456789012",
+		EntraTenantName:  "TestTenant",
+		SubscriptionID:   "sub-12345678-1234-1234-1234-123456789012",
+		SubscriptionName: "Test Subscription",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources:   map[string]interface{}{"appId": "app-123"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	_, hasCCEResources := capturedBody["cceResources"]
+	require.False(t, hasCCEResources, "cceResources must be omitted from the request when not provided (omitempty)")
 }
 
 func TestTfSubscription_Success(t *testing.T) {

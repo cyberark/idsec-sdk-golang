@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	accounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts"
 	accountsmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/accounts/models"
 	safes "github.com/cyberark/idsec-sdk-golang/pkg/services/pcloud/safes"
@@ -167,7 +168,7 @@ func TestCompleteVaultWorkflow(t *testing.T) {
 
 		updatedAccount, err := accountsSvc.Update(&accountsmodels.IdsecPCloudUpdateAccount{
 			AccountID: account.AccountID,
-			Address:   updatedAddress,
+			Address:   common.Ptr(updatedAddress),
 		})
 		require.NoError(t, err, "Failed to update account")
 		assert.Equal(t, updatedAddress, updatedAccount.Address)

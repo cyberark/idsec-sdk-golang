@@ -18,61 +18,38 @@ func testUnsignedJWT(claims map[string]string) string {
 	return header + "." + body + "."
 }
 
-func TestAzureIdentitiesMatch_UPNOnly(t *testing.T) {
-	elevate := azureJWTIdentity{UPN: "eva.ravish.int2@cybrsca.onmicrosoft.com", Email: "onlineshopping374@gmail.com"}
-	azure := azureJWTIdentity{UPN: "eva.ravish.int2@cybrsca.onmicrosoft.com"}
-	require.True(t, azureIdentitiesMatch(elevate, azure))
-}
-
-func TestAzureIdentitiesMatch_EmailWhenBothPresent(t *testing.T) {
-	elevate := azureJWTIdentity{UPN: "user@tenant.com", Email: "same@example.com"}
-	azure := azureJWTIdentity{UPN: "other@tenant.com", Email: "same@example.com"}
-	require.True(t, azureIdentitiesMatch(elevate, azure))
-}
-
-func TestAzureIdentitiesMatch_EmailMismatchFallsBackToUPN(t *testing.T) {
-	elevate := azureJWTIdentity{
-		UPN:   "eva.ravish.int2@cybrsca.onmicrosoft.com",
-		Email: "onlineshopping374@gmail.com",
-	}
-	azure := azureJWTIdentity{
-		UPN:   "eva.ravish.int2@cybrsca.onmicrosoft.com",
-		Email: "different@gmail.com",
-	}
-	// Both have email but they differ — fall through to UPN match.
-	require.True(t, azureIdentitiesMatch(elevate, azure))
-}
-
-func TestAzureIdentitiesMatch_NoMatch(t *testing.T) {
-	elevate := azureJWTIdentity{UPN: "alice@tenant.com", Email: "alice@gmail.com"}
-	azure := azureJWTIdentity{UPN: "bob@tenant.com", Email: "bob@gmail.com"}
-	require.False(t, azureIdentitiesMatch(elevate, azure))
-}
-
 func TestValidateAzureCLIIdentity_RealWorldClaimMix(t *testing.T) {
-	elevate := testUnsignedJWT(map[string]string{
-		"preferred_username": "eva.ravish.int2@cybrsca.onmicrosoft.com",
-		"email":              "onlineshopping374@gmail.com",
-	})
 	azure := testUnsignedJWT(map[string]string{
-		"upn":   "eva.ravish.int2@cybrsca.onmicrosoft.com",
-		"email": "eva.ravish.int2@cybrsca.onmicrosoft.com",
+		"upn":   "alex.morgan.int2@contoso.onmicrosoft.com",
+		"email": "alex.morgan.personal@example.net",
 	})
-	require.NoError(t, validateAzureCLIIdentity(elevate, azure))
+	require.NoError(t, validateAzureCLIIdentity("alex.morgan.int2@contoso.onmicrosoft.com", azure))
 }
 
-func TestValidateAzureCLIIdentity_Mismatch(t *testing.T) {
-	elevate := testUnsignedJWT(map[string]string{
-		"preferred_username": "eva.ravish.int2@cybrsca.onmicrosoft.com",
-	})
-	azure := testUnsignedJWT(map[string]string{
-		"upn": "bob@tenant.com",
-	})
-	err := validateAzureCLIIdentity(elevate, azure)
+// No cloudUserName means an older backend or a pre-upgrade cache entry; the
+// check must be skipped rather than blocking access.
+func TestValidateAzureCLIIdentity_SkippedWithoutCloudUserName(t *testing.T) {
+	azure := testUnsignedJWT(map[string]string{"upn": "bob@tenant.com"})
+	require.NoError(t, validateAzureCLIIdentity("", azure))
+}
+
+// The error names both accounts so a user who believes they are already signed
+// in as the elevated user can see which account az actually resolved to.
+func TestValidateAzureCLIIdentity_MismatchNamesBothAccounts(t *testing.T) {
+	azure := testUnsignedJWT(map[string]string{"upn": "bob@tenant.com"})
+	err := validateAzureCLIIdentity("alex.morgan.int2@contoso.onmicrosoft.com", azure)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "does not match")
-	require.NotContains(t, err.Error(), "bob@tenant.com")
-	require.NotContains(t, err.Error(), "eva.ravish.int2@cybrsca.onmicrosoft.com")
+	require.Contains(t, err.Error(), "not the elevated user")
+	require.Contains(t, err.Error(), "alex.morgan.int2@contoso.onmicrosoft.com")
+	require.Contains(t, err.Error(), "bob@tenant.com")
+}
+
+// Falls back to the email claim when the token carries no UPN.
+func TestValidateAzureCLIIdentity_MismatchNamesEmailWhenNoUPN(t *testing.T) {
+	azure := testUnsignedJWT(map[string]string{"email": "bob@tenant.com"})
+	err := validateAzureCLIIdentity("alex.morgan.int2@contoso.onmicrosoft.com", azure)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bob@tenant.com")
 }
 
 func TestExtractAzureJWTIdentity(t *testing.T) {

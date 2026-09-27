@@ -47,7 +47,7 @@ type IdsecSCAGroupAccessElevateResponse struct {
 type IdsecSCAGroupAccessElevateActionRequest struct {
 	CSP         string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (must be AZURE)"`
 	DirectoryID string `json:"directory_id" mapstructure:"directory_id" validate:"required" flag:"directory-id" desc:"The Entra directory (tenant) ID"`
-	Groups      string `json:"groups" mapstructure:"groups" validate:"required" flag:"groups" desc:"Comma-separated group IDs to elevate into (max 50)"`
+	Groups      string `json:"groups" mapstructure:"groups" validate:"required" flag:"groups" desc:"Comma-separated group IDs to elevate into (max 5)"`
 }
 
 // IdsecSCAListGroupTargetsResponse is the response from GET /access/{csp}/eligibility/groups.

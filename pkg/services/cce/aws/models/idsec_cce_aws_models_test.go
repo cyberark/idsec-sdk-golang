@@ -37,6 +37,14 @@ func TestTfIdsecCCEAWSUpdateAccount_IDRequired(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("empty_services_passes", func(t *testing.T) {
+		err := validation.ValidateStruct(&TfIdsecCCEAWSUpdateAccount{
+			ID:       "ef858a2d8f8f4f1781578089bb4ea010",
+			Services: []ccemodels.IdsecCCEServiceInput{},
+		})
+		require.NoError(t, err, "empty services must be allowed for CCE-only version updates")
+	})
 }
 
 // TestTfIdsecCCEAWSUpdateOrganization_IDRequired ensures the organization
@@ -57,5 +65,13 @@ func TestTfIdsecCCEAWSUpdateOrganization_IDRequired(t *testing.T) {
 			Services: validServices(),
 		})
 		require.NoError(t, err)
+	})
+
+	t.Run("empty_services_passes", func(t *testing.T) {
+		err := validation.ValidateStruct(&TfIdsecCCEAWSUpdateOrganization{
+			ID:       "ef858a2d8f8f4f1781578089bb4ea010",
+			Services: []ccemodels.IdsecCCEServiceInput{},
+		})
+		require.NoError(t, err, "empty services must be allowed for CCE-only version updates")
 	})
 }

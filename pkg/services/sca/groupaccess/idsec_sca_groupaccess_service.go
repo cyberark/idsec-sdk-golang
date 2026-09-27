@@ -20,7 +20,7 @@ import (
 const (
 	eligibilityGroupsURLFmt = "/api/access/%s/eligibility/groups"
 	elevateGroupsURL        = "/api/access/elevate/groups"
-	maxGroupIDs             = 50
+	maxGroupIDs             = 5
 )
 
 // IdsecSCAGroupAccessService provides SCA Entra ID group eligibility and elevate operations (AZURE-only).

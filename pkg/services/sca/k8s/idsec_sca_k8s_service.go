@@ -443,9 +443,9 @@ func (s *IdsecSCAK8sService) GenerateProxyExecCredentialWithPrefetch(
 // short-lived client certificate/key pair via POST https://<tenant>.dpa.<env>/api/adb/sso/acquire
 // (DPA-K8S). Shared by AWS and Azure proxy providers.
 //
-// JWE is built when any of ctx.K8sToken or ctx.ClusterToken is non-empty.
+// JWE is built when any of ctx.K8sToken or ctx.ClusterContext is non-empty.
 // All three payload fields are independent: "k8s_token", "root_ca", and
-// "cluster_token" are each included when non-empty. root_ca is sent on every
+// "cluster_context" are each included when non-empty. root_ca is sent on every
 // flow where it is available — including AWS IAM proxy — aligning with the
 // future removal of the internal SIA proxy API path.
 //
@@ -456,16 +456,16 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 	diagnostics := clusterDiagnostics(ctx)
 	k8sToken := ""
 	rootCA := ""
-	clusterToken := ""
+	clusterContext := ""
 	if ctx != nil {
 		k8sToken = strings.TrimSpace(ctx.K8sToken)
 		rootCA = strings.TrimSpace(ctx.RootCA)
-		clusterToken = strings.TrimSpace(ctx.ClusterToken)
+		clusterContext = strings.TrimSpace(ctx.ClusterContext)
 	}
-	jweSet := k8sToken != "" || clusterToken != ""
+	jweSet := k8sToken != "" || clusterContext != ""
 	kubectlLoginDiagnostic(diagnostics,
-		"generateDPAProxyExecCredential: POST %s service=%s proxy_jwe=%v k8s_token_len=%d root_ca_len=%d cluster_token_len=%d",
-		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet, len(k8sToken), len(rootCA), len(clusterToken))
+		"generateDPAProxyExecCredential: POST %s service=%s proxy_jwe=%v k8s_token_len=%d root_ca_len=%d cluster_context_len=%d",
+		acquireDpaSsoTokenURL, dpaK8sProxyService, jweSet, len(k8sToken), len(rootCA), len(clusterContext))
 
 	if k8sToken != "" && rootCA == "" {
 		return nil, fmt.Errorf("proxy client certificate generation failed: root_ca is required when k8s_token is set")
@@ -510,13 +510,13 @@ func (s *IdsecSCAK8sService) generateDPAProxyExecCredential(ctx *IdsecSCAK8sClus
 			}
 		}
 		jweEncryptStart := time.Now()
-		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA, clusterToken)
+		jweExtensionValue, err = encryptProxyJWEExtension(pubKey, kid, k8sToken, rootCA, clusterContext)
 		if err != nil {
 			return nil, fmt.Errorf("proxy client certificate generation failed: proxy jwe: failed to encrypt extension: %w", err)
 		}
 		kubectlLoginDiagnostic(diagnostics,
-			"proxy JWE encrypted in %s (kid=%s encrypted_jwe_len=%d k8s_token_len=%d root_ca_len=%d cluster_token_len=%d)",
-			time.Since(jweEncryptStart).Round(time.Millisecond), kid, len(jweExtensionValue), len(k8sToken), len(rootCA), len(clusterToken))
+			"proxy JWE encrypted in %s (kid=%s encrypted_jwe_len=%d k8s_token_len=%d root_ca_len=%d cluster_context_len=%d)",
+			time.Since(jweEncryptStart).Round(time.Millisecond), kid, len(jweExtensionValue), len(k8sToken), len(rootCA), len(clusterContext))
 	}
 
 	body := map[string]interface{}{

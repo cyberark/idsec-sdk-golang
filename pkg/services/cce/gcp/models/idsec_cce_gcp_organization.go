@@ -77,7 +77,9 @@ type TfIdsecCCEGCPOrganization struct {
 	// Status is the overall onboarding status (e.g., "Completely added", "Partially added", "Failed to add") (nullable).
 	Status string `json:"status,omitempty" mapstructure:"status,omitempty" desc:"Onboarding status: Completely added, Partially added, Failed to add."`
 	// Services is the list of onboarded service names (e.g., ["dpa", "sca"]).
-	Services []string `json:"services,omitempty" mapstructure:"services,omitempty" desc:"List of services (SIA, SCA, SecretsHub, CDS)."`
+	// mapstructure:"-" prevents Read() from overwriting the plan's []IdsecCCEServiceInput with this []string.
+	// Use ServicesData for the onboarded-service view.
+	Services []string `json:"services,omitempty" mapstructure:"-" desc:"List of services (SIA, SCA, SecretsHub, CDS)."`
 	// ServicesData contains detailed information about each onboarded service.
 	ServicesData []ccemodels.IdsecCCEOnboardedService `json:"servicesData,omitempty" mapstructure:"services_data,omitempty" desc:"Detailed information about each onboarded service."`
 }
