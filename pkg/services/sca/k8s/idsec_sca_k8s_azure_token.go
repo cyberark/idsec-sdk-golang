@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -25,6 +26,9 @@ const (
 
 	acquireAKSTokenTimeout   = 30 * time.Second
 	aksExecCredRefreshBuffer = 60 * time.Second // subtract from JWT exp for ExecCredential.expirationTimestamp
+
+	// Env form of az config core.enable_broker_on_windows (AZURE_{SECTION}_{NAME}); env wins over ~/.azure/config.
+	azureBrokerOnWindowsEnvVar = "AZURE_CORE_ENABLE_BROKER_ON_WINDOWS"
 )
 
 // AzureTokenProvider: AKS token via local az session; validates az identity vs the Elevate cloudUserName.
@@ -172,11 +176,27 @@ func acquireAKSToken(organizationID string) (string, error) {
 // runAzLogin: stdout discarded so parent stdout stays clean for kubectl ExecCredential JSON.
 func runAzLogin() error {
 	cmd := exec.Command("az", "login")
+	cmd.Env = os.Environ()
+	// Azure CLI 2.61+ signs in through the WAM broker on Windows, which shows a native
+	// account picker seeded with the machine's own identity instead of the elevated user.
+	// Scoped to this process, so ~/.azure/config is untouched and an explicit user value wins.
+	brokerDisabled := false
+	if _, userSet := os.LookupEnv(azureBrokerOnWindowsEnvVar); runtime.GOOS == "windows" && !userSet {
+		cmd.Env = append(cmd.Env, azureBrokerOnWindowsEnvVar+"=false")
+		brokerDisabled = true
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		if brokerDisabled {
+			return fmt.Errorf(
+				"'az login' exited with error: %w; it used the default browser. "+
+					"If your tenant requires the Windows account picker, run 'setx %s true' and retry",
+				err, azureBrokerOnWindowsEnvVar,
+			)
+		}
 		return fmt.Errorf("'az login' exited with error: %w", err)
 	}
 	return nil
