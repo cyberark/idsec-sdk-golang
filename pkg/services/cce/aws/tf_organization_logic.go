@@ -270,20 +270,11 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 	}
 
 	// Step 3: Add new services, push version upgrades, or update CCE version.
-	// Detect CCE-only version change: CCEVersion is requested and differs from current
-	cceVersionChanged := input.CCEVersion != "" && input.CCEVersion != currentCCEVersion
+	cceVersionToSend := cceinternal.CCEVersionIfChanged(input.CCEVersion, currentCCEVersion)
+	cceVersionChanged := cceVersionToSend != ""
 	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
-	// The API reads the mere presence of a cceVersion as a request to upgrade `cce`, and validates it
-	// against the upgrade feature flag alongside the already-onboarded services in the payload. Since
-	// cce_version is computed, Terraform carries the deployed value in state and passes it back on every
-	// update, so echoing it unchanged would make an ordinary service upgrade fail with
-	// 501 FEATURE_NOT_IMPLEMENTED on 'cce'. Send it only when it actually changed.
-	cceVersionToSend := ""
-	if cceVersionChanged {
-		cceVersionToSend = input.CCEVersion
-	}
 	if len(servicesToSend) > 0 || cceVersionChanged {
-		s.Logger.Info("Sending %d service(s) to organization [%s] (CCE version: %s)", len(servicesToSend), input.ID, cceVersionToSend)
+		s.Logger.Info("Sending %d service(s) to organization [%s] (CCE version: %s)", len(servicesToSend), input.ID, cceinternal.CCEVersionLogValue(cceVersionToSend))
 		err = s.addOrganizationServices(&awsmodels.TfIdsecCCEAWSAddOrganizationServices{
 			ID:                input.ID,
 			Services:          servicesToSend,

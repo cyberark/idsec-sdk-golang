@@ -450,15 +450,15 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 	}
 
 	// Step 3: Add new services, push version upgrades, or update CCE version.
-	// Detect CCE-only version change: CCEVersion is requested and differs from current
-	cceVersionChanged := input.CCEVersion != "" && input.CCEVersion != currentCCEVersion
+	cceVersionToSend := cceinternal.CCEVersionIfChanged(input.CCEVersion, currentCCEVersion)
+	cceVersionChanged := cceVersionToSend != ""
 	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
 	if len(servicesToSend) > 0 || cceVersionChanged {
-		s.Logger.Info("Sending %d service(s) to account [%s] (CCE version: %s)", len(servicesToSend), input.ID, input.CCEVersion)
+		s.Logger.Info("Sending %d service(s) to account [%s] (CCE version: %s)", len(servicesToSend), input.ID, cceinternal.CCEVersionLogValue(cceVersionToSend))
 		err = s.TfAddAccountServices(&awsmodels.TfIdsecCCEAWSAddAccountServices{
 			ID:         input.ID,
 			Services:   servicesToSend,
-			CCEVersion: input.CCEVersion,
+			CCEVersion: cceVersionToSend,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to add/update services: %w", err)

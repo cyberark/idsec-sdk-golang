@@ -1454,6 +1454,139 @@ func TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
 	require.Zero(t, deleteCount, "no service removal means no delete-services call")
 }
 
+// TestTfUpdateAccount_ServiceUpgradeOmitsUnchangedCCEVersion is a regression guard verifying that
+// upgrading a service version does not carry the unchanged cceVersion into the payload.
+//
+// cce_version is computed, so Terraform holds the deployed value in state and passes it back on
+// every update. The API treats the presence of a cceVersion as a request to upgrade 'cce' and
+// validates it against the upgrade feature flag, so echoing it unchanged made an ordinary
+// secrets_hub upgrade fail with 501 FEATURE_NOT_IMPLEMENTED on 'cce'.
+func TestTfUpdateAccount_ServiceUpgradeOmitsUnchangedCCEVersion(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["secrets_hub"],
+		"servicesData": [
+			{"name": "secrets_hub", "version": "0.0.7", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"secrets_hub": {"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"}
+		},
+		"cceVersion": "0.0.1",
+		"status": "Completely added"
+	}`
+
+	var postCount int
+	var postBody string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/account/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				body, _ := io.ReadAll(r.Body)
+				postBody = string(body)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	// secrets_hub upgrades 0.0.7 -> 0.0.8 while cceVersion stays at the deployed 0.0.1.
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID:         onboardingID,
+		CCEVersion: "0.0.1",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SecretsHub,
+				Version:     "0.0.8",
+				Resources:   map[string]any{"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "the service version upgrade must trigger exactly one add/update-services call")
+	require.Contains(t, postBody, `"serviceName":"secrets_hub"`, "the upgraded service must be sent")
+	require.NotContains(t, postBody, "cceVersion",
+		"an unchanged cceVersion must NOT be sent, or the API gates 'cce' behind the upgrade feature flag and returns 501")
+}
+
+// TestTfUpdateAccount_ServiceUpgradeWithCCEVersionChange verifies that when both a service version
+// and the CCE version change, the new CCE version is sent along with the upgraded service.
+func TestTfUpdateAccount_ServiceUpgradeWithCCEVersionChange(t *testing.T) {
+	const onboardingID = "1111aaaa2222bbbb3333cccc"
+	accountJSON := `{
+		"id": "` + onboardingID + `",
+		"accountId": "123456789012",
+		"onboardingType": "terraform_provider",
+		"services": ["secrets_hub"],
+		"servicesData": [
+			{"name": "secrets_hub", "version": "0.0.7", "status": "Completely added", "errors": []}
+		],
+		"parameters": {
+			"secrets_hub": {"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"}
+		},
+		"cceVersion": "0.0.1",
+		"status": "Completely added"
+	}`
+
+	var postCount int
+	var capturedCCEVersion string
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/account/"+onboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: accountJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/account/"+onboardingID+"/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				postCount++
+				captureCCEVersion(&capturedCCEVersion)(r)
+			},
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
+		ID:         onboardingID,
+		CCEVersion: "0.1.0",
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.SecretsHub,
+				Version:     "0.0.8",
+				Resources:   map[string]any{"SecretsHubCustomerAccessRole": "arn:aws:iam::123456789012:role/SecretsHubRole"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, postCount, "service and CCE version changes must be sent in a single add/update-services call")
+	require.Equal(t, "0.1.0", capturedCCEVersion, "a changed CCE version must be sent")
+}
+
 // TestTfAccount_ReadsCCEVersion verifies that when reading an account,
 // the CCEVersion field is populated from the API response.
 func TestTfAccount_ReadsCCEVersion(t *testing.T) {

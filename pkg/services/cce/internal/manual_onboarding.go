@@ -329,14 +329,14 @@ func (c *ManualClient) UpdateServicesWithReconcile(
 		}
 	}
 
-	// Detect CCE-only version change: CCEVersion is requested and differs from current
-	cceVersionChanged := cceVersion != "" && cceVersion != current.CCEVersion
+	cceVersionToSend := CCEVersionIfChanged(cceVersion, current.CCEVersion)
+	cceVersionChanged := cceVersionToSend != ""
 
 	c.logger.Info("Services to add/upgrade/update: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
 
 	if len(servicesToSend) > 0 || cceVersionChanged {
-		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %s)", len(servicesToSend), resourceType, id, cceVersion)
-		if err := c.AddServices(id, servicesToSend, cceVersion); err != nil {
+		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %s)", len(servicesToSend), resourceType, id, CCEVersionLogValue(cceVersionToSend))
+		if err := c.AddServices(id, servicesToSend, cceVersionToSend); err != nil {
 			return fmt.Errorf("failed to add/update services: %w", err)
 		}
 	}

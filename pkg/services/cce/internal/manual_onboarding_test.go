@@ -877,7 +877,8 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_NoAPICall(
 }
 
 // TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_WithServiceChanges verifies that
-// when CCE version is unchanged but services change, only service changes are sent with the CCE version.
+// when CCE version is unchanged but services change, only the service changes are sent and the
+// unchanged CCE version is omitted, so the API does not treat the request as a CCE upgrade.
 func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_WithServiceChanges(t *testing.T) {
 	var addedServices []ccemodels.IdsecCCEServiceInput
 	var capturedCCEVersion string
@@ -929,9 +930,106 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_WithServic
 	require.NoError(t, err)
 	require.Len(t, addedServices, 1, "only SCA should be added")
 	require.Equal(t, string(ccemodels.SCA), string(addedServices[0].ServiceName))
-	// When CCE version is unchanged, it should still be included if services are being added
-	require.True(t, hasCCEVersion, "CCE version should be included when services are added")
-	require.Equal(t, "0.1.0", capturedCCEVersion)
+	require.False(t, hasCCEVersion, "an unchanged CCE version must not be sent when services are added")
+	require.Empty(t, capturedCCEVersion)
+}
+
+// TestManualClient_UpdateServicesWithReconcile_SecondServiceOmitsDeployedCCEVersion onboards one service
+// together with a CCE version, then onboards a second service while Terraform passes the (computed)
+// deployed CCE version back unchanged. The first request must carry the cceVersion; the second must not.
+// The API treats the presence of a cceVersion as a request to upgrade 'cce' and validates it against
+// the upgrade feature flag, so echoing it unchanged fails with 501 FEATURE_NOT_IMPLEMENTED.
+func TestManualClient_UpdateServicesWithReconcile_SecondServiceOmitsDeployedCCEVersion(t *testing.T) {
+	var postBodies []map[string]interface{}
+
+	client, cleanup := SetupMockCCEService(t, []MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var requestData map[string]interface{}
+				_ = json.Unmarshal(body, &requestData)
+				postBodies = append(postBodies, requestData)
+			},
+		},
+	})
+	defer cleanup()
+
+	manual := newTestManualClient(client)
+
+	// Step 1: onboard dpa together with CCE 0.0.1 on an entity that has nothing deployed yet.
+	dpa := ccemodels.IdsecCCEServiceInput{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]interface{}{}}
+	err := manual.UpdateServicesWithReconcile("test-id", &CurrentServiceState{}, []ccemodels.IdsecCCEServiceInput{dpa}, "subscription", "0.0.1")
+	require.NoError(t, err)
+
+	// Step 2: dpa and CCE 0.0.1 are now deployed; onboard sca while the same CCE version is passed back.
+	deployed := &CurrentServiceState{
+		Names:      []string{string(ccemodels.DPA)},
+		Versions:   map[string]string{string(ccemodels.DPA): "0.0.3"},
+		CCEVersion: "0.0.1",
+	}
+	sca := ccemodels.IdsecCCEServiceInput{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]interface{}{}}
+	err = manual.UpdateServicesWithReconcile("test-id", deployed, []ccemodels.IdsecCCEServiceInput{dpa, sca}, "subscription", "0.0.1")
+	require.NoError(t, err)
+
+	require.Len(t, postBodies, 2, "each onboarding step must trigger exactly one add-services call")
+
+	first := postBodies[0]
+	require.Equal(t, "0.0.1", first["cceVersion"], "the initial onboarding must send the CCE version")
+	require.Len(t, first["services"], 1)
+	require.Equal(t, string(ccemodels.DPA), first["services"].([]interface{})[0].(map[string]interface{})["serviceName"])
+
+	second := postBodies[1]
+	require.NotContains(t, second, "cceVersion",
+		"an unchanged cceVersion must NOT be sent, or the API gates 'cce' behind the upgrade feature flag and returns 501")
+	require.Len(t, second["services"], 1, "only the newly onboarded service must be sent")
+	require.Equal(t, string(ccemodels.SCA), second["services"].([]interface{})[0].(map[string]interface{})["serviceName"])
+}
+
+// TestManualClient_UpdateServicesWithReconcile_ServiceUpgradeWithCCEVersionChange verifies that when
+// both a service and the CCE version change, the new CCE version is sent along with the service.
+func TestManualClient_UpdateServicesWithReconcile_ServiceUpgradeWithCCEVersionChange(t *testing.T) {
+	var capturedCCEVersion string
+	var capturedServices []interface{}
+
+	client, cleanup := SetupMockCCEService(t, []MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/services")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var requestData map[string]interface{}
+				_ = json.Unmarshal(body, &requestData)
+				capturedCCEVersion, _ = requestData["cceVersion"].(string)
+				capturedServices, _ = requestData["services"].([]interface{})
+			},
+		},
+	})
+	defer cleanup()
+
+	manual := newTestManualClient(client)
+
+	current := &CurrentServiceState{
+		Names:      []string{string(ccemodels.SecretsHub)},
+		Versions:   map[string]string{string(ccemodels.SecretsHub): "0.0.7"},
+		CCEVersion: "0.0.1",
+	}
+	desired := []ccemodels.IdsecCCEServiceInput{
+		{ServiceName: ccemodels.SecretsHub, Version: "0.0.8", Resources: map[string]interface{}{}},
+	}
+
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "0.1.0")
+
+	require.NoError(t, err)
+	require.Len(t, capturedServices, 1, "the upgraded service must be sent")
+	require.Equal(t, "0.1.0", capturedCCEVersion, "a changed CCE version must be sent")
 }
 
 // TestExtractCCEVersion verifies the ExtractCCEVersion helper correctly extracts
