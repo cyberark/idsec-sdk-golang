@@ -11,7 +11,7 @@ var ServiceConfig = services.IdsecServiceConfig{
 	RequiredAuthenticatorNames: []string{"pvwa"},
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
-	Enabled:                    enabled(false),
+	Enabled:                    enabled(true),
 	ActionSchemas:              nil,
 }
 

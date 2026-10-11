@@ -731,9 +731,18 @@ func (s *IdsecSCAK8sService) generateKubeconfigViaDpa(req *k8smodels.IdsecSCAK8s
 	s.Logger.Info("Generating kubeconfig (dpa endpoint) for CSP [%s]", cspDisplay)
 	s.Logger.Debug("requesting generate-kubeconfig DPA API at route: %s", route)
 
+	// The DPA kubeconfig endpoint internally calls SCA's evaluate-eligibility endpoint.
+	// SCA verifies X-CLI-Signature against the evaluate path, not the DPA kubeconfig path.
+	// Compute the signature for the evaluate path so SCA validation passes.
+	signatureRoute := route // fallback: use API route when no CSP is available
+	if csp != "" {
+		signatureRoute = strings.TrimPrefix(strings.Replace(evaluateRelURL, "<csp>", strings.ToUpper(csp), 1), "/")
+		s.Logger.Debug("using SCA evaluate route for CLI signature: %s", signatureRoute)
+	}
+
 	client := s.dpaISP.ISPClient()
 	client.RemoveHeader("Content-Type")
-	response, err := s.getWithCLISignature(client, route, nil)
+	response, err := s.getWithCLISignatureForPath(client, route, signatureRoute, nil)
 	client.SetHeader("Content-Type", "application/json")
 
 	if err != nil {

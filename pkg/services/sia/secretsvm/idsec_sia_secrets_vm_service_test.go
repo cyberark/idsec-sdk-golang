@@ -631,7 +631,55 @@ func TestValidateEphemeralDomainUserParams(t *testing.T) {
 				UseWinrmForHTTPS:                            true,
 			},
 			expectedError:  true,
-			expectedErrMsg: "domain-controller-enable-certificate-validation requires domain-controller-ldaps-certificate to be provided",
+			expectedErrMsg: "domain-controller-enable-certificate-validation requires domain-controller-ldaps-certificate or domain-controller-ldaps-load-all-certificates to be provided",
+		},
+		{
+			name: "valid_certificate_validation_with_load_all_certificates",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                    true,
+				DomainControllerEnableCertificateValidation: true,
+				DomainControllerLdapsLoadAllCertificates:    true,
+				UseWinrmForHTTPS:                            true,
+				WinrmEnableCertificateValidation:            true,
+				WinrmLoadAllCertificates:                    true,
+			},
+			expectedError: false,
+		},
+		{
+			name: "valid_certificate_and_load_all_certificates_without_certificate_validation",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                 true,
+				DomainControllerLdapsCertificate:         "cert-id-123",
+				DomainControllerLdapsLoadAllCertificates: true,
+				UseWinrmForHTTPS:                         true,
+				WinrmCertificate:                         "winrm-cert-456",
+				WinrmLoadAllCertificates:                 true,
+			},
+			expectedError: false,
+		},
+		{
+			name: "error_domain_controller_certificate_with_load_all_certificates",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                    true,
+				DomainControllerEnableCertificateValidation: true,
+				DomainControllerLdapsCertificate:            "cert-id-123",
+				DomainControllerLdapsLoadAllCertificates:    true,
+				UseWinrmForHTTPS:                            true,
+			},
+			expectedError:  true,
+			expectedErrMsg: "domain-controller-ldaps-certificate and domain-controller-ldaps-load-all-certificates cannot be used together",
+		},
+		{
+			name: "error_winrm_certificate_with_load_all_certificates",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:         true,
+				UseWinrmForHTTPS:                 true,
+				WinrmEnableCertificateValidation: true,
+				WinrmCertificate:                 "winrm-cert-456",
+				WinrmLoadAllCertificates:         true,
+			},
+			expectedError:  true,
+			expectedErrMsg: "winrm-certificate and winrm-load-all-certificates cannot be used together",
 		},
 		{
 			name: "error_winrm_cert_validation_without_https",
@@ -653,7 +701,7 @@ func TestValidateEphemeralDomainUserParams(t *testing.T) {
 				WinrmCertificate:                 "", // Missing certificate
 			},
 			expectedError:  true,
-			expectedErrMsg: "winrm-enable-certificate-validation requires winrm-certificate to be provided",
+			expectedErrMsg: "winrm-enable-certificate-validation requires winrm-certificate or winrm-load-all-certificates to be provided",
 		},
 	}
 
@@ -693,6 +741,7 @@ func TestExtractEphemeralParamsFromAddSecret(t *testing.T) {
 			expected: vmsecretsmodels.EphemeralDomainUserParams{
 				DomainControllerName:                        "",
 				DomainControllerNetbios:                     "",
+				DomainControllerAutomaticDiscovery:          false, // nil defaults to false, not true
 				EphemeralDomainUserLocation:                 "",
 				DomainControllerUseLdaps:                    true,
 				DomainControllerEnableCertificateValidation: false,
@@ -700,6 +749,41 @@ func TestExtractEphemeralParamsFromAddSecret(t *testing.T) {
 				UseWinrmForHTTPS:                            true,
 				WinrmEnableCertificateValidation:            false,
 				WinrmCertificate:                            "",
+			},
+		},
+		{
+			name: "automatic_discovery_explicitly_true",
+			addSecret: &vmsecretsmodels.IdsecSIAVMAddSecret{
+				DomainControllerAutomaticDiscovery: boolPtr(true),
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerAutomaticDiscovery: true,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "automatic_discovery_explicitly_false",
+			addSecret: &vmsecretsmodels.IdsecSIAVMAddSecret{
+				DomainControllerAutomaticDiscovery: boolPtr(false),
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerAutomaticDiscovery: false,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "load_all_certificates_explicitly_true",
+			addSecret: &vmsecretsmodels.IdsecSIAVMAddSecret{
+				DomainControllerLdapsLoadAllCertificates: boolPtr(true),
+				WinrmLoadAllCertificates:                 boolPtr(true),
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                 true,
+				DomainControllerLdapsLoadAllCertificates: true,
+				UseWinrmForHTTPS:                         true,
+				WinrmLoadAllCertificates:                 true,
 			},
 		},
 		{
@@ -777,6 +861,9 @@ func TestExtractEphemeralParamsFromAddSecret(t *testing.T) {
 			if params.DomainControllerNetbios != tt.expected.DomainControllerNetbios {
 				t.Errorf("DomainControllerNetbios: expected %q, got %q", tt.expected.DomainControllerNetbios, params.DomainControllerNetbios)
 			}
+			if params.DomainControllerAutomaticDiscovery != tt.expected.DomainControllerAutomaticDiscovery {
+				t.Errorf("DomainControllerAutomaticDiscovery: expected %v, got %v", tt.expected.DomainControllerAutomaticDiscovery, params.DomainControllerAutomaticDiscovery)
+			}
 			if params.EphemeralDomainUserLocation != tt.expected.EphemeralDomainUserLocation {
 				t.Errorf("EphemeralDomainUserLocation: expected %q, got %q", tt.expected.EphemeralDomainUserLocation, params.EphemeralDomainUserLocation)
 			}
@@ -797,6 +884,12 @@ func TestExtractEphemeralParamsFromAddSecret(t *testing.T) {
 			}
 			if params.WinrmCertificate != tt.expected.WinrmCertificate {
 				t.Errorf("WinrmCertificate: expected %q, got %q", tt.expected.WinrmCertificate, params.WinrmCertificate)
+			}
+			if params.DomainControllerLdapsLoadAllCertificates != tt.expected.DomainControllerLdapsLoadAllCertificates {
+				t.Errorf("DomainControllerLdapsLoadAllCertificates: expected %v, got %v", tt.expected.DomainControllerLdapsLoadAllCertificates, params.DomainControllerLdapsLoadAllCertificates)
+			}
+			if params.WinrmLoadAllCertificates != tt.expected.WinrmLoadAllCertificates {
+				t.Errorf("WinrmLoadAllCertificates: expected %v, got %v", tt.expected.WinrmLoadAllCertificates, params.WinrmLoadAllCertificates)
 			}
 		})
 	}
@@ -956,6 +1049,279 @@ func TestExtractEphemeralParamsFromChangeSecretWithMerge(t *testing.T) {
 				WinrmCertificate:                            "new-winrm-cert",
 			},
 		},
+		{
+			// A secret stored before automatic discovery existed has no such key
+			name:         "automatic_discovery_defaults_to_false_when_absent_from_existing",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_name":      "existing-dc.example.com",
+					"domain_controller_use_ldaps": true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:               "existing-dc.example.com",
+				DomainControllerAutomaticDiscovery: false,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name:         "automatic_discovery_preserved_from_existing",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_automatic_discovery": true,
+					"domain_controller_use_ldaps":           true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerAutomaticDiscovery: true,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "automatic_discovery_explicit_false_overrides_existing_true",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerAutomaticDiscovery: boolPtr(false),
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_automatic_discovery": true,
+					"domain_controller_use_ldaps":           true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerAutomaticDiscovery: false, // user explicit false
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "automatic_discovery_disabled_still_inherits_domain_controller_name",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerAutomaticDiscovery: boolPtr(false),
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_name":      "existing-dc.example.com",
+					"domain_controller_netbios":   "EXISTINGDC",
+					"domain_controller_use_ldaps": true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:               "existing-dc.example.com",
+				DomainControllerNetbios:            "EXISTINGDC",
+				DomainControllerAutomaticDiscovery: false,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name:         "load_all_certificates_preserved_on_unrelated_change",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{SecretName: "renamed"},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_enable_certificate_validation": true,
+					"domain_controller_ldaps_load_all_certificates":   true,
+				},
+				"winrm_info": map[string]interface{}{
+					"winrm_enable_certificate_validation": true,
+					"winrm_load_all_certificates":         true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                    true,
+				DomainControllerEnableCertificateValidation: true,
+				DomainControllerLdapsLoadAllCertificates:    true,
+				UseWinrmForHTTPS:                            true,
+				WinrmEnableCertificateValidation:            true,
+				WinrmLoadAllCertificates:                    true,
+			},
+		},
+		{
+			name: "load_all_disabled_still_inherits_certificate",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerLdapsLoadAllCertificates: boolPtr(false),
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_ldaps_certificate": "existing-cert",
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:         true,
+				DomainControllerLdapsCertificate: "existing-cert",
+				UseWinrmForHTTPS:                 true,
+			},
+		},
+		{
+			name: "automatic_discovery_enabled_clears_inherited_domain_controller_name",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerAutomaticDiscovery: boolPtr(true),
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_name":              "old-dc.example.com",
+					"domain_controller_netbios":           "OLDDC",
+					"domain_controller_ldaps_certificate": "old-cert",
+					"domain_controller_use_ldaps":         true,
+				},
+				"ephemeral_domain_user_location": "OU=Old,DC=example,DC=com",
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:                        "", // superseded
+				DomainControllerNetbios:                     "", // superseded
+				DomainControllerAutomaticDiscovery:          true,
+				EphemeralDomainUserLocation:                 "OU=Old,DC=example,DC=com", // untouched
+				DomainControllerUseLdaps:                    true,
+				DomainControllerEnableCertificateValidation: false,
+				DomainControllerLdapsCertificate:            "old-cert", // untouched
+				UseWinrmForHTTPS:                            true,
+			},
+		},
+		{
+			name: "explicit_domain_controller_name_clears_inherited_automatic_discovery",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerName: "new-dc.example.com",
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_automatic_discovery": true,
+					"domain_controller_use_ldaps":           true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:               "new-dc.example.com",
+				DomainControllerAutomaticDiscovery: false, // superseded
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "explicit_domain_controller_netbios_clears_inherited_automatic_discovery",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerNetbios: "NEWDC",
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_automatic_discovery": true,
+					"domain_controller_use_ldaps":           true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerNetbios:            "NEWDC",
+				DomainControllerAutomaticDiscovery: false, // superseded
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			// Both given at once are sent as-is for the service to reject
+			name: "explicit_conflict_preserved_for_validation",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerName:               "dc.example.com",
+				DomainControllerAutomaticDiscovery: boolPtr(true),
+			},
+			existingData: nil,
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:               "dc.example.com",
+				DomainControllerAutomaticDiscovery: true,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+		},
+		{
+			name: "load_all_certificates_enabled_clears_inherited_certificates",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerLdapsLoadAllCertificates: boolPtr(true),
+				WinrmLoadAllCertificates:                 boolPtr(true),
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_enable_certificate_validation": true,
+					"domain_controller_ldaps_certificate":             "old-cert",
+				},
+				"winrm_info": map[string]interface{}{
+					"winrm_enable_certificate_validation": true,
+					"winrm_certificate":                   "old-winrm-cert",
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                    true,
+				DomainControllerEnableCertificateValidation: true,
+				DomainControllerLdapsCertificate:            "", // superseded
+				DomainControllerLdapsLoadAllCertificates:    true,
+				UseWinrmForHTTPS:                            true,
+				WinrmEnableCertificateValidation:            true,
+				WinrmCertificate:                            "", // superseded
+				WinrmLoadAllCertificates:                    true,
+			},
+		},
+		{
+			name: "explicit_certificates_clear_inherited_load_all",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerLdapsCertificate: "new-cert",
+				WinrmCertificate:                 "new-winrm-cert",
+			},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_ldaps_load_all_certificates": true,
+				},
+				"winrm_info": map[string]interface{}{
+					"winrm_load_all_certificates": true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                 true,
+				DomainControllerLdapsCertificate:         "new-cert",
+				DomainControllerLdapsLoadAllCertificates: false, // superseded
+				UseWinrmForHTTPS:                         true,
+				WinrmCertificate:                         "new-winrm-cert",
+				WinrmLoadAllCertificates:                 false, // superseded
+			},
+		},
+		{
+			name: "explicit_certificate_and_load_all_preserved_for_validation",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{
+				DomainControllerLdapsCertificate:         "new-cert",
+				DomainControllerLdapsLoadAllCertificates: boolPtr(true),
+				WinrmCertificate:                         "new-winrm-cert",
+				WinrmLoadAllCertificates:                 boolPtr(true),
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                 true,
+				DomainControllerLdapsCertificate:         "new-cert",
+				DomainControllerLdapsLoadAllCertificates: true,
+				UseWinrmForHTTPS:                         true,
+				WinrmCertificate:                         "new-winrm-cert",
+				WinrmLoadAllCertificates:                 true,
+			},
+		},
+		{
+			// Inherited load-all takes precedence over an inherited certificate, as in jit-ui
+			name:         "inherited_load_all_wins_over_inherited_certificate",
+			changeSecret: &vmsecretsmodels.IdsecSIAVMChangeSecret{},
+			existingData: map[string]interface{}{
+				"domain_controller": map[string]interface{}{
+					"domain_controller_ldaps_certificate":           "old-cert",
+					"domain_controller_ldaps_load_all_certificates": true,
+				},
+				"winrm_info": map[string]interface{}{
+					"winrm_certificate":           "old-winrm-cert",
+					"winrm_load_all_certificates": true,
+				},
+			},
+			expected: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerUseLdaps:                 true,
+				DomainControllerLdapsCertificate:         "",
+				DomainControllerLdapsLoadAllCertificates: true,
+				UseWinrmForHTTPS:                         true,
+				WinrmCertificate:                         "",
+				WinrmLoadAllCertificates:                 true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -967,6 +1333,9 @@ func TestExtractEphemeralParamsFromChangeSecretWithMerge(t *testing.T) {
 			}
 			if params.DomainControllerNetbios != tt.expected.DomainControllerNetbios {
 				t.Errorf("DomainControllerNetbios: expected %q, got %q", tt.expected.DomainControllerNetbios, params.DomainControllerNetbios)
+			}
+			if params.DomainControllerAutomaticDiscovery != tt.expected.DomainControllerAutomaticDiscovery {
+				t.Errorf("DomainControllerAutomaticDiscovery: expected %v, got %v", tt.expected.DomainControllerAutomaticDiscovery, params.DomainControllerAutomaticDiscovery)
 			}
 			if params.EphemeralDomainUserLocation != tt.expected.EphemeralDomainUserLocation {
 				t.Errorf("EphemeralDomainUserLocation: expected %q, got %q", tt.expected.EphemeralDomainUserLocation, params.EphemeralDomainUserLocation)
@@ -989,6 +1358,236 @@ func TestExtractEphemeralParamsFromChangeSecretWithMerge(t *testing.T) {
 			if params.WinrmCertificate != tt.expected.WinrmCertificate {
 				t.Errorf("WinrmCertificate: expected %q, got %q", tt.expected.WinrmCertificate, params.WinrmCertificate)
 			}
+			if params.DomainControllerLdapsLoadAllCertificates != tt.expected.DomainControllerLdapsLoadAllCertificates {
+				t.Errorf("DomainControllerLdapsLoadAllCertificates: expected %v, got %v", tt.expected.DomainControllerLdapsLoadAllCertificates, params.DomainControllerLdapsLoadAllCertificates)
+			}
+			if params.WinrmLoadAllCertificates != tt.expected.WinrmLoadAllCertificates {
+				t.Errorf("WinrmLoadAllCertificates: expected %v, got %v", tt.expected.WinrmLoadAllCertificates, params.WinrmLoadAllCertificates)
+			}
+		})
+	}
+}
+
+// TestBuildEphemeralDomainUserDataMap tests that every domain controller key is emitted, including false ones.
+func TestBuildEphemeralDomainUserDataMap(t *testing.T) {
+	tests := []struct {
+		name                      string
+		params                    vmsecretsmodels.EphemeralDomainUserParams
+		expectedAutomaticDiscover bool
+	}{
+		{
+			name: "automatic_discovery_true_is_emitted",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerAutomaticDiscovery: true,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+			expectedAutomaticDiscover: true,
+		},
+		{
+			name: "automatic_discovery_false_is_still_emitted",
+			params: vmsecretsmodels.EphemeralDomainUserParams{
+				DomainControllerName:               "dc.example.com",
+				DomainControllerAutomaticDiscovery: false,
+				DomainControllerUseLdaps:           true,
+				UseWinrmForHTTPS:                   true,
+			},
+			expectedAutomaticDiscover: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := vmsecretsmodels.BuildEphemeralDomainUserDataMap(tt.params)
+
+			dcMap, ok := data["domain_controller"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected domain_controller to be a map, got %T", data["domain_controller"])
+			}
+			if len(dcMap) != 7 {
+				t.Errorf("expected 7 domain_controller keys, got %d: %v", len(dcMap), dcMap)
+			}
+			if loadAll, ok := dcMap["domain_controller_ldaps_load_all_certificates"].(bool); !ok || loadAll {
+				t.Errorf("expected domain_controller_ldaps_load_all_certificates to be emitted as false, got %v", dcMap["domain_controller_ldaps_load_all_certificates"])
+			}
+			winrmMap, ok := data["winrm_info"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected winrm_info to be a map, got %T", data["winrm_info"])
+			}
+			if loadAll, ok := winrmMap["winrm_load_all_certificates"].(bool); !ok || loadAll {
+				t.Errorf("expected winrm_load_all_certificates to be emitted as false, got %v", winrmMap["winrm_load_all_certificates"])
+			}
+			value, ok := dcMap["domain_controller_automatic_discovery"]
+			if !ok {
+				t.Fatal("expected domain_controller_automatic_discovery key to be present")
+			}
+			automaticDiscovery, ok := value.(bool)
+			if !ok {
+				t.Fatalf("expected domain_controller_automatic_discovery to be a bool, got %T", value)
+			}
+			if automaticDiscovery != tt.expectedAutomaticDiscover {
+				t.Errorf("domain_controller_automatic_discovery: expected %v, got %v", tt.expectedAutomaticDiscover, automaticDiscovery)
+			}
+		})
+	}
+}
+
+// TestChangeSecretDisablesAutomaticDiscovery tests that an explicit false overrides a stored true through merge and build.
+func TestChangeSecretDisablesAutomaticDiscovery(t *testing.T) {
+	existingData := map[string]interface{}{
+		"domain_controller": map[string]interface{}{
+			"domain_controller_automatic_discovery": true,
+			"domain_controller_use_ldaps":           true,
+		},
+		"ephemeral_domain_user_location": "OU=Test,DC=example,DC=com",
+	}
+	changeSecret := &vmsecretsmodels.IdsecSIAVMChangeSecret{
+		DomainControllerAutomaticDiscovery: boolPtr(false),
+	}
+
+	params := vmsecretsmodels.ExtractEphemeralParamsFromChangeSecret(changeSecret, existingData)
+	if params.DomainControllerAutomaticDiscovery {
+		t.Fatal("expected explicit false to override the stored true")
+	}
+
+	data := vmsecretsmodels.BuildEphemeralDomainUserDataMap(params)
+	dcMap, ok := data["domain_controller"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected domain_controller to be a map, got %T", data["domain_controller"])
+	}
+	value, ok := dcMap["domain_controller_automatic_discovery"]
+	if !ok {
+		t.Fatal("expected domain_controller_automatic_discovery key to be present so the stored true is overwritten")
+	}
+	if automaticDiscovery, _ := value.(bool); automaticDiscovery {
+		t.Error("expected the stored state to be rewritten with false")
+	}
+	if location := data["ephemeral_domain_user_location"]; location != "OU=Test,DC=example,DC=com" {
+		t.Errorf("expected the unrelated location to be preserved, got %v", location)
+	}
+}
+
+// TestPopulateFromSecretDetailsJSONAutomaticDiscovery tests reading automatic discovery back from secret_details.
+func TestPopulateFromSecretDetailsJSONAutomaticDiscovery(t *testing.T) {
+	// The method never dereferences the receiver, so a service without HTTP mocking is sufficient
+	service := createTestService(nil)
+
+	tests := []struct {
+		name          string
+		secretDetails string
+		expected      *bool
+	}{
+		{
+			name:          "automatic_discovery_true",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_automatic_discovery":true}}}`,
+			expected:      boolPtr(true),
+		},
+		{
+			name:          "automatic_discovery_false",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_automatic_discovery":false}}}`,
+			expected:      boolPtr(false),
+		},
+		{
+			// nil means not provided, not an explicit false
+			name:          "automatic_discovery_absent",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_name":"dc.example.com"}}}`,
+			expected:      nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			secret := &vmsecretsmodels.IdsecSIAVMSecret{}
+			if err := service.populateFromSecretDetailsJSON(tt.secretDetails, secret); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			switch {
+			case tt.expected == nil:
+				if secret.DomainControllerAutomaticDiscovery != nil {
+					t.Errorf("expected DomainControllerAutomaticDiscovery to stay nil, got %v", *secret.DomainControllerAutomaticDiscovery)
+				}
+			case secret.DomainControllerAutomaticDiscovery == nil:
+				t.Errorf("expected DomainControllerAutomaticDiscovery to be %v, got nil", *tt.expected)
+			case *secret.DomainControllerAutomaticDiscovery != *tt.expected:
+				t.Errorf("DomainControllerAutomaticDiscovery: expected %v, got %v", *tt.expected, *secret.DomainControllerAutomaticDiscovery)
+			}
+		})
+	}
+
+	// Round trip through the map ChangeSecret merges against
+	t.Run("round_trip_into_existing_ephemeral_data", func(t *testing.T) {
+		secret := &vmsecretsmodels.IdsecSIAVMSecret{}
+		secretDetails := `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_automatic_discovery":true,"domain_controller_use_ldaps":true}}}`
+		if err := service.populateFromSecretDetailsJSON(secretDetails, secret); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		existingData := vmsecretsmodels.EphemeralDomainUserDataMapFromSecret(secret)
+		dcMap, ok := existingData["domain_controller"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected domain_controller to be a map, got %T", existingData["domain_controller"])
+		}
+		if automaticDiscovery, _ := dcMap["domain_controller_automatic_discovery"].(bool); !automaticDiscovery {
+			t.Error("expected the stored automatic discovery flag to survive the round trip")
+		}
+
+		// An unrelated change must not turn it off
+		params := vmsecretsmodels.ExtractEphemeralParamsFromChangeSecret(
+			&vmsecretsmodels.IdsecSIAVMChangeSecret{SecretName: "renamed"}, existingData)
+		if !params.DomainControllerAutomaticDiscovery {
+			t.Error("expected an unrelated change to preserve automatic discovery")
+		}
+	})
+}
+
+// TestPopulateFromSecretDetailsJSONLoadAllCertificates tests reading the load-all certificate flags back from secret_details.
+func TestPopulateFromSecretDetailsJSONLoadAllCertificates(t *testing.T) {
+	service := createTestService(nil)
+
+	tests := []struct {
+		name          string
+		secretDetails string
+		expectedLdaps *bool
+		expectedWinrm *bool
+	}{
+		{
+			name:          "both_true",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_ldaps_load_all_certificates":true},"winrm_info":{"winrm_load_all_certificates":true}}}`,
+			expectedLdaps: boolPtr(true),
+			expectedWinrm: boolPtr(true),
+		},
+		{
+			name:          "both_false",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_ldaps_load_all_certificates":false},"winrm_info":{"winrm_load_all_certificates":false}}}`,
+			expectedLdaps: boolPtr(false),
+			expectedWinrm: boolPtr(false),
+		},
+		{
+			name:          "absent",
+			secretDetails: `{"account_domain":"example.com","ephemeral_domain_user_data":{"domain_controller":{"domain_controller_name":"dc.example.com"},"winrm_info":{"use_winrm_for_https":true}}}`,
+		},
+	}
+
+	check := func(t *testing.T, field string, got, expected *bool) {
+		switch {
+		case expected == nil && got != nil:
+			t.Errorf("expected %s to stay nil, got %v", field, *got)
+		case expected != nil && got == nil:
+			t.Errorf("expected %s to be %v, got nil", field, *expected)
+		case expected != nil && *got != *expected:
+			t.Errorf("%s: expected %v, got %v", field, *expected, *got)
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			secret := &vmsecretsmodels.IdsecSIAVMSecret{}
+			if err := service.populateFromSecretDetailsJSON(tt.secretDetails, secret); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			check(t, "DomainControllerLdapsLoadAllCertificates", secret.DomainControllerLdapsLoadAllCertificates, tt.expectedLdaps)
+			check(t, "WinrmLoadAllCertificates", secret.WinrmLoadAllCertificates, tt.expectedWinrm)
 		})
 	}
 }

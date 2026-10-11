@@ -403,7 +403,7 @@ func TestTfUpdateAccount_IncludesCCEVersion(t *testing.T) {
 
 	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
 		ID:         onboardingID,
-		CCEVersion: "2.5.0",
+		CCEVersion: common.Ptr("2.5.0"),
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{}},
 			{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]any{}},
@@ -1379,7 +1379,7 @@ func TestTfUpdateAccount_CCEVersionOnlyChange(t *testing.T) {
 	// Same services as current state, but different CCEVersion
 	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
 		ID:         onboardingID,
-		CCEVersion: "0.1.0", // Changed from 0.0.1 to 0.1.0
+		CCEVersion: common.Ptr("0.1.0"), // Changed from 0.0.1 to 0.1.0
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
 		},
@@ -1390,8 +1390,9 @@ func TestTfUpdateAccount_CCEVersionOnlyChange(t *testing.T) {
 	require.Equal(t, "0.1.0", capturedCCEVersion, "new CCE version must be sent in the request")
 }
 
-// TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges verifies that when neither
-// CCEVersion nor services change, no add-services API call is made.
+// TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges verifies that when services are unchanged
+// and CCEVersion is not supplied (nil, as UpdateOnlyModified passes an unchanged cce_version), no
+// add-services API call is made.
 func TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
 	const onboardingID = "1111aaaa2222bbbb3333cccc"
 	// Account has dpa onboarded at 0.0.3, cceVersion is 0.1.0
@@ -1440,10 +1441,9 @@ func TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
 
 	service := setupAWSService(client)
 
-	// Same services and same CCEVersion as current state
+	// Same services as current state, CCEVersion unchanged (nil)
 	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
-		ID:         onboardingID,
-		CCEVersion: "0.1.0", // Same as current
+		ID: onboardingID,
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]any{"DpaRoleArn": "arn:aws:iam::123456789012:role/DpaRole"}},
 		},
@@ -1457,10 +1457,10 @@ func TestTfUpdateAccount_CCEVersionUnchanged_NoServiceChanges(t *testing.T) {
 // TestTfUpdateAccount_ServiceUpgradeOmitsUnchangedCCEVersion is a regression guard verifying that
 // upgrading a service version does not carry the unchanged cceVersion into the payload.
 //
-// cce_version is computed, so Terraform holds the deployed value in state and passes it back on
-// every update. The API treats the presence of a cceVersion as a request to upgrade 'cce' and
-// validates it against the upgrade feature flag, so echoing it unchanged made an ordinary
-// secrets_hub upgrade fail with 501 FEATURE_NOT_IMPLEMENTED on 'cce'.
+// The API treats the presence of a cceVersion as a request to upgrade 'cce' and validates it against
+// the upgrade feature flag, so echoing it unchanged made an ordinary secrets_hub upgrade fail with
+// 501 FEATURE_NOT_IMPLEMENTED on 'cce'. The Terraform provider (UpdateOnlyModified) passes an
+// unchanged cce_version as nil, which must not be sent.
 func TestTfUpdateAccount_ServiceUpgradeOmitsUnchangedCCEVersion(t *testing.T) {
 	const onboardingID = "1111aaaa2222bbbb3333cccc"
 	accountJSON := `{
@@ -1505,10 +1505,9 @@ func TestTfUpdateAccount_ServiceUpgradeOmitsUnchangedCCEVersion(t *testing.T) {
 
 	service := setupAWSService(client)
 
-	// secrets_hub upgrades 0.0.7 -> 0.0.8 while cceVersion stays at the deployed 0.0.1.
+	// secrets_hub upgrades 0.0.7 -> 0.0.8 while cceVersion stays at the deployed 0.0.1 (nil).
 	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
-		ID:         onboardingID,
-		CCEVersion: "0.0.1",
+		ID: onboardingID,
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{
 				ServiceName: ccemodels.SecretsHub,
@@ -1572,7 +1571,7 @@ func TestTfUpdateAccount_ServiceUpgradeWithCCEVersionChange(t *testing.T) {
 
 	_, err := service.TfUpdateAccount(&awsmodels.TfIdsecCCEAWSUpdateAccount{
 		ID:         onboardingID,
-		CCEVersion: "0.1.0",
+		CCEVersion: common.Ptr("0.1.0"),
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{
 				ServiceName: ccemodels.SecretsHub,

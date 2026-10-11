@@ -119,6 +119,7 @@ func (s *IdsecPamshSafesService) listSafesWithFilters(
 	)
 }
 
+// Get method is intended for Terraform use only.
 // Get retrieves a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safes%20Web%20Services%20-%20Get%20Safes%20Details.htm
 func (s *IdsecPamshSafesService) Get(getSafe *safesmodels.IdsecPamshGetSafe) (*safesmodels.IdsecPamshSafe, error) {
@@ -171,6 +172,7 @@ func (s *IdsecPamshSafesService) Get(getSafe *safesmodels.IdsecPamshGetSafe) (*s
 	return &safe, nil
 }
 
+// GetMember method is intended for Terraform use only.
 // GetMember retrieves a safe member by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/Safe%20Members%20WS%20-%20List%20Safe%20Member.htm
 func (s *IdsecPamshSafesService) GetMember(getSafeMember *safesmodels.IdsecPamshGetSafeMember) (*safesmodels.IdsecPamshSafeMember, error) {
@@ -205,6 +207,7 @@ func (s *IdsecPamshSafesService) GetMember(getSafeMember *safesmodels.IdsecPamsh
 	return &safeMember, nil
 }
 
+// Create method is intended for Terraform use only.
 // Create adds a new safe.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Safe.htm
 func (s *IdsecPamshSafesService) Create(addSafe *safesmodels.IdsecPamshAddSafe) (*safesmodels.IdsecPamshSafe, error) {
@@ -276,6 +279,7 @@ func (s *IdsecPamshSafesService) Create(addSafe *safesmodels.IdsecPamshAddSafe) 
 	return &safe, nil
 }
 
+// AddMember method is intended for Terraform use only.
 // AddMember adds a new member to a safe.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Safe%20Member.htm
 func (s *IdsecPamshSafesService) AddMember(addSafeMember *safesmodels.IdsecPamshAddSafeMember) (*safesmodels.IdsecPamshSafeMember, error) {
@@ -319,6 +323,7 @@ func (s *IdsecPamshSafesService) AddMember(addSafeMember *safesmodels.IdsecPamsh
 	return &safeMember, nil
 }
 
+// Delete method is intended for Terraform use only.
 // Delete deletes a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Safe.htm
 func (s *IdsecPamshSafesService) Delete(deleteSafe *safesmodels.IdsecPamshDeleteSafe) error {
@@ -339,6 +344,7 @@ func (s *IdsecPamshSafesService) Delete(deleteSafe *safesmodels.IdsecPamshDelete
 	return nil
 }
 
+// DeleteMember method is intended for Terraform use only.
 // DeleteMember deletes a member from a safe by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Safe%20Member.htm
 func (s *IdsecPamshSafesService) DeleteMember(deleteSafeMember *safesmodels.IdsecPamshDeleteSafeMember) error {
@@ -359,6 +365,7 @@ func (s *IdsecPamshSafesService) DeleteMember(deleteSafeMember *safesmodels.Idse
 	return nil
 }
 
+// Update method is intended for Terraform use only.
 // Update updates a safe by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Update%20Safe.htm
 func (s *IdsecPamshSafesService) Update(updateSafe *safesmodels.IdsecPamshUpdateSafe) (*safesmodels.IdsecPamshSafe, error) {
@@ -404,6 +411,7 @@ func (s *IdsecPamshSafesService) Update(updateSafe *safesmodels.IdsecPamshUpdate
 	return &safe, nil
 }
 
+// UpdateMember method is intended for Terraform use only.
 // UpdateMember updates a member of a safe by its safe ID and member name.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Update%20Safe%20Member.htm
 func (s *IdsecPamshSafesService) UpdateMember(updateSafeMember *safesmodels.IdsecPamshUpdateSafeMember) (*safesmodels.IdsecPamshSafeMember, error) {

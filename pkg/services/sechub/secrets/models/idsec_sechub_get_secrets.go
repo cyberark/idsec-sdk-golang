@@ -34,18 +34,39 @@ type IdsecSecHubSecretVendorData struct {
 	Region          string            `json:"region,omitempty" mapstructure:"region,omitempty" desc:"Cloud Service Provider Region"`
 }
 
+// OnboardStatus represents the PAM onboarding status of a secret.
+type OnboardStatus string
+
+const (
+	// OnboardStatusCandidate indicates the secret is eligible for PAM onboarding.
+	OnboardStatusCandidate OnboardStatus = "CANDIDATE"
+	// OnboardStatusOnboarded indicates the secret has been successfully onboarded to PAM.
+	OnboardStatusOnboarded OnboardStatus = "ONBOARDED"
+	// OnboardStatusNotCandidate indicates the secret cannot be onboarded to PAM.
+	OnboardStatusNotCandidate OnboardStatus = "NOT_CANDIDATE"
+)
+
+// IdsecSecHubSecretOnboardData represents the PAM onboarding status and metadata for a secret.
+type IdsecSecHubSecretOnboardData struct {
+	Status    string `json:"status,omitempty" mapstructure:"status,omitempty" desc:"The onboarding status of this secret to PAM" choices:"CANDIDATE,ONBOARDED,NOT_CANDIDATE"`
+	Message   string `json:"message,omitempty" mapstructure:"message,omitempty" desc:"Indicates why the secret cannot be onboarded to PAM. Populated only when status is NOT_CANDIDATE."`
+	Timestamp string `json:"timestamp,omitempty" mapstructure:"timestamp,omitempty" desc:"The date and time at which the secret was successfully onboarded to PAM. Populated only when status is ONBOARDED."`
+}
+
 // IdsecSecHubSecret represents a single secret in the response.
 type IdsecSecHubSecret struct {
-	VendorType       string                      `json:"vendor_type" mapstructure:"vendor_type" desc:"The vendor type of the store where the secret was found (AWS, AZURE, GCP)" validate:"required"`
-	VendorSubType    string                      `json:"vendor_sub_type" mapstructure:"vendor_sub_type" desc:"The subtype of the secret store where the secret was discovered (ASM, AKV, GSM)" validate:"required"`
-	ID               string                      `json:"id" mapstructure:"id" desc:"The unique identifier of the secret in Secrets Hub (internal). " validate:"required"`
-	OriginID         string                      `json:"origin_id" mapstructure:"origin_id" desc:"The unique identifier of the secret as defined in the secret store." validate:"required"`
-	Name             string                      `json:"name,omitempty" mapstructure:"name,omitempty" desc:"The name of the secret as defined in the secret store."`
-	StoreID          string                      `json:"store_id" mapstructure:"store_id" desc:"The unique identifier of the secret store"`
-	DiscoveredAt     string                      `json:"discovered_at" mapstructure:"discovered_at" desc:"The date and time that the secret was discovered by the Secrets Hub scan."`
-	VendorData       IdsecSecHubSecretVendorData `json:"vendor_data,omitzero" mapstructure:"vendor_data,omitzero" desc:"Data related to the secret as defined in the cloud platform."`
-	LastScannedAt    string                      `json:"last_scanned_at,omitempty" mapstructure:"last_scanned_at,omitempty" desc:"The last date and time the secret was scanned by Secrets Hub, example: 2023-07-06T15:43:48.103000+00:00"`
-	StoreName        string                      `json:"store_name,omitempty" mapstructure:"store_name,omitempty" desc:"Name of the secret store"`
-	Onboarded        bool                        `json:"onboarded,omitempty" mapstructure:"onboarded,omitempty" desc:"Indicates whether the secret is onboarded to PAM."`
-	SyncedByCyberArk bool                        `json:"synced_by_cyberark" mapstructure:"synced_by_cyberark" desc:"Indicates whether the secret has been synced by Idira. If not set, the status is unknown."`
+	VendorType    string                      `json:"vendor_type" mapstructure:"vendor_type" desc:"The vendor type of the store where the secret was found (AWS, AZURE, GCP)" validate:"required"`
+	VendorSubType string                      `json:"vendor_sub_type" mapstructure:"vendor_sub_type" desc:"The subtype of the secret store where the secret was discovered (ASM, AKV, GSM)" validate:"required"`
+	ID            string                      `json:"id" mapstructure:"id" desc:"The unique identifier of the secret in Secrets Hub (internal). " validate:"required"`
+	OriginID      string                      `json:"origin_id" mapstructure:"origin_id" desc:"The unique identifier of the secret as defined in the secret store." validate:"required"`
+	Name          string                      `json:"name,omitempty" mapstructure:"name,omitempty" desc:"The name of the secret as defined in the secret store."`
+	StoreID       string                      `json:"store_id" mapstructure:"store_id" desc:"The unique identifier of the secret store"`
+	DiscoveredAt  string                      `json:"discovered_at" mapstructure:"discovered_at" desc:"The date and time that the secret was discovered by the Secrets Hub scan."`
+	VendorData    IdsecSecHubSecretVendorData `json:"vendor_data,omitzero" mapstructure:"vendor_data,omitzero" desc:"Data related to the secret as defined in the cloud platform."`
+	LastScannedAt string                      `json:"last_scanned_at,omitempty" mapstructure:"last_scanned_at,omitempty" desc:"The last date and time the secret was scanned by Secrets Hub, example: 2023-07-06T15:43:48.103000+00:00"`
+	StoreName     string                      `json:"store_name,omitempty" mapstructure:"store_name,omitempty" desc:"Name of the secret store"`
+	// Deprecated: use OnboardData.Status instead.
+	Onboarded        bool                         `json:"onboarded,omitempty" mapstructure:"onboarded,omitempty" desc:"(Deprecated) Indicates whether the secret is onboarded to PAM. Use onboard_data.status instead."`
+	OnboardData      IdsecSecHubSecretOnboardData `json:"onboard_data,omitzero" mapstructure:"onboard_data,omitzero" desc:"The onboarding status and metadata for this secret."`
+	SyncedByCyberArk bool                         `json:"synced_by_cyberark" mapstructure:"synced_by_cyberark" desc:"Indicates whether the secret has been synced by Idira. If not set, the status is unknown."`
 }

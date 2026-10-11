@@ -7,70 +7,31 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	sechubinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/internal"
 	secretstoresmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretstores/models"
 )
 
-// mockEndpointConfig defines configuration for a single endpoint matcher.
-type mockEndpointConfig struct {
-	Matcher      func(*http.Request) bool
-	StatusCode   int
-	ResponseBody string
-	OnRequest    func(*http.Request)
-}
+// mockEndpointConfig is an alias for sechubinternal.MockEndpointConfig.
+type mockEndpointConfig = sechubinternal.MockEndpointConfig
 
 // setupMockSecretStoresService creates a mock HTTP server with the given endpoint configs
 // and returns an IdsecSecHubSecretStoresService wired to the mock server.
 func setupMockSecretStoresService(t *testing.T, configs []mockEndpointConfig) (*IdsecSecHubSecretStoresService, func()) {
 	t.Helper()
-
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		for _, config := range configs {
-			if config.Matcher(r) {
-				if config.OnRequest != nil {
-					config.OnRequest(r)
-				}
-				w.WriteHeader(config.StatusCode)
-				_, _ = w.Write([]byte(config.ResponseBody))
-				return
-			}
-		}
-
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error": "endpoint not found in mock configuration"}`))
-	}))
-
-	client := common.NewIdsecClient("", "", "", "Authorization", nil, nil, "", false)
-	client.BaseURL = testServer.URL
-
-	ispClient := &isp.IdsecISPServiceClient{
-		IdsecClient: client,
-	}
-
+	ispClient, cleanup := sechubinternal.SetupMockSecHubService(t, configs)
 	ispBase := &services.IdsecISPBaseService{}
-	v := reflect.ValueOf(ispBase).Elem()
-	clientField := v.FieldByName("client")
-	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
-	clientField.Set(reflect.ValueOf(ispClient))
-
+	sechubinternal.InjectISPClient(ispBase, ispClient)
 	svc := &IdsecSecHubSecretStoresService{
 		IdsecBaseService: &services.IdsecBaseService{
 			Logger: common.GlobalLogger,
 		},
 		IdsecISPBaseService: ispBase,
 	}
-
-	cleanup := func() {
-		testServer.Close()
-	}
-
 	return svc, cleanup
 }
 
@@ -724,10 +685,7 @@ func TestIdsecSecHubSecretStoresService_WaitForScanCompletion(t *testing.T) {
 
 			ispClient := &isp.IdsecISPServiceClient{IdsecClient: client}
 			ispBase := &services.IdsecISPBaseService{}
-			v := reflect.ValueOf(ispBase).Elem()
-			clientField := v.FieldByName("client")
-			clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
-			clientField.Set(reflect.ValueOf(ispClient))
+			sechubinternal.InjectISPClient(ispBase, ispClient)
 
 			svc := &IdsecSecHubSecretStoresService{
 				IdsecBaseService:    &services.IdsecBaseService{Logger: common.GlobalLogger},

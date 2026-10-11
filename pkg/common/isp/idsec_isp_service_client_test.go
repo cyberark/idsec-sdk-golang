@@ -749,3 +749,18 @@ func TestFromISPAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestFromISPAuth_NoTokenAndNoAuthProfile(t *testing.T) {
+	t.Parallel()
+
+	ispAuth := auth.NewIdsecISPAuth(false).(*auth.IdsecISPAuth)
+	ispAuth.ActiveProfile = &models.IdsecProfile{
+		ProfileName:  "test",
+		AuthProfiles: map[string]*authmodels.IdsecAuthProfile{},
+	}
+
+	_, err := FromISPAuth(ispAuth, "api", "-", "", nil, nil)
+	if err == nil || err.Error() != "ISP auth token is not available" {
+		t.Fatalf("Expected 'ISP auth token is not available', got %v", err)
+	}
+}

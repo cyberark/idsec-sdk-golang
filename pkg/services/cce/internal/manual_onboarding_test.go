@@ -455,7 +455,7 @@ func TestManualClient_UpdateServicesWithReconcile_UpsertsChangedServiceInput(t *
 		{ServiceName: ccemodels.SCA, Version: "0.0.4", Resources: map[string]interface{}{}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", nil)
 
 	require.NoError(t, err)
 	assertServiceNames(t, addedServices, string(ccemodels.SCA))
@@ -494,7 +494,7 @@ func TestManualClient_UpdateServicesWithReconcile_SendsResourceChange(t *testing
 		{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]interface{}{"roleArn": "arn:aws:iam::123456789012:role/ScaRoleNew"}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", nil)
 
 	require.NoError(t, err)
 	assertServiceNames(t, addedServices, string(ccemodels.SCA))
@@ -530,7 +530,7 @@ func TestManualClient_UpdateServicesWithReconcile_OnboardedServiceWithoutVersion
 		{ServiceName: ccemodels.SCA, Resources: map[string]interface{}{}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "management_group", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "management_group", nil)
 
 	require.NoError(t, err)
 	assertServiceNames(t, addedServices, string(ccemodels.SCA))
@@ -557,7 +557,7 @@ func TestManualClient_UpdateServicesWithReconcile_RemovesUndesiredServices(t *te
 		{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]interface{}{}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", nil)
 
 	require.NoError(t, err)
 	assertStringSliceContains(t, deletedServices, string(ccemodels.SCA))
@@ -608,7 +608,7 @@ func TestManualClient_UpdateServicesWithReconcile_NoChanges(t *testing.T) {
 		{ServiceName: ccemodels.SCA, Version: "0.0.4", Resources: map[string]interface{}{"roleArn": "arn:aws:iam::123456789012:role/ScaRole"}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "management_group", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "management_group", nil)
 
 	require.NoError(t, err)
 	require.False(t, postCalled, "POST should not be called when no service changed")
@@ -739,15 +739,15 @@ func TestManualClient_UpdateServicesWithReconcile_IncludesCCEVersion(t *testing.
 		},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", "4.0.0")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", common.Ptr("4.0.0"))
 
 	require.NoError(t, err)
 	require.Equal(t, "4.0.0", capturedCCEVersion, "CCE version must be included in the add-services request")
 }
 
-// TestManualClient_UpdateServicesWithReconcile_OmitsCCEVersionWhenEmpty verifies that the cceVersion
-// field is not included in the request body when empty.
-func TestManualClient_UpdateServicesWithReconcile_OmitsCCEVersionWhenEmpty(t *testing.T) {
+// TestManualClient_UpdateServicesWithReconcile_OmitsCCEVersionWhenNil verifies that the cceVersion
+// field is not included in the request body when it was not supplied (nil).
+func TestManualClient_UpdateServicesWithReconcile_OmitsCCEVersionWhenNil(t *testing.T) {
 	var hasCCEVersion bool
 
 	client, cleanup := SetupMockCCEService(t, []MockEndpointConfig{
@@ -780,10 +780,10 @@ func TestManualClient_UpdateServicesWithReconcile_OmitsCCEVersionWhenEmpty(t *te
 		},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", "")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", nil)
 
 	require.NoError(t, err)
-	require.False(t, hasCCEVersion, "CCE version should not be included when empty")
+	require.False(t, hasCCEVersion, "CCE version should not be included when nil")
 }
 
 // TestManualClient_UpdateServicesWithReconcile_CCEVersionOnlyChange verifies that when only the CCE version
@@ -818,16 +818,15 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionOnlyChange(t *testin
 
 	manual := newTestManualClient(client)
 
-	// Current has DPA with CCE version 0.0.1, desired also has DPA (no service changes), but CCE version changes to 0.1.0
+	// Current has DPA, desired also has DPA (no service changes), but a CCE version 0.1.0 is supplied
 	current := &CurrentServiceState{
-		Names:      []string{string(ccemodels.DPA)},
-		Versions:   map[string]string{string(ccemodels.DPA): "1.0.0"},
-		CCEVersion: "0.0.1",
+		Names:    []string{string(ccemodels.DPA)},
+		Versions: map[string]string{string(ccemodels.DPA): "1.0.0"},
 	}
 	desired := makeServices(string(ccemodels.DPA))
 	desired[0].Version = "1.0.0" // Same version as current to avoid service update
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", "0.1.0")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "subscription", common.Ptr("0.1.0"))
 
 	require.NoError(t, err)
 	require.True(t, postCalled, "POST must be called when CCE version changes even if no services change")
@@ -835,8 +834,8 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionOnlyChange(t *testin
 	require.Empty(t, capturedServices, "services list should be empty for CCE-only update")
 }
 
-// TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_NoAPICall verifies that when both
-// services and CCE version are unchanged, no API calls are made.
+// TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_NoAPICall verifies that when
+// services are unchanged and no CCE version is supplied (nil), no API calls are made.
 func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_NoAPICall(t *testing.T) {
 	postCalled := false
 	deleteCalled := false
@@ -860,16 +859,15 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_NoAPICall(
 
 	manual := newTestManualClient(client)
 
-	// Current has DPA with CCE version 0.1.0, desired also has DPA with same CCE version
+	// Current has DPA, desired also has DPA at the same version, and the CCE version is unchanged (nil)
 	current := &CurrentServiceState{
-		Names:      []string{string(ccemodels.DPA)},
-		Versions:   map[string]string{string(ccemodels.DPA): "1.0.0"},
-		CCEVersion: "0.1.0",
+		Names:    []string{string(ccemodels.DPA)},
+		Versions: map[string]string{string(ccemodels.DPA): "1.0.0"},
 	}
 	desired := makeServices(string(ccemodels.DPA))
 	desired[0].Version = "1.0.0" // Same version as current
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "0.1.0")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", nil)
 
 	require.NoError(t, err)
 	require.False(t, postCalled, "POST should not be called when services and CCE version are unchanged")
@@ -914,18 +912,17 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_WithServic
 
 	manual := newTestManualClient(client)
 
-	// Current has DPA, desired has DPA + SCA (adding SCA), CCE version unchanged at 0.1.0
+	// Current has DPA, desired has DPA + SCA (adding SCA), CCE version unchanged (nil)
 	current := &CurrentServiceState{
-		Names:      []string{string(ccemodels.DPA)},
-		Versions:   map[string]string{string(ccemodels.DPA): "1.0.0"},
-		CCEVersion: "0.1.0",
+		Names:    []string{string(ccemodels.DPA)},
+		Versions: map[string]string{string(ccemodels.DPA): "1.0.0"},
 	}
 	desired := []ccemodels.IdsecCCEServiceInput{
 		{ServiceName: ccemodels.DPA, Version: "1.0.0", Resources: map[string]interface{}{}},
 		{ServiceName: ccemodels.SCA, Resources: map[string]interface{}{}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "0.1.0")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", nil)
 
 	require.NoError(t, err)
 	require.Len(t, addedServices, 1, "only SCA should be added")
@@ -935,10 +932,10 @@ func TestManualClient_UpdateServicesWithReconcile_CCEVersionUnchanged_WithServic
 }
 
 // TestManualClient_UpdateServicesWithReconcile_SecondServiceOmitsDeployedCCEVersion onboards one service
-// together with a CCE version, then onboards a second service while Terraform passes the (computed)
-// deployed CCE version back unchanged. The first request must carry the cceVersion; the second must not.
-// The API treats the presence of a cceVersion as a request to upgrade 'cce' and validates it against
-// the upgrade feature flag, so echoing it unchanged fails with 501 FEATURE_NOT_IMPLEMENTED.
+// together with a CCE version, then onboards a second service with the CCE version unchanged, which the
+// Terraform provider (UpdateOnlyModified) passes as nil. The first request must carry the cceVersion; the
+// second must not. The API treats the presence of a cceVersion as a request to upgrade 'cce' and validates
+// it against the upgrade feature flag, so echoing it unchanged fails with 501 FEATURE_NOT_IMPLEMENTED.
 func TestManualClient_UpdateServicesWithReconcile_SecondServiceOmitsDeployedCCEVersion(t *testing.T) {
 	var postBodies []map[string]interface{}
 
@@ -963,17 +960,16 @@ func TestManualClient_UpdateServicesWithReconcile_SecondServiceOmitsDeployedCCEV
 
 	// Step 1: onboard dpa together with CCE 0.0.1 on an entity that has nothing deployed yet.
 	dpa := ccemodels.IdsecCCEServiceInput{ServiceName: ccemodels.DPA, Version: "0.0.3", Resources: map[string]interface{}{}}
-	err := manual.UpdateServicesWithReconcile("test-id", &CurrentServiceState{}, []ccemodels.IdsecCCEServiceInput{dpa}, "subscription", "0.0.1")
+	err := manual.UpdateServicesWithReconcile("test-id", &CurrentServiceState{}, []ccemodels.IdsecCCEServiceInput{dpa}, "subscription", common.Ptr("0.0.1"))
 	require.NoError(t, err)
 
-	// Step 2: dpa and CCE 0.0.1 are now deployed; onboard sca while the same CCE version is passed back.
+	// Step 2: dpa and CCE 0.0.1 are now deployed; onboard sca with the CCE version unchanged (nil).
 	deployed := &CurrentServiceState{
-		Names:      []string{string(ccemodels.DPA)},
-		Versions:   map[string]string{string(ccemodels.DPA): "0.0.3"},
-		CCEVersion: "0.0.1",
+		Names:    []string{string(ccemodels.DPA)},
+		Versions: map[string]string{string(ccemodels.DPA): "0.0.3"},
 	}
 	sca := ccemodels.IdsecCCEServiceInput{ServiceName: ccemodels.SCA, Version: "0.0.3", Resources: map[string]interface{}{}}
-	err = manual.UpdateServicesWithReconcile("test-id", deployed, []ccemodels.IdsecCCEServiceInput{dpa, sca}, "subscription", "0.0.1")
+	err = manual.UpdateServicesWithReconcile("test-id", deployed, []ccemodels.IdsecCCEServiceInput{dpa, sca}, "subscription", nil)
 	require.NoError(t, err)
 
 	require.Len(t, postBodies, 2, "each onboarding step must trigger exactly one add-services call")
@@ -1017,80 +1013,18 @@ func TestManualClient_UpdateServicesWithReconcile_ServiceUpgradeWithCCEVersionCh
 	manual := newTestManualClient(client)
 
 	current := &CurrentServiceState{
-		Names:      []string{string(ccemodels.SecretsHub)},
-		Versions:   map[string]string{string(ccemodels.SecretsHub): "0.0.7"},
-		CCEVersion: "0.0.1",
+		Names:    []string{string(ccemodels.SecretsHub)},
+		Versions: map[string]string{string(ccemodels.SecretsHub): "0.0.7"},
 	}
 	desired := []ccemodels.IdsecCCEServiceInput{
 		{ServiceName: ccemodels.SecretsHub, Version: "0.0.8", Resources: map[string]interface{}{}},
 	}
 
-	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", "0.1.0")
+	err := manual.UpdateServicesWithReconcile("test-id", current, desired, "entra", common.Ptr("0.1.0"))
 
 	require.NoError(t, err)
 	require.Len(t, capturedServices, 1, "the upgraded service must be sent")
 	require.Equal(t, "0.1.0", capturedCCEVersion, "a changed CCE version must be sent")
-}
-
-// TestExtractCCEVersion verifies the ExtractCCEVersion helper correctly extracts
-// the cce_version field from a JSON response.
-func TestExtractCCEVersion(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected string
-	}{
-		{
-			name: "valid_cce_version",
-			input: map[string]interface{}{
-				"id":          "onboarding-123",
-				"services":    []interface{}{"dpa", "sca"},
-				"cce_version": "0.1.0",
-			},
-			expected: "0.1.0",
-		},
-		{
-			name: "missing_cce_version",
-			input: map[string]interface{}{
-				"id":       "onboarding-123",
-				"services": []interface{}{"dpa"},
-			},
-			expected: "",
-		},
-		{
-			name: "empty_cce_version",
-			input: map[string]interface{}{
-				"id":          "onboarding-123",
-				"cce_version": "",
-			},
-			expected: "",
-		},
-		{
-			name: "cce_version_wrong_type",
-			input: map[string]interface{}{
-				"id":          "onboarding-123",
-				"cce_version": 123, // wrong type
-			},
-			expected: "",
-		},
-		{
-			name:     "nil_input",
-			input:    nil,
-			expected: "",
-		},
-		{
-			name:     "non_map_input",
-			input:    "not a map",
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ExtractCCEVersion(tt.input)
-			require.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 // TestExtractServiceNames verifies the ExtractServiceNames helper correctly extracts

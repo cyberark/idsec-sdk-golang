@@ -11,11 +11,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	api "github.com/cyberark/idsec-sdk-golang/pkg"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
+	"github.com/cyberark/idsec-sdk-golang/pkg/models"
+	authmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/auth"
+	commonmodels "github.com/cyberark/idsec-sdk-golang/pkg/models/common"
 )
 
 // setTestBaseURL sets FAS_BASE_URL for the duration of the test. Restore with the returned cleanup func.
@@ -175,4 +179,63 @@ func TestReport_NoToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "FAS report sent successfully", msg)
 	assert.Empty(t, authHeader)
+}
+
+// reportTestISPAuth returns an ISP authenticator holding the given token with an active
+// auth profile, so LoadAuthentication would act on its state (no keyring, no network).
+func reportTestISPAuth(token *authmodels.IdsecToken) *auth.IdsecISPAuth {
+	authProfile := &authmodels.IdsecAuthProfile{Username: "user@test.com", AuthMethod: authmodels.IdentityServiceUser}
+	ispAuth := auth.NewIdsecISPAuth(false).(*auth.IdsecISPAuth)
+	ispAuth.Token = token
+	ispAuth.ActiveProfile = &models.IdsecProfile{
+		ProfileName:  "test",
+		AuthProfiles: map[string]*authmodels.IdsecAuthProfile{"isp": authProfile},
+	}
+	ispAuth.ActiveAuthProfile = authProfile
+	return ispAuth
+}
+
+// An expired token must be skipped without clearing the shared authenticator's token;
+// otherwise every later FromISPAuth fails with "ISP auth token is not available".
+func TestReportWithAPI_ExpiredTokenLeavesAuthStateIntact(t *testing.T) {
+	expired := &authmodels.IdsecToken{
+		Token:     "expired-jwt",
+		TokenType: authmodels.JWT,
+		ExpiresIn: commonmodels.IdsecRFC3339Time(time.Now().Add(-time.Minute)),
+	}
+	ispAuth := reportTestISPAuth(expired)
+	apiInstance, err := api.NewIdsecAPI([]auth.IdsecAuth{ispAuth}, nil)
+	require.NoError(t, err)
+
+	msg, err := ReportWithAPI(context.Background(), apiInstance, "m", nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "FAS report skipped: token expired", msg)
+	assert.Same(t, expired, ispAuth.GetToken(), "reporter must not modify the authenticator's token")
+}
+
+func TestReportWithAPI_SendsValidToken(t *testing.T) {
+	var authHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	defer setTestBaseURL(t, server.URL)()
+
+	valid := &authmodels.IdsecToken{
+		Token:     "valid-jwt",
+		TokenType: authmodels.JWT,
+		ExpiresIn: commonmodels.IdsecRFC3339Time(time.Now().Add(time.Hour)),
+	}
+	ispAuth := reportTestISPAuth(valid)
+	apiInstance, err := api.NewIdsecAPI([]auth.IdsecAuth{ispAuth}, nil)
+	require.NoError(t, err)
+
+	msg, err := ReportWithAPI(context.Background(), apiInstance, "m", nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "FAS report sent successfully", msg)
+	assert.Equal(t, "Bearer valid-jwt", authHeader)
+	assert.Same(t, valid, ispAuth.GetToken())
 }

@@ -153,6 +153,7 @@ func setAccountNameIfMissing(addAccount *accountsmodels.IdsecPamshAddAccount) {
 	}
 }
 
+// Get method is intended for Terraform use only.
 // Get retrieves an IdsecPamshAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Get%20Account%20Details.htm?
 func (s *IdsecPamshAccountsService) Get(getAccount *accountsmodels.IdsecPamshGetAccount) (*accountsmodels.IdsecPamshAccount, error) {
@@ -192,6 +193,7 @@ func (s *IdsecPamshAccountsService) Get(getAccount *accountsmodels.IdsecPamshGet
 	return s.parseAccountResponse(response.Body)
 }
 
+// Create method is intended for Terraform use only.
 // Create adds a new IdsecPamshAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Add%20Account%20v10.htm?
 func (s *IdsecPamshAccountsService) Create(addAccount *accountsmodels.IdsecPamshAddAccount) (*accountsmodels.IdsecPamshAccount, error) {
@@ -239,6 +241,7 @@ func (s *IdsecPamshAccountsService) Create(addAccount *accountsmodels.IdsecPamsh
 	return account, nil
 }
 
+// Update method is intended for Terraform use only.
 // Update updates an existing IdsecPamshAccount.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/SDK/UpdateAccount%20v10.htm
 func (s *IdsecPamshAccountsService) Update(updateAccount *accountsmodels.IdsecPamshUpdateAccount) (*accountsmodels.IdsecPamshAccount, error) {
@@ -288,6 +291,7 @@ func (s *IdsecPamshAccountsService) Update(updateAccount *accountsmodels.IdsecPa
 	return account, nil
 }
 
+// Delete method is intended for Terraform use only.
 // Delete deletes an existing account.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Delete%20Account.htm
 func (s *IdsecPamshAccountsService) Delete(deleteAccount *accountsmodels.IdsecPamshDeleteAccount) error {

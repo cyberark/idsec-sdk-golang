@@ -2,10 +2,14 @@ package k8s
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
@@ -16,10 +20,24 @@ import (
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
+// testMakeEKSToken builds a synthetic k8s-aws-v1. bearer token whose embedded
+// presigned URL carries the supplied X-Amz-Date and X-Amz-Expires values.
+// The signature field is intentionally fake — only the query parameters are parsed.
+func testMakeEKSToken(amzDate string, expiresSecs int) string {
+	rawURL := fmt.Sprintf(
+		"https://sts.us-east-1.amazonaws.com/?Action=GetCallerIdentity&X-Amz-Algorithm=AWS4-HMAC-SHA256"+
+			"&X-Amz-Date=%s&X-Amz-Expires=%d&X-Amz-SignedHeaders=host%%3Bx-k8s-aws-id&X-Amz-Signature=fakesig000",
+		amzDate, expiresSecs,
+	)
+	return eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(rawURL))
+}
+
 // mockElevateResponse is the confirmed JSON shape returned by the SCA Elevate API for AWS.
-// accessCredentials is a JSON-encoded string (double-encoded).
+// eksToken is a synthetic bearer token with a far-future expiry for test stability.
 // targetId is the EKS cluster ARN from which region and cluster name are parsed.
-const mockElevateResponse = `{
+var (
+	testEKSToken        = testMakeEKSToken("20991231T235959Z", 899)
+	mockElevateResponse = fmt.Sprintf(`{
   "response": {
     "organizationId": "general",
     "csp": "AWS",
@@ -28,12 +46,14 @@ const mockElevateResponse = `{
         "workspaceId": "123456789012",
         "roleId": "arn:aws:iam::123456789012:role/k8s_sca_test_role",
         "sessionId": "11111111-2222-3333-4444-555555555555",
-        "accessCredentials": "{\"aws_access_key\": \"DUMMYACCESSKEYID00001\", \"aws_secret_access_key\": \"dummy-secret-key\", \"aws_session_token\": \"dummy-session-token\"}",
+        "sessionExpTime": "2099-12-31T23:59:59Z",
+        "eksToken": "%s",
         "targetId": "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster"
       }
     ]
   }
-}`
+}`, testEKSToken)
+)
 
 // validFQDNReq is a reusable valid elevate request using the FQDN path (as used by kubeconfig).
 var validFQDNReq = k8smodels.IdsecSCAK8sElevateKubectlRequest{
@@ -149,7 +169,7 @@ func TestElevate_Success_AWS(t *testing.T) {
 	require.Equal(t, "123456789012", result.WorkspaceID)
 	require.Equal(t, "arn:aws:iam::123456789012:role/k8s_sca_test_role", result.RoleID)
 	require.Equal(t, "11111111-2222-3333-4444-555555555555", result.SessionID)
-	require.NotEmpty(t, result.AccessCredentials)
+	require.NotEmpty(t, result.EKSToken)
 	// TargetID is returned by the API and used to derive region + cluster name
 	require.Equal(t, "arn:aws:eks:us-east-1:123456789012:cluster/k8s-demo-cluster", result.TargetID)
 }
@@ -521,31 +541,101 @@ func TestAzureTokenProvider_GenerateToken_NilContext(t *testing.T) {
 	require.Contains(t, err.Error(), "cluster context cannot be nil")
 }
 
-func TestAWSTokenProvider_GenerateToken_EmptyAccessCredentials(t *testing.T) {
+func TestAWSTokenProvider_GenerateToken_Success(t *testing.T) {
 	p := &AWSTokenProvider{}
-	result := &k8smodels.IdsecSCAK8sElevateResult{AccessCredentials: ""}
-	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
-	_, err := p.GenerateToken(result, ctx)
+	result := &k8smodels.IdsecSCAK8sElevateResult{EKSToken: testEKSToken}
+	cred, err := p.GenerateToken(result, &IdsecSCAK8sClusterContext{})
+	require.NoError(t, err)
+	require.NotNil(t, cred)
+	require.Equal(t, testEKSToken, cred.Status.Token)
+	require.NotEmpty(t, cred.Status.ExpirationTimestamp)
+	exp, parseErr := time.Parse(time.RFC3339, cred.Status.ExpirationTimestamp)
+	require.NoError(t, parseErr)
+	require.True(t, exp.After(time.Now()), "ExpirationTimestamp should be in the future")
+}
+
+// When eksToken is absent, GenerateToken falls back to GenerateEKSTokenFromAccessCredentials;
+// with accessCredentials also empty that fallback's own validation error surfaces.
+func TestAWSTokenProvider_GenerateToken_EmptyEKSToken_FallsBackAndFails(t *testing.T) {
+	p := &AWSTokenProvider{}
+	result := &k8smodels.IdsecSCAK8sElevateResult{}
+	_, err := p.GenerateToken(result, &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "accessCredentials is empty")
 }
 
-func TestAWSTokenProvider_GenerateToken_InvalidJSON(t *testing.T) {
+// When eksToken is absent but accessCredentials is populated (AWS IDC
+// permission-set path), GenerateToken dispatches to
+// GenerateEKSTokenFromAccessCredentials and succeeds.
+func TestAWSTokenProvider_GenerateToken_EmptyEKSToken_FallsBackAndSucceeds(t *testing.T) {
 	p := &AWSTokenProvider{}
+	result := &k8smodels.IdsecSCAK8sElevateResult{
+		AccessCredentials: `{"aws_access_key":"key","aws_secret_access_key":"secret","aws_session_token":"token"}`,
+	}
+	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
+	cred, err := p.GenerateToken(result, ctx)
+	require.NoError(t, err)
+	require.NotNil(t, cred)
+	require.True(t, strings.HasPrefix(cred.Status.Token, eksTokenPrefix))
+}
+
+func TestAWSTokenProvider_GenerateToken_InvalidEKSToken(t *testing.T) {
+	p := &AWSTokenProvider{}
+	result := &k8smodels.IdsecSCAK8sElevateResult{EKSToken: "k8s-aws-v1.!!!notvalidbase64"}
+	_, err := p.GenerateToken(result, &IdsecSCAK8sClusterContext{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "eksToken")
+}
+
+// ---------------------------------------------------------------------------
+// GenerateEKSTokenFromAccessCredentials tests (IDC client-side presign path)
+// ---------------------------------------------------------------------------
+
+func TestGenerateEKSTokenFromAccessCredentials_NilResult(t *testing.T) {
+	_, err := GenerateEKSTokenFromAccessCredentials(nil, &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "c"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "elevate result cannot be nil")
+}
+
+func TestGenerateEKSTokenFromAccessCredentials_NilCtx(t *testing.T) {
+	result := &k8smodels.IdsecSCAK8sElevateResult{AccessCredentials: `{"aws_access_key":"k","aws_secret_access_key":"s"}`}
+	_, err := GenerateEKSTokenFromAccessCredentials(result, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cluster context cannot be nil")
+}
+
+func TestGenerateEKSTokenFromAccessCredentials_EmptyAccessCredentials(t *testing.T) {
+	result := &k8smodels.IdsecSCAK8sElevateResult{}
+	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
+	_, err := GenerateEKSTokenFromAccessCredentials(result, ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "accessCredentials is empty")
+}
+
+func TestGenerateEKSTokenFromAccessCredentials_InvalidJSON(t *testing.T) {
 	result := &k8smodels.IdsecSCAK8sElevateResult{AccessCredentials: "{not-valid-json}"}
 	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
-	_, err := p.GenerateToken(result, ctx)
+	_, err := GenerateEKSTokenFromAccessCredentials(result, ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to parse AWS access credentials")
 }
 
-func TestAWSTokenProvider_GenerateToken_MissingAccessKey(t *testing.T) {
-	p := &AWSTokenProvider{}
+func TestGenerateEKSTokenFromAccessCredentials_MissingAccessKey(t *testing.T) {
 	result := &k8smodels.IdsecSCAK8sElevateResult{
-		AccessCredentials: `{"aws_access_key": "", "aws_secret_access_key": "secret", "aws_session_token": "token"}`,
+		AccessCredentials: `{"aws_access_key":"","aws_secret_access_key":"secret","aws_session_token":"token"}`,
 	}
 	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
-	_, err := p.GenerateToken(result, ctx)
+	_, err := GenerateEKSTokenFromAccessCredentials(result, ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing")
+}
+
+func TestGenerateEKSTokenFromAccessCredentials_MissingSecretKey(t *testing.T) {
+	result := &k8smodels.IdsecSCAK8sElevateResult{
+		AccessCredentials: `{"aws_access_key":"key","aws_secret_access_key":"","aws_session_token":"token"}`,
+	}
+	ctx := &IdsecSCAK8sClusterContext{Region: "us-east-1", ClusterID: "my-cluster"}
+	_, err := GenerateEKSTokenFromAccessCredentials(result, ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing")
 }

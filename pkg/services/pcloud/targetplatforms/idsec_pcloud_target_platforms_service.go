@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -30,6 +32,14 @@ const (
 	deactivateTargetPlatformURL = "api/platforms/targets/%d/deactivate"
 )
 
+const (
+	// maxTargetPlatforms is the supported maximum number of target platforms per tenant.
+	maxTargetPlatforms = 800
+	// targetPlatformsCountRefreshInterval is how long the cached platform count is trusted before
+	// it is re-fetched, so platforms created or deleted outside this service are picked up.
+	targetPlatformsCountRefreshInterval = 30 * time.Second
+)
+
 // IdsecPCloudTargetPlatformsService is the service for managing pCloud Target Platforms.
 type IdsecPCloudTargetPlatformsService struct {
 	*services.IdsecBaseService
@@ -38,6 +48,14 @@ type IdsecPCloudTargetPlatformsService struct {
 	doGet    func(ctx context.Context, path string, params interface{}) (*http.Response, error)
 	doPost   func(ctx context.Context, path string, body interface{}) (*http.Response, error)
 	doDelete func(ctx context.Context, path string, body interface{}, params interface{}) (*http.Response, error)
+
+	// importLimitMu serializes the platform-count check with the import request, so concurrent
+	// imports (e.g. Terraform parallelism) cannot push the tenant past maxTargetPlatforms.
+	// It also guards cachedCount and countRefreshedAt.
+	importLimitMu    sync.Mutex
+	cachedCount      int
+	countRefreshedAt time.Time
+	now              func() time.Time
 }
 
 // NewIdsecPCloudTargetPlatformsService creates a new instance of IdsecPCloudTargetPlatformsService.
@@ -408,6 +426,12 @@ func (s *IdsecPCloudTargetPlatformsService) Delete(deleteTargetPlatform *targetp
 		return fmt.Errorf("failed to delete target platform - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 
+	s.importLimitMu.Lock()
+	if s.cachedCount > 0 {
+		s.cachedCount--
+	}
+	s.importLimitMu.Unlock()
+
 	return nil
 }
 
@@ -439,9 +463,89 @@ func (s *IdsecPCloudTargetPlatformsService) Stats() (*targetplatformsmodels.Idse
 	return stats, nil
 }
 
+func (s *IdsecPCloudTargetPlatformsService) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// refreshTargetPlatformsCount re-fetches the target platform count. Caller must hold importLimitMu.
+func (s *IdsecPCloudTargetPlatformsService) refreshTargetPlatformsCount() error {
+	stats, err := s.Stats()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve platform count before import: %w", err)
+	}
+	s.cachedCount = stats.TargetPlatformsCount
+	s.countRefreshedAt = s.currentTime()
+	return nil
+}
+
+// checkTargetPlatformsLimit verifies there is room for one more target platform, using the cached
+// count while it is fresh. Caller must hold importLimitMu.
+func (s *IdsecPCloudTargetPlatformsService) checkTargetPlatformsLimit() error {
+	refreshed := false
+	if s.countRefreshedAt.IsZero() || s.currentTime().Sub(s.countRefreshedAt) >= targetPlatformsCountRefreshInterval {
+		if err := s.refreshTargetPlatformsCount(); err != nil {
+			return err
+		}
+		refreshed = true
+	}
+	// Confirm with a fresh count before rejecting, in case platforms were deleted elsewhere.
+	if s.cachedCount >= maxTargetPlatforms && !refreshed {
+		if err := s.refreshTargetPlatformsCount(); err != nil {
+			return err
+		}
+	}
+	if s.cachedCount >= maxTargetPlatforms {
+		return fmt.Errorf(
+			"cannot import platform: the current count (%d) has reached the supported maximum of %d platforms; "+
+				"see https://docs.cyberark.com/privilege-cloud-secrets-rotation/latest/en/content/pasimp/manage-platforms.htm"+
+				"#Platformconsiderationsandrequirements for details",
+			s.cachedCount, maxTargetPlatforms,
+		)
+	}
+	return nil
+}
+
+// importTargetPlatformZip checks the platform limit and posts the import request while holding importLimitMu.
+func (s *IdsecPCloudTargetPlatformsService) importTargetPlatformZip(requestBody map[string]interface{}) (map[string]interface{}, error) {
+	s.importLimitMu.Lock()
+	defer s.importLimitMu.Unlock()
+
+	if err := s.checkTargetPlatformsLimit(); err != nil {
+		return nil, err
+	}
+
+	response, err := s.postOperation()(context.Background(), importPlatformURL, requestBody)
+	if err != nil {
+		// The import may or may not have happened; force a re-count next time.
+		s.countRefreshedAt = time.Time{}
+		return nil, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			common.GlobalLogger.Warning("Error closing response body")
+		}
+	}(response.Body)
+
+	if response.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("failed to import target platform - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	s.cachedCount++
+
+	resultJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	return resultJSON.(map[string]interface{}), nil
+}
+
 // Import imports a target platform from a zip file.
 //
-// Tries to import a target platform zip data.
+// Tries to import a target platform zip data. Imports are rejected once the tenant
+// has reached maxTargetPlatforms target platforms.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PrivCloud-SS/Latest/en/Content/WebServices/ImportPlatform.htm
 func (s *IdsecPCloudTargetPlatformsService) Import(importPlatform *targetplatformsmodels.IdsecPCloudImportTargetPlatform) (*targetplatformsmodels.IdsecPCloudTargetPlatform, error) {
 	s.Logger.Info("Importing target platform from [%s]", importPlatform.PlatformZipPath)
@@ -461,27 +565,11 @@ func (s *IdsecPCloudTargetPlatformsService) Import(importPlatform *targetplatfor
 		"ImportFile": encodedData,
 	}
 
-	response, err := s.postOperation()(context.Background(), importPlatformURL, requestBody)
-	if err != nil {
-		return nil, err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			common.GlobalLogger.Warning("Error closing response body")
-		}
-	}(response.Body)
-
-	if response.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("failed to import target platform - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
-	}
-
-	resultJSON, err := common.DeserializeJSONSnake(response.Body)
+	resultMap, err := s.importTargetPlatformZip(requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	resultMap := resultJSON.(map[string]interface{})
 	platformID, ok := resultMap["platform_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("failed to parse platform id from import response")

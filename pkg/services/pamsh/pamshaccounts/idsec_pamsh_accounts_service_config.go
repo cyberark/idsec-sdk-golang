@@ -11,7 +11,7 @@ var ServiceConfig = services.IdsecServiceConfig{
 	ServiceName:                "pamsh-accounts",
 	RequiredAuthenticatorNames: []string{"pvwa"},
 	OptionalAuthenticatorNames: []string{},
-	Enabled:                    enabled(false),
+	Enabled:                    enabled(true),
 	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
 	ActionSchemas:              svcactions.ActionToSchemaMap,
 }

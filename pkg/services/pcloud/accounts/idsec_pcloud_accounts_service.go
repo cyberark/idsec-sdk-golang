@@ -932,7 +932,7 @@ func buildUpdateOperations(updateAccount *accountsmodels.IdsecPCloudUpdateAccoun
 	if updateAccount.PlatformAccountProperties != nil {
 		// ConvertToCamelCase reproduces what SerializeJSONCamel did to this map, inner keys
 		// included; the tenant is matched against those camelCased property names today.
-		replace("/platformAccountProperties", common.ConvertToCamelCase(updateAccount.PlatformAccountProperties, nil))
+		replace("/platformAccountProperties", common.ConvertToCamelCase(*updateAccount.PlatformAccountProperties, nil))
 	}
 	if updateAccount.AutomaticManagementEnabled != nil {
 		replace("/secretManagement/automaticManagementEnabled", *updateAccount.AutomaticManagementEnabled)
@@ -941,7 +941,7 @@ func buildUpdateOperations(updateAccount *accountsmodels.IdsecPCloudUpdateAccoun
 		replace("/secretManagement/manualManagementReason", *updateAccount.ManualManagementReason)
 	}
 	if updateAccount.RemoteMachines != nil {
-		replace("/remoteMachinesAccess/remoteMachines", strings.Join(updateAccount.RemoteMachines, ";"))
+		replace("/remoteMachinesAccess/remoteMachines", strings.Join(*updateAccount.RemoteMachines, ";"))
 	}
 	if updateAccount.AccessRestrictedToRemoteMachines != nil {
 		replace("/remoteMachinesAccess/accessRestrictedToRemoteMachines", *updateAccount.AccessRestrictedToRemoteMachines)

@@ -114,6 +114,9 @@ func (s *IdsecSIASecretsVMService) populateFromSecretDetailsJSON(secretDetails s
 			if netbios, ok := dcData["domain_controller_netbios"].(string); ok {
 				public.DomainControllerNetbios = netbios
 			}
+			if automaticDiscovery, ok := dcData["domain_controller_automatic_discovery"].(bool); ok {
+				public.DomainControllerAutomaticDiscovery = &automaticDiscovery
+			}
 			if useLdaps, ok := dcData["domain_controller_use_ldaps"].(bool); ok {
 				public.DomainControllerUseLdaps = &useLdaps
 			}
@@ -122,6 +125,9 @@ func (s *IdsecSIASecretsVMService) populateFromSecretDetailsJSON(secretDetails s
 			}
 			if ldapsCert, ok := dcData["domain_controller_ldaps_certificate"].(string); ok {
 				public.DomainControllerLdapsCertificate = ldapsCert
+			}
+			if loadAll, ok := dcData["domain_controller_ldaps_load_all_certificates"].(bool); ok {
+				public.DomainControllerLdapsLoadAllCertificates = &loadAll
 			}
 		}
 		if location, ok := ephemeralData["ephemeral_domain_user_location"].(string); ok {
@@ -136,6 +142,9 @@ func (s *IdsecSIASecretsVMService) populateFromSecretDetailsJSON(secretDetails s
 			}
 			if cert, ok := winrmData["winrm_certificate"].(string); ok {
 				public.WinrmCertificate = cert
+			}
+			if loadAll, ok := winrmData["winrm_load_all_certificates"].(bool); ok {
+				public.WinrmLoadAllCertificates = &loadAll
 			}
 		}
 	}

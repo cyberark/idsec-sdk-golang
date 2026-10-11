@@ -268,7 +268,8 @@ func (a *IdsecAuthBase) IsAuthenticated(profile *models.IdsecProfile) bool {
 //
 // The token is computed into a local variable and published exactly once at the end so that
 // concurrent readers (via GetToken) never observe a transiently-nil token while a cache load
-// or network refresh is in progress.
+// or network refresh is in progress. An expired or missing result is returned to the caller
+// but never clears the stored token, so other clients sharing the authenticator are unaffected.
 //
 // When refreshAuth is true the token is only re-authenticated if it is at (or within the grace
 // window of) its client-side expiry. To force a genuine re-authentication regardless of the
@@ -370,10 +371,11 @@ func (a *IdsecAuthBase) loadAuthentication(profile *models.IdsecProfile, refresh
 	if token != nil && time.Time(token.ExpiresIn).Before(time.Now()) {
 		token = nil
 	}
+	// The authenticator is shared by every service client, so an expired or missing token is
+	// reported to this caller only. Clearing the shared state would make FromISPAuth fail before
+	// any request is sent, and the client's 401 refresh path is what recovers a stale token.
 	if token != nil {
 		a.setState(token, profile, authProfile)
-	} else {
-		a.setState(nil, nil, nil)
 	}
 	return token, nil
 }

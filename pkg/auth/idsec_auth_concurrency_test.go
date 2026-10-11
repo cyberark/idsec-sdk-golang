@@ -144,3 +144,66 @@ func TestLoadAuthentication_NoKeyringPreservesInMemoryToken(t *testing.T) {
 		t.Errorf("refresh should not have been attempted for a valid, non-expired in-memory token")
 	}
 }
+
+// TestLoadAuthentication_UnusableResultKeepsSharedToken guards against LoadAuthentication clearing
+// the shared token when it ends up without a valid one. The authenticator is shared by every service
+// client, so clearing it made every later FromISPAuth fail with "ISP auth token is not available"
+// before any request was sent, bypassing the 401 refresh path (DVP-11594).
+func TestLoadAuthentication_UnusableResultKeepsSharedToken(t *testing.T) {
+	tests := []struct {
+		name        string
+		refreshAuth bool
+		refreshed   func() *auth.IdsecToken
+	}{
+		{
+			name:        "read_only_load",
+			refreshAuth: false,
+		},
+		{
+			name:        "refresh_returns_nil",
+			refreshAuth: true,
+			refreshed:   func() *auth.IdsecToken { return nil },
+		},
+		{
+			name:        "refresh_returns_expired_token",
+			refreshAuth: true,
+			refreshed: func() *auth.IdsecToken {
+				return CreateTestToken("still_expired", time.Now().Add(-time.Minute), "")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAuth := &MockIdsecAuth{
+				AuthenticatorNameFunc: func() string { return "mock_auth" },
+				PerformRefreshAuthenticationFunc: func(profile *models.IdsecProfile, authProfile *auth.IdsecAuthProfile, token *auth.IdsecToken) (*auth.IdsecToken, error) {
+					if tt.refreshed == nil {
+						t.Fatal("refresh should not be attempted for a read-only load")
+					}
+					return tt.refreshed(), nil
+				},
+			}
+			base := NewIdsecAuthBase(false, "test", mockAuth)
+			profile := CreateTestProfile("test", "mock_auth", "user1")
+			authProfile := &auth.IdsecAuthProfile{
+				Username:           "user1",
+				AuthMethod:         auth.Direct,
+				AuthMethodSettings: auth.DirectIdsecAuthMethodSettings{Endpoint: "https://test.example.com"},
+			}
+			expired := CreateTestToken("expired_token", time.Now().Add(-time.Minute), "")
+			base.setState(expired, profile, authProfile)
+
+			got, err := base.LoadAuthentication(nil, tt.refreshAuth)
+			if err != nil {
+				t.Fatalf("LoadAuthentication returned error: %v", err)
+			}
+			if got != nil {
+				t.Errorf("expected no usable token to be returned, got %+v", got)
+			}
+			if base.GetToken() != expired {
+				t.Errorf("expected the shared token to be kept, got %+v", base.GetToken())
+			}
+		})
+	}
+}

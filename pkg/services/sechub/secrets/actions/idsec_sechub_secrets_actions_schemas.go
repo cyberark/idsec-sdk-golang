@@ -4,7 +4,8 @@ import sechubsecrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/s
 
 // ActionToSchemaMap is a map that defines the mapping between Sec Hub secrets action names and their corresponding schema types.
 var ActionToSchemaMap = map[string]interface{}{
-	"get":     nil,
-	"list-by": &sechubsecrets.IdsecSecHubSecretsFilter{},
-	"stats":   nil,
+	"get":                       nil,
+	"list-by":                   &sechubsecrets.IdsecSecHubSecretsFilter{},
+	"stats":                     nil,
+	"find-by-name-and-store-id": &sechubsecrets.IdsecSecHubFindSecretByNameAndStoreID{},
 }

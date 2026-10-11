@@ -6,6 +6,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secrets"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretsonboarding"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretstores"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/serviceinfo"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/syncpolicies"
@@ -13,13 +14,14 @@ import (
 
 // IdsecSecHubAPI is a struct that provides access to the Idsec SecHub API as a wrapped set of services.
 type IdsecSecHubAPI struct {
-	configurationService *configurations.IdsecSecHubConfigurationService
-	filtersService       *filters.IdsecSecHubFiltersService
-	scansService         *scans.IdsecSecHubScansService
-	serviceInfoService   *serviceinfo.IdsecSecHubServiceInfoService
-	secretsService       *secrets.IdsecSecHubSecretsService
-	secretStoresService  *secretstores.IdsecSecHubSecretStoresService
-	syncPoliciesService  *syncpolicies.IdsecSecHubSyncPoliciesService
+	configurationService    *configurations.IdsecSecHubConfigurationService
+	filtersService          *filters.IdsecSecHubFiltersService
+	scansService            *scans.IdsecSecHubScansService
+	serviceInfoService      *serviceinfo.IdsecSecHubServiceInfoService
+	secretsService          *secrets.IdsecSecHubSecretsService
+	secretStoresService     *secretstores.IdsecSecHubSecretStoresService
+	syncPoliciesService     *syncpolicies.IdsecSecHubSyncPoliciesService
+	secretOnboardingService *secretsonboarding.IdsecSecHubSecretOnboardingService
 }
 
 // NewIdsecSecHubAPI creates a new instance of IdsecSecHubAPI with the provided IdsecISPAuth.
@@ -53,14 +55,19 @@ func NewIdsecSecHubAPI(ispAuth *auth.IdsecISPAuth) (*IdsecSecHubAPI, error) {
 	if err != nil {
 		return nil, err
 	}
+	secretOnboardingService, err := secretsonboarding.NewIdsecSecHubSecretOnboardingService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	return &IdsecSecHubAPI{
-		serviceInfoService:   serviceInfoService,
-		configurationService: configurationService,
-		filtersService:       filtersService,
-		scansService:         scansService,
-		secretStoresService:  secretStoresService,
-		secretsService:       secretsService,
-		syncPoliciesService:  syncPoliciesService,
+		serviceInfoService:      serviceInfoService,
+		configurationService:    configurationService,
+		filtersService:          filtersService,
+		scansService:            scansService,
+		secretStoresService:     secretStoresService,
+		secretsService:          secretsService,
+		syncPoliciesService:     syncPoliciesService,
+		secretOnboardingService: secretOnboardingService,
 	}, nil
 }
 
@@ -97,4 +104,9 @@ func (api *IdsecSecHubAPI) ServiceInfo() *serviceinfo.IdsecSecHubServiceInfoServ
 // SyncPolicies returns the sync policies service of the IdsecSecHubAPI instance.
 func (api *IdsecSecHubAPI) SyncPolicies() *syncpolicies.IdsecSecHubSyncPoliciesService {
 	return api.syncPoliciesService
+}
+
+// SecretOnboarding returns the secret onboarding service of the IdsecSecHubAPI instance.
+func (api *IdsecSecHubAPI) SecretOnboarding() *secretsonboarding.IdsecSecHubSecretOnboardingService {
+	return api.secretOnboardingService
 }

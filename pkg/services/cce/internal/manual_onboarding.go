@@ -87,14 +87,13 @@ func (c *ManualClient) CurrentServiceNames(getURL string) ([]string, error) {
 	return ExtractServiceNames(entityJSON), nil
 }
 
-// CurrentServiceState holds the currently deployed service names, per-service versions,
-// per-service parameters (resources), and CCE version for a manual onboarding entity, as read from its raw JSON.
+// CurrentServiceState holds the currently deployed service names, per-service versions, and
+// per-service parameters (resources) for a manual onboarding entity, as read from its raw JSON.
 // It is the "current" side of a version/resources-aware reconcile (see UpdateServicesWithReconcile).
 type CurrentServiceState struct {
 	Names      []string
 	Versions   map[string]string
 	Parameters map[string]map[string]interface{}
-	CCEVersion string
 }
 
 // GetCurrentServiceState GETs the given URL once and extracts the current service names,
@@ -121,7 +120,6 @@ func (c *ManualClient) GetCurrentServiceState(getURL string) (*CurrentServiceSta
 		Names:      ExtractServiceNames(entityJSON),
 		Versions:   extractCurrentServiceVersions(entityJSON),
 		Parameters: extractCurrentServiceParameters(entityJSON),
-		CCEVersion: ExtractCCEVersion(entityJSON),
 	}, nil
 }
 
@@ -304,12 +302,14 @@ func (c *ManualClient) reconcileDesiredServices(
 // so the (idempotent) add/update-services endpoint leaves them untouched and does not reject the
 // request with a 501 for a service that is not update-enabled: the endpoint validates every
 // already-onboarded service it's given, changed or not.
+//
+// cceVersion nil means "not supplied": no cceVersion is sent and the deployed version is retained.
 func (c *ManualClient) UpdateServicesWithReconcile(
 	id string,
 	current *CurrentServiceState,
 	desiredServices []ccemodels.IdsecCCEServiceInput,
 	resourceType string,
-	cceVersion string,
+	cceVersion *string,
 ) error {
 	c.logger.Info("Updating services for %s [%s]", resourceType, id)
 	c.logger.Info("Current %s services: %v", resourceType, current.Names)
@@ -329,13 +329,15 @@ func (c *ManualClient) UpdateServicesWithReconcile(
 		}
 	}
 
-	cceVersionToSend := CCEVersionIfChanged(cceVersion, current.CCEVersion)
-	cceVersionChanged := cceVersionToSend != ""
+	var cceVersionToSend string
+	if cceVersion != nil {
+		cceVersionToSend = *cceVersion
+	}
 
-	c.logger.Info("Services to add/upgrade/update: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
+	c.logger.Info("Services to add/upgrade/update: %d, Services to remove: %d, CCE version to send: %q\n", len(servicesToSend), len(servicesToRemove), cceVersionToSend)
 
-	if len(servicesToSend) > 0 || cceVersionChanged {
-		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %s)", len(servicesToSend), resourceType, id, CCEVersionLogValue(cceVersionToSend))
+	if len(servicesToSend) > 0 || cceVersionToSend != "" {
+		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %q)", len(servicesToSend), resourceType, id, cceVersionToSend)
 		if err := c.AddServices(id, servicesToSend, cceVersionToSend); err != nil {
 			return fmt.Errorf("failed to add/update services: %w", err)
 		}
@@ -529,19 +531,6 @@ func ExtractServiceNames(entityJSON interface{}) []string {
 		}
 	}
 	return serviceNames
-}
-
-// ExtractCCEVersion extracts the CCE version from an entity JSON response.
-// Returns an empty string if the field is not present.
-func ExtractCCEVersion(entityJSON interface{}) string {
-	if entityMap, ok := entityJSON.(map[string]interface{}); ok {
-		if cceVersionRaw, exists := entityMap["cce_version"]; exists {
-			if cceVersionStr, ok := cceVersionRaw.(string); ok {
-				return cceVersionStr
-			}
-		}
-	}
-	return ""
 }
 
 // GetWithRetry wraps common.RetryCall with the CCE default retry configuration,

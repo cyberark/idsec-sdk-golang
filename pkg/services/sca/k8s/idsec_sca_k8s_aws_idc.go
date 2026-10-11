@@ -3,6 +3,7 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +11,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	smithymiddleware "github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/toqueteos/webbrowser"
 
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
@@ -21,6 +28,10 @@ import (
 const (
 	awsIDCDeviceCodeGrantType   = "urn:ietf:params:oauth:grant-type:device_code"
 	awsIDCRefreshTokenGrantType = "refresh_token"
+
+	// eksPresignDuration is the hard AWS limit for STS presigned URL validity.
+	// EKS does not honour longer durations.
+	eksPresignDuration = 15 * time.Minute
 )
 
 // AWS IDC OIDC / SSO portal error codes returned in the JSON "error" field of the
@@ -124,8 +135,9 @@ type AWSIDCOIDCCache struct {
 }
 
 // HydrateAWSAccessCredentialsFromElevate runs the AWS IDC device-registration flow
-// when needed and writes STS credentials into result.AccessCredentials so the
-// existing AWSTokenProvider presign path can run unchanged.
+// when needed and writes STS credentials into result.AccessCredentials. Callers
+// then pass the hydrated result to AWSTokenProvider.GenerateToken (or directly
+// to GenerateEKSTokenFromAccessCredentials below) for client-side STS presigning.
 func HydrateAWSAccessCredentialsFromElevate(
 	result *k8smodels.IdsecSCAK8sElevateResult,
 	diagnostics bool,
@@ -171,6 +183,104 @@ func HydrateAWSAccessCredentialsFromElevate(
 	}
 	result.AccessCredentials = encoded
 	return nil
+}
+
+// GenerateEKSTokenFromAccessCredentials builds an EKS bearer token by presigning
+// a GetCallerIdentity STS request from the STS credentials in
+// result.AccessCredentials (populated by HydrateAWSAccessCredentialsFromElevate
+// above). This is the AWS IDC permission-set half of AWSTokenProvider.GenerateToken
+// (idsec_sca_k8s_aws_token.go), which calls this function as its fallback when
+// result.EKSToken is empty; it is also exported for callers that need the raw
+// presigned token outside the ExecCredential provider path (e.g. embedding it
+// in a proxy JWE payload). ctx.Region and ctx.ClusterID must be populated.
+func GenerateEKSTokenFromAccessCredentials(
+	result *k8smodels.IdsecSCAK8sElevateResult,
+	ctx *IdsecSCAK8sClusterContext,
+) (*k8smodels.IdsecSCAK8sExecCredential, error) {
+	if result == nil {
+		return nil, fmt.Errorf("elevate result cannot be nil")
+	}
+	if ctx == nil {
+		return nil, fmt.Errorf("cluster context cannot be nil")
+	}
+	if strings.TrimSpace(result.AccessCredentials) == "" {
+		return nil, fmt.Errorf("accessCredentials is empty for AWS IDC flow")
+	}
+	var awsCreds k8smodels.IdsecSCAK8sAWSAccessCredentials
+	if err := json.Unmarshal([]byte(result.AccessCredentials), &awsCreds); err != nil {
+		return nil, fmt.Errorf("failed to parse AWS access credentials: %w", err)
+	}
+	if awsCreds.AWSAccessKey == "" || awsCreds.AWSSecretAccessKey == "" {
+		return nil, fmt.Errorf("AWS access key or secret key is missing in access credentials")
+	}
+
+	cfg := aws.Config{
+		Region: ctx.Region,
+		Credentials: credentials.NewStaticCredentialsProvider(
+			awsCreds.AWSAccessKey,
+			awsCreds.AWSSecretAccessKey,
+			awsCreds.AWSSessionToken,
+		),
+	}
+	presignClient := sts.NewPresignClient(sts.NewFromConfig(cfg))
+
+	clusterID := ctx.ClusterID
+	// Capture issuance time before the call so the stamped expirationTimestamp
+	// is conservative even if the network call takes a few hundred ms.
+	presignedAt := time.Now()
+	presignedReq, err := presignClient.PresignGetCallerIdentity(
+		context.Background(),
+		&sts.GetCallerIdentityInput{},
+		func(o *sts.PresignOptions) {
+			o.ClientOptions = append(o.ClientOptions, func(opts *sts.Options) {
+				opts.APIOptions = append(opts.APIOptions, func(stack *smithymiddleware.Stack) error {
+					return stack.Build.Add(
+						&eksPresignMiddleware{clusterID: clusterID, expires: eksPresignDuration},
+						smithymiddleware.After,
+					)
+				})
+			})
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to presign STS GetCallerIdentity: %w", err)
+	}
+
+	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(presignedReq.URL))
+	expiresAt := presignedAt.Add(eksPresignDuration).Add(-eksExecCredRefreshBuffer).UTC()
+	return &k8smodels.IdsecSCAK8sExecCredential{
+		APIVersion: eksExecCredAPIVersion,
+		Kind:       "ExecCredential",
+		Status: k8smodels.IdsecSCAK8sExecCredentialStatus{
+			Token:               token,
+			ExpirationTimestamp: expiresAt.Format(time.RFC3339),
+		},
+	}, nil
+}
+
+// eksPresignMiddleware is a Build-phase middleware that injects the
+// x-k8s-aws-id header and X-Amz-Expires query parameter required by EKS.
+// Both must be present before SigV4 signing (Finalize phase) so they are
+// included in the computed signature.
+type eksPresignMiddleware struct {
+	clusterID string
+	expires   time.Duration
+}
+
+func (m *eksPresignMiddleware) ID() string { return "EKSPresignHeaderAndExpiry" }
+
+func (m *eksPresignMiddleware) HandleBuild(
+	bCtx context.Context,
+	in smithymiddleware.BuildInput,
+	next smithymiddleware.BuildHandler,
+) (smithymiddleware.BuildOutput, smithymiddleware.Metadata, error) {
+	if req, ok := in.Request.(*smithyhttp.Request); ok {
+		req.Header.Set("x-k8s-aws-id", m.clusterID)
+		q := req.URL.Query()
+		q.Set("X-Amz-Expires", strconv.FormatInt(int64(m.expires/time.Second), 10))
+		req.URL.RawQuery = q.Encode()
+	}
+	return next.HandleBuild(bCtx, in)
 }
 
 // EnsureAWSIDCAccessCredentials obtains temporary AWS STS credentials for an IDC

@@ -7,7 +7,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
@@ -845,6 +849,7 @@ func TestImport(t *testing.T) {
 			setupFile: func(t *testing.T) string {
 				return "/nonexistent/target-platform.zip"
 			},
+			mockGetBody:      `{"platforms": []}`,
 			expectedError:    true,
 			expectedErrorMsg: "given path",
 		},
@@ -860,6 +865,7 @@ func TestImport(t *testing.T) {
 			},
 			mockStatusCode:   http.StatusBadRequest,
 			mockBody:         `{"error": "invalid zip file"}`,
+			mockGetBody:      `{"platforms": []}`,
 			expectedError:    true,
 			expectedErrorMsg: "failed to import target platform",
 		},
@@ -875,8 +881,28 @@ func TestImport(t *testing.T) {
 			},
 			mockStatusCode:   http.StatusUnauthorized,
 			mockBody:         `{"error": "unauthorized"}`,
+			mockGetBody:      `{"platforms": []}`,
 			expectedError:    true,
 			expectedErrorMsg: "failed to import target platform",
+		},
+		{
+			name: "error_platform_limit_reached",
+			setupFile: func(t *testing.T) string {
+				tmpFile := filepath.Join(t.TempDir(), "target-platform.zip")
+				if err := os.WriteFile(tmpFile, []byte("fake zip content"), 0644); err != nil {
+					t.Fatalf("Failed to create test file: %v", err)
+				}
+				return tmpFile
+			},
+			mockGetBody: func() string {
+				platforms := make([]string, maxTargetPlatforms)
+				for i := range platforms {
+					platforms[i] = `{"id": 1, "platform_id": "p", "name": "p"}`
+				}
+				return `{"platforms": [` + strings.Join(platforms, ",") + `]}`
+			}(),
+			expectedError:    true,
+			expectedErrorMsg: "cannot import platform",
 		},
 	}
 
@@ -1007,4 +1033,186 @@ func TestExport(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mockTargetPlatformsBody returns a target platforms list response with count platforms,
+// one of which is "imported-platform" so ListBy after Import finds it.
+func mockTargetPlatformsBody(count int) string {
+	platforms := make([]string, 0, count)
+	if count > 0 {
+		platforms = append(platforms, `{"id": 123, "platform_id": "imported-platform", "name": "Imported Platform"}`)
+	}
+	for len(platforms) < count {
+		platforms = append(platforms, `{"id": 1, "platform_id": "p", "name": "p"}`)
+	}
+	return `{"platforms": [` + strings.Join(platforms, ",") + `]}`
+}
+
+// limitTestTenant simulates a tenant whose platform count grows with each successful import.
+type limitTestTenant struct {
+	serverCount atomic.Int64
+	posts       atomic.Int64
+	gets        atomic.Int64
+}
+
+func (tt *limitTestTenant) attach(service *IdsecPCloudTargetPlatformsService) {
+	service.doGet = func(ctx context.Context, path string, params interface{}) (*http.Response, error) {
+		tt.gets.Add(1)
+		return NewMockResponse(http.StatusOK, mockTargetPlatformsBody(int(tt.serverCount.Load()))), nil
+	}
+	service.doPost = func(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+		tt.posts.Add(1)
+		tt.serverCount.Add(1)
+		return NewMockResponse(http.StatusCreated, `{"platform_id": "imported-platform"}`), nil
+	}
+	service.doDelete = func(ctx context.Context, path string, body interface{}, params interface{}) (*http.Response, error) {
+		tt.serverCount.Add(-1)
+		return NewMockResponse(http.StatusNoContent, ""), nil
+	}
+}
+
+func writeTestZip(t *testing.T) string {
+	t.Helper()
+	tmpFile := filepath.Join(t.TempDir(), "target-platform.zip")
+	if err := os.WriteFile(tmpFile, []byte("fake zip content"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	return tmpFile
+}
+
+// TestImportConcurrentRespectsLimit tests that parallel imports cannot exceed maxTargetPlatforms.
+//
+// Starting at 795 platforms, 10 concurrent imports must yield exactly 5 successes, and the
+// platform list must be fetched once for the count instead of once per import.
+func TestImportConcurrentRespectsLimit(t *testing.T) {
+	tenant := &limitTestTenant{}
+	tenant.serverCount.Store(maxTargetPlatforms - 5)
+	service := createTestService()
+	tenant.attach(service)
+	zipPath := writeTestZip(t)
+
+	var wg sync.WaitGroup
+	var succeeded, limited atomic.Int64
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath})
+			switch {
+			case err == nil:
+				succeeded.Add(1)
+			case strings.HasPrefix(err.Error(), "cannot import platform"):
+				limited.Add(1)
+			default:
+				t.Errorf("Unexpected error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if succeeded.Load() != 5 || limited.Load() != 5 {
+		t.Errorf("Expected 5 successes and 5 limit errors, got %d and %d", succeeded.Load(), limited.Load())
+	}
+	if tenant.posts.Load() != 5 {
+		t.Errorf("Expected 5 import requests, got %d", tenant.posts.Load())
+	}
+	if tenant.serverCount.Load() != maxTargetPlatforms {
+		t.Errorf("Expected tenant to end at %d platforms, got %d", maxTargetPlatforms, tenant.serverCount.Load())
+	}
+	// 1 initial count + 5 ListBy after successful imports + 5 re-counts before rejecting.
+	if tenant.gets.Load() != 11 {
+		t.Errorf("Expected 11 list requests, got %d", tenant.gets.Load())
+	}
+}
+
+// TestImportCountRefresh tests that the cached count picks up platforms changed outside the service.
+func TestImportCountRefresh(t *testing.T) {
+	t.Run("deleted_elsewhere_detected_before_rejecting", func(t *testing.T) {
+		tenant := &limitTestTenant{}
+		tenant.serverCount.Store(maxTargetPlatforms - 1)
+		service := createTestService()
+		tenant.attach(service)
+		clock := time.Unix(0, 0)
+		service.now = func() time.Time { return clock }
+		zipPath := writeTestZip(t)
+
+		if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+			t.Fatalf("Expected first import to succeed, got %v", err)
+		}
+		// Cache now says 800 and is still fresh; another client deletes 3 platforms.
+		tenant.serverCount.Add(-3)
+		if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+			t.Errorf("Expected import to succeed after external deletions, got %v", err)
+		}
+	})
+
+	t.Run("created_elsewhere_detected_after_interval", func(t *testing.T) {
+		tenant := &limitTestTenant{}
+		tenant.serverCount.Store(maxTargetPlatforms - 10)
+		service := createTestService()
+		tenant.attach(service)
+		clock := time.Unix(0, 0)
+		service.now = func() time.Time { return clock }
+		zipPath := writeTestZip(t)
+
+		if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+			t.Fatalf("Expected first import to succeed, got %v", err)
+		}
+		// Another client fills the tenant; the cache (791) is stale once the interval passes.
+		tenant.serverCount.Store(maxTargetPlatforms)
+		clock = clock.Add(targetPlatformsCountRefreshInterval)
+		_, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath})
+		if err == nil || !strings.HasPrefix(err.Error(), "cannot import platform") {
+			t.Errorf("Expected limit error after refresh, got %v", err)
+		}
+		if tenant.posts.Load() != 1 {
+			t.Errorf("Expected 1 import request, got %d", tenant.posts.Load())
+		}
+	})
+
+	t.Run("fresh_cache_skips_list_request", func(t *testing.T) {
+		tenant := &limitTestTenant{}
+		tenant.serverCount.Store(10)
+		service := createTestService()
+		tenant.attach(service)
+		clock := time.Unix(0, 0)
+		service.now = func() time.Time { return clock }
+		zipPath := writeTestZip(t)
+
+		for i := 0; i < 3; i++ {
+			if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+				t.Fatalf("Expected import to succeed, got %v", err)
+			}
+		}
+		// 1 count + 3 ListBy after imports.
+		if tenant.gets.Load() != 4 {
+			t.Errorf("Expected 4 list requests, got %d", tenant.gets.Load())
+		}
+	})
+
+	t.Run("delete_frees_slot_in_cache", func(t *testing.T) {
+		tenant := &limitTestTenant{}
+		tenant.serverCount.Store(maxTargetPlatforms - 1)
+		service := createTestService()
+		tenant.attach(service)
+		clock := time.Unix(0, 0)
+		service.now = func() time.Time { return clock }
+		zipPath := writeTestZip(t)
+
+		if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+			t.Fatalf("Expected first import to succeed, got %v", err)
+		}
+		id := 123
+		if err := service.Delete(&targetplatformsmodels.IdsecPCloudDeleteTargetPlatform{ID: &id}); err != nil {
+			t.Fatalf("Expected delete to succeed, got %v", err)
+		}
+		getsBefore := tenant.gets.Load()
+		if _, err := service.Import(&targetplatformsmodels.IdsecPCloudImportTargetPlatform{PlatformZipPath: zipPath}); err != nil {
+			t.Fatalf("Expected import after delete to succeed, got %v", err)
+		}
+		// Only the ListBy after import; the cached count was used for the limit check.
+		if got := tenant.gets.Load() - getsBefore; got != 1 {
+			t.Errorf("Expected 1 list request after delete, got %d", got)
+		}
+	})
 }

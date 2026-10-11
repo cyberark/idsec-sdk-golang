@@ -80,13 +80,16 @@ func (s *IdsecSCAK8sService) postWithCLISignature(route string, body interface{}
 	})
 }
 
-// getWithCLISignature GETs with X-CLI-Signature on the given ISP client (SCA or DPA).
-func (s *IdsecSCAK8sService) getWithCLISignature(ispClient *isp.IdsecISPServiceClient, route string, params interface{}) (*http.Response, error) {
+// getWithCLISignatureForPath GETs at apiRoute but computes X-CLI-Signature using
+// signatureRoute. Use when the HTTP endpoint is a proxy that internally forwards
+// the request to a different SCA endpoint — the signature must match the path that
+// the downstream service will verify it against.
+func (s *IdsecSCAK8sService) getWithCLISignatureForPath(ispClient *isp.IdsecISPServiceClient, apiRoute, signatureRoute string, params interface{}) (*http.Response, error) {
 	client, err := ispClientForSignature(ispClient)
 	if err != nil {
 		return nil, err
 	}
-	return withCLISignature(client, route, func() (*http.Response, error) {
-		return ispClient.Get(context.Background(), route, params)
+	return withCLISignature(client, signatureRoute, func() (*http.Response, error) {
+		return ispClient.Get(context.Background(), apiRoute, params)
 	})
 }

@@ -13,7 +13,7 @@ var ServiceConfig = services.IdsecServiceConfig{
 	OptionalAuthenticatorNames: []string{},
 	ActionsConfigurations:      map[actions.IdsecServiceActionType][]actions.IdsecServiceActionDefinition{},
 	ActionSchemas:              svcactions.ActionToSchemaMap,
-	Enabled:                    enabled(false),
+	Enabled:                    enabled(true),
 }
 
 // ServiceGenerator constructs IdsecPamshSafesService instances for the SDK registry.

@@ -70,6 +70,7 @@ import (
 	directories "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
 	policies "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
 	roles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
+	tenantsuffixes "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/tenantsuffixes"
 	users "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
 	webapps "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps"
 	pamshaccounts "github.com/cyberark/idsec-sdk-golang/pkg/services/pamsh/pamshaccounts"
@@ -96,6 +97,7 @@ import (
 	filters "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/filters"
 	scans "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/scans"
 	secrets "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secrets"
+	secretsonboarding "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretsonboarding"
 	secretstores "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretstores"
 	serviceinfo "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/serviceinfo"
 	syncpolicies "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/syncpolicies"
@@ -443,6 +445,16 @@ func (api *IdsecAPI) IdentityRoles() (*roles.IdsecIdentityRolesService, error) {
 	return (*service).(*roles.IdsecIdentityRolesService), nil
 }
 
+func (api *IdsecAPI) IdentityTenantsuffixes() (*tenantsuffixes.IdsecIdentityTenantSuffixesService, error) {
+	service, err := api.services.service(tenantsuffixes.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return tenantsuffixes.ServiceGenerator(api.loadServiceAuthenticators(tenantsuffixes.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*tenantsuffixes.IdsecIdentityTenantSuffixesService), nil
+}
+
 func (api *IdsecAPI) IdentityUsers() (*users.IdsecIdentityUsersService, error) {
 	service, err := api.services.service(users.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
 		return users.ServiceGenerator(api.loadServiceAuthenticators(users.ServiceConfig)...)
@@ -701,6 +713,16 @@ func (api *IdsecAPI) SechubSecrets() (*secrets.IdsecSecHubSecretsService, error)
 		return nil, err
 	}
 	return (*service).(*secrets.IdsecSecHubSecretsService), nil
+}
+
+func (api *IdsecAPI) SechubSecretsonboarding() (*secretsonboarding.IdsecSecHubSecretOnboardingService, error) {
+	service, err := api.services.service(secretsonboarding.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return secretsonboarding.ServiceGenerator(api.loadServiceAuthenticators(secretsonboarding.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*secretsonboarding.IdsecSecHubSecretOnboardingService), nil
 }
 
 func (api *IdsecAPI) SechubSecretstores() (*secretstores.IdsecSecHubSecretStoresService, error) {

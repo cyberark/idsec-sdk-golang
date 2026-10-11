@@ -206,9 +206,8 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 		return nil, fmt.Errorf("failed to deserialize organization response: %w", err)
 	}
 
-	// Extract current services (names + per-service version + per-service parameters) and CCE version from raw JSON.
+	// Extract current services (names + per-service version + per-service parameters) from raw JSON.
 	var currentServiceNames []string
-	var currentCCEVersion string
 	currentServiceVersions := map[string]string{}
 	currentServiceParams := map[string]map[string]interface{}{}
 	if orgMap, ok := organizationJSON.(map[string]interface{}); ok {
@@ -219,11 +218,6 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 						currentServiceNames = append(currentServiceNames, svcStr)
 					}
 				}
-			}
-		}
-		if cceVersionRaw, exists := orgMap["cce_version"]; exists {
-			if cceVersionStr, ok := cceVersionRaw.(string); ok {
-				currentCCEVersion = cceVersionStr
 			}
 		}
 		currentServiceVersions = extractCurrentServiceVersions(orgMap)
@@ -270,11 +264,13 @@ func (s *IdsecCCEAWSService) tfUpdateOrganization(input *awsmodels.TfIdsecCCEAWS
 	}
 
 	// Step 3: Add new services, push version upgrades, or update CCE version.
-	cceVersionToSend := cceinternal.CCEVersionIfChanged(input.CCEVersion, currentCCEVersion)
-	cceVersionChanged := cceVersionToSend != ""
-	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version changed: %v\n", len(servicesToSend), len(servicesToRemove), cceVersionChanged)
-	if len(servicesToSend) > 0 || cceVersionChanged {
-		s.Logger.Info("Sending %d service(s) to organization [%s] (CCE version: %s)", len(servicesToSend), input.ID, cceinternal.CCEVersionLogValue(cceVersionToSend))
+	var cceVersionToSend string
+	if input.CCEVersion != nil {
+		cceVersionToSend = *input.CCEVersion
+	}
+	s.Logger.Info("Services to add/upgrade: %d, Services to remove: %d, CCE version to send: %q\n", len(servicesToSend), len(servicesToRemove), cceVersionToSend)
+	if len(servicesToSend) > 0 || cceVersionToSend != "" {
+		s.Logger.Info("Sending %d service(s) to organization [%s] (CCE version: %q)", len(servicesToSend), input.ID, cceVersionToSend)
 		err = s.addOrganizationServices(&awsmodels.TfIdsecCCEAWSAddOrganizationServices{
 			ID:                input.ID,
 			Services:          servicesToSend,

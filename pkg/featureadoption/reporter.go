@@ -50,21 +50,33 @@ func authISPOrPVWA(idsecAPI *api.IdsecAPI) auth.IdsecAuth {
 	return nil
 }
 
+// tokenReader is implemented by authenticators embedding IdsecAuthBase (isp, pvwa).
+type tokenReader interface {
+	GetToken() *authmodels.IdsecToken
+}
+
 // ReportWithAPI sends a feature adoption report to FAS using the token resolved from IdsecAPI.
-// It resolves the authenticator (isp or pvwa) internally, loads the token, and only reports if the token is JWT.
-// Skips if FAS URL is unset, telemetry is disabled, no auth configured, or token is not JWT.
+// It resolves the authenticator (isp or pvwa) internally, reads its current token, and only reports if the token is JWT.
+// Skips if FAS URL is unset, telemetry is disabled, no auth configured, the token is expired, or token is not JWT.
 // Returns (message, nil) on success or skip; returns ("", err) on failure.
+//
+// The token is read without loading or refreshing authentication: the authenticator is shared by every
+// service client, and LoadAuthentication clears its token once expired, which would break later client creation.
 func ReportWithAPI(ctx context.Context, idsecAPI *api.IdsecAPI, metricKey string, tags map[string]string, opts *ReportOpts) (message string, err error) {
 	auth := authISPOrPVWA(idsecAPI)
 	if auth == nil {
 		return "FAS report skipped: no auth configured", nil
 	}
-	token, loadErr := auth.LoadAuthentication(nil, false)
-	if loadErr != nil {
-		return "", loadErr
+	reader, ok := auth.(tokenReader)
+	if !ok {
+		return "FAS report skipped: no token or auth error", nil
 	}
+	token := reader.GetToken()
 	if token == nil || token.Token == "" {
 		return "FAS report skipped: no token or auth error", nil
+	}
+	if expiresIn := time.Time(token.ExpiresIn); !expiresIn.IsZero() && expiresIn.Before(time.Now()) {
+		return "FAS report skipped: token expired", nil
 	}
 	if token.TokenType != authmodels.JWT {
 		return "FAS report skipped: token is not JWT (PVWA auth not supported for FAS)", nil

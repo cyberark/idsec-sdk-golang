@@ -158,13 +158,18 @@ func TestGenerateKubeconfig_SetsCLISignatureHeader(t *testing.T) {
 		All: "false",
 	})
 	require.NoError(t, err)
+	// The HTTP request must still go to the DPA kubeconfig endpoint.
 	require.Equal(t, "/k8s/kube-config/AWS", capturedPath)
 	require.NotEmpty(t, capturedSig)
 
-	want := computeCLISignature(testCLISignatureIDToken, "k8s/kube-config/AWS", time.Now().UTC())
+	// The signature must be computed for the SCA evaluate path (not the DPA kubeconfig
+	// path) because the kubeconfig endpoint internally forwards the request to
+	// /access/AWS/eligibility/clusters/evaluate which enforces X-CLI-Signature.
+	const evaluateSigRoute = "access/AWS/eligibility/clusters/evaluate"
+	want := computeCLISignature(testCLISignatureIDToken, evaluateSigRoute, time.Now().UTC())
 	wantPrev := computeCLISignature(
 		testCLISignatureIDToken,
-		"k8s/kube-config/AWS",
+		evaluateSigRoute,
 		time.Now().UTC().Add(-5*time.Second),
 	)
 	require.True(t, capturedSig == want || capturedSig == wantPrev,

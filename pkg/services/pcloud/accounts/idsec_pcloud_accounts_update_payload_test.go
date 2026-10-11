@@ -116,7 +116,7 @@ func TestBuildUpdateOperations_OnlyRemoteMachines(t *testing.T) {
 	updateAccount := &accountsmodels.IdsecPCloudUpdateAccount{
 		AccountID: "account-1",
 		IdsecPCloudUpdateAccountRemoteMachinesAccess: accountsmodels.IdsecPCloudUpdateAccountRemoteMachinesAccess{
-			RemoteMachines: []string{"host1", "host2"},
+			RemoteMachines: &[]string{"host1", "host2"},
 		},
 	}
 
@@ -139,7 +139,7 @@ func TestBuildUpdateOperations_OnlyRemoteMachines(t *testing.T) {
 func TestBuildUpdateOperations_PlatformAccountPropertiesLowerCamelCasesInnerKeys(t *testing.T) {
 	updateAccount := &accountsmodels.IdsecPCloudUpdateAccount{
 		AccountID: "account-1",
-		PlatformAccountProperties: map[string]interface{}{
+		PlatformAccountProperties: &map[string]interface{}{
 			"logon_domain": "example.com",
 			"port_number":  "22",
 		},
@@ -205,7 +205,7 @@ func TestBuildUpdateOperations_GoldenFullPayload(t *testing.T) {
 		Address:    common.Ptr("10.0.0.1"),
 		Username:   common.Ptr("svc-user"),
 		PlatformID: common.Ptr("UnixSSH"),
-		PlatformAccountProperties: map[string]interface{}{
+		PlatformAccountProperties: &map[string]interface{}{
 			"logon_domain": "example.com",
 		},
 		IdsecPCloudUpdateAccountSecretManagement: accountsmodels.IdsecPCloudUpdateAccountSecretManagement{
@@ -213,7 +213,7 @@ func TestBuildUpdateOperations_GoldenFullPayload(t *testing.T) {
 			ManualManagementReason:     common.Ptr("reason"),
 		},
 		IdsecPCloudUpdateAccountRemoteMachinesAccess: accountsmodels.IdsecPCloudUpdateAccountRemoteMachinesAccess{
-			RemoteMachines:                   []string{"host1", "host2"},
+			RemoteMachines:                   &[]string{"host1", "host2"},
 			AccessRestrictedToRemoteMachines: common.Ptr(true),
 		},
 	}

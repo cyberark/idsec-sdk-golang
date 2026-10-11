@@ -4,16 +4,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
+	sechubinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/internal"
 	syncpoliciesmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/syncpolicies/models"
 )
 
@@ -29,10 +28,7 @@ func newMockService(t *testing.T, serverURL string) *IdsecSecHubSyncPoliciesServ
 	}
 
 	ispBase := &services.IdsecISPBaseService{}
-	v := reflect.ValueOf(ispBase).Elem()
-	clientField := v.FieldByName("client")
-	clientField = reflect.NewAt(clientField.Type(), unsafe.Pointer(clientField.UnsafeAddr())).Elem()
-	clientField.Set(reflect.ValueOf(ispClient))
+	sechubinternal.InjectISPClient(ispBase, ispClient)
 
 	return &IdsecSecHubSyncPoliciesService{
 		IdsecBaseService: &services.IdsecBaseService{

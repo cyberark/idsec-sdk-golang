@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -166,4 +167,86 @@ func (s *IdsecSecHubSecretsService) Stats() (*secretsmodels.IdsecSecHubSecretsSt
 // ServiceConfig returns the service configuration for the IdsecSecHubSecretStoreService.
 func (s *IdsecSecHubSecretsService) ServiceConfig() services.IdsecServiceConfig {
 	return ServiceConfig
+}
+
+// This method is intended for Terraform use only.
+// FindByNameAndStoreId looks up a single secret by name and store ID.
+// Returns an error if zero or more than one secret matches, or if the secret's onboarding status is NOT_CANDIDATE.
+func (s *IdsecSecHubSecretsService) FindByNameAndStoreId(req *secretsmodels.IdsecSecHubFindSecretByNameAndStoreID) (*secretsmodels.IdsecSecHubSecret, error) {
+	s.Logger.Info("Finding secret [%s] in store [%s]", req.Name, req.StoreID)
+
+	items, err := s.fetchSecretCandidates(req.Name, req.StoreID)
+	if err != nil {
+		return nil, err
+	}
+
+	secret, err := s.resolveUniqueSecret(items, req.Name, req.StoreID)
+	if err != nil {
+		return nil, err
+	}
+
+	if secret.OnboardData.Status == string(secretsmodels.OnboardStatusNotCandidate) {
+		return nil, fmt.Errorf("secret %q in store %q cannot be onboarded to PAM: %s", req.Name, req.StoreID, secret.OnboardData.Message)
+	}
+	return secret, nil
+}
+
+// fetchSecretCandidates queries the SecHub API for secrets matching the given name and store ID.
+// The API only supports CONTAINS, not exact-match operators.
+// limit=2 lets us distinguish "not found" / "unique" / "ambiguous" without fetching more results than needed.
+func (s *IdsecSecHubSecretsService) fetchSecretCandidates(name, storeID string) ([]interface{}, error) {
+	query := map[string]string{
+		"filter": fmt.Sprintf(`name CONTAINS "%s" AND storeId CONTAINS "%s"`, name, storeID),
+		"limit":  "2",
+		"sort":   "name ASC",
+	}
+	response, err := s.ISPClient().Get(context.Background(), sechubURL, query)
+	if err != nil {
+		return nil, err
+	}
+	defer pagination.CloseResponse(response)
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to find secret - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+	}
+	resultJSON, err := common.DeserializeJSONSnake(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	resultMap, ok := resultJSON.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("failed to find secret: unexpected response format")
+	}
+	return pagination.ExtractItemsFromResult(resultMap, "Secrets", "secrets")
+}
+
+// resolveUniqueSecret uses lexicographic ordering (name ASC) to determine whether the search
+// produced an exact match. Because the API only supports CONTAINS, results are sorted by name
+// so that the target name—if present—always lands at items[0].
+//
+//   - items[0] not an exact match → secret not found
+//   - items[0] exact match, no items[1] → unique match, success
+//   - items[0] exact match, items[1] also exact → duplicate secret, error
+//   - items[0] exact match, items[1] is a lexicographic neighbour → unique match, success
+func (s *IdsecSecHubSecretsService) resolveUniqueSecret(items []interface{}, name, storeID string) (*secretsmodels.IdsecSecHubSecret, error) {
+	if len(items) == 0 {
+		return nil, fmt.Errorf("secret %q not found in store %q", name, storeID)
+	}
+	var first secretsmodels.IdsecSecHubSecret
+	if err := mapstructure.Decode(items[0], &first); err != nil {
+		return nil, fmt.Errorf("failed to decode secret: %w", err)
+	}
+	if first.Name != name || first.StoreID != storeID {
+		return nil, fmt.Errorf("secret %q not found in store %q", name, storeID)
+	}
+	if len(items) > 1 {
+		var second secretsmodels.IdsecSecHubSecret
+		if err := mapstructure.Decode(items[1], &second); err != nil {
+			return nil, fmt.Errorf("failed to decode secret: %w", err)
+		}
+		if second.Name == name && second.StoreID == storeID {
+			return nil, fmt.Errorf("too many secrets matched name %q in store %q; use a more specific name", name, storeID)
+		}
+		// Second result is a lexicographic neighbour — not a duplicate
+	}
+	return &first, nil
 }

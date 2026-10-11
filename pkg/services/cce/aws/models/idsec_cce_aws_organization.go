@@ -68,8 +68,9 @@ type TfIdsecCCEAWSUpdateOrganization struct {
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	// ServiceParameters contains service-specific parameters, keyed by service name.
 	ServiceParameters map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
-	// CCEVersion is the optional target version for the base CCE infrastructure. If not specified, the current version is retained.
-	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
+	// CCEVersion is the optional target version for the base CCE infrastructure. nil means "not supplied":
+	// the current version is retained and no cceVersion is sent.
+	CCEVersion *string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
 }
 
 // TfIdsecCCEAWSAddOrganizationServices is the input for adding services to an AWS organization.

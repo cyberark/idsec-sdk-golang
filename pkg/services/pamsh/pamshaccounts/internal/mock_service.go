@@ -4,7 +4,6 @@ package internal
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -44,15 +43,6 @@ func (b *TrackableBody) Closed() bool {
 type MockPVWAServiceParts struct {
 	BaseService *services.IdsecBaseService
 	PVWABase    *services.IdsecPVWABaseService
-}
-
-// SetupMockPVWAServiceParts wires an IdsecPVWABaseService to an httptest server.
-func SetupMockPVWAServiceParts(t *testing.T, handler http.Handler) (*MockPVWAServiceParts, func()) {
-	t.Helper()
-
-	testServer := httptest.NewServer(handler)
-	parts := NewMockPVWAServiceParts(testServer.URL)
-	return parts, testServer.Close
 }
 
 // NewMockPVWAServiceParts builds service parts with the given PVWA base URL.
