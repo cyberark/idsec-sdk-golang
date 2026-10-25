@@ -120,3 +120,27 @@ func TestIdsecCCEPropertyValue_MarshalJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"name":"cce_broken_role","value":true}`, string(data))
 }
+
+// TestIdsecCCEOnboardedService_AvailableVersions ensures available versions decode through both
+// encoding/json (camelCase) and mapstructure (snake_case), and are omitted when absent.
+func TestIdsecCCEOnboardedService_AvailableVersions(t *testing.T) {
+	var fromJSON IdsecCCEOnboardedService
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"dpa","status":"Completely added","version":"1.0.0","availableVersions":["1.1.0","1.2.0"]}`), &fromJSON))
+	require.Equal(t, []string{"1.1.0", "1.2.0"}, fromJSON.AvailableVersions)
+
+	var fromMap IdsecCCEOnboardedService
+	require.NoError(t, mapstructure.Decode(map[string]interface{}{
+		"name":               "dpa",
+		"version":            "1.0.0",
+		"available_versions": []interface{}{"1.1.0"},
+	}, &fromMap))
+	require.Equal(t, []string{"1.1.0"}, fromMap.AvailableVersions)
+
+	var absent IdsecCCEOnboardedService
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"dpa","version":"1.0.0"}`), &absent))
+	require.Nil(t, absent.AvailableVersions)
+
+	out, err := json.Marshal(absent)
+	require.NoError(t, err)
+	require.NotContains(t, string(out), "availableVersions")
+}

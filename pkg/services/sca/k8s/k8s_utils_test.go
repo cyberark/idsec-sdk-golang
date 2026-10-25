@@ -190,3 +190,25 @@ func TestExtractISPSessionClaims(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidAWSIDCRegion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		region string
+		want   bool
+	}{
+		{region: "us-east-1", want: true},
+		{region: "us-gov-west-1", want: true},
+		{region: "", want: false},
+		{region: "US-EAST-1", want: false},
+		{region: "cn-north-1", want: false},
+		{region: "x@evil.example#", want: false},
+		{region: "evil.example/x?", want: false},
+	}
+	for _, tt := range tests {
+		if got := IsValidAWSIDCRegion(tt.region); got != tt.want {
+			t.Errorf("IsValidAWSIDCRegion(%q) = %v, want %v", tt.region, got, tt.want)
+		}
+	}
+}

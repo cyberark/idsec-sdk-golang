@@ -712,6 +712,65 @@ func (s *IdsecPCloudAccountsService) parseAccountResponse(responseBody io.ReadCl
 	return &account, nil
 }
 
+func findAccountIDByName(accountsPages <-chan *IdsecPCloudAccountsPage, accountName string) (string, bool) {
+	for accountsPage := range accountsPages {
+		for _, account := range accountsPage.Items {
+			if account.Name == accountName {
+				return account.AccountID, true
+			}
+		}
+	}
+	return "", false
+}
+
+// accountIDByName resolves an exact account name to its ID, optionally within safeName.
+// Without safeName the first account with that name in any Safe wins.
+// PVWA keyword search does not match account names unless WideAccountsSearch is enabled
+// (off by default), so when the search yields no exact match the accounts are listed
+// without a search and scanned, stopping at the first match.
+func (s *IdsecPCloudAccountsService) accountIDByName(accountName string, safeName string) (string, error) {
+	if accountName == "" {
+		return "", fmt.Errorf("account name must not be empty")
+	}
+	searchPages, err := s.ListBy(&accountsmodels.IdsecPCloudAccountsFilter{
+		Search:   accountName,
+		SafeName: safeName,
+	})
+	if err != nil {
+		return "", err
+	}
+	if accountID, ok := findAccountIDByName(searchPages, accountName); ok {
+		return accountID, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	query := map[string]string{}
+	if safeName != "" {
+		query["filter"] = fmt.Sprintf("safeName eq %s", safeName)
+	}
+	listPages, listErrors := pagination.ListPaginated[accountsmodels.IdsecPCloudAccount](
+		ctx,
+		pagination.HTTPGetFetch(s.ISPClient(), accountsURL, query),
+		pagination.ListPaginatedConfig[accountsmodels.IdsecPCloudAccount]{
+			ResourceName: "accounts",
+			Decode:       decodeAccountsFromResultMap,
+		},
+	)
+	if accountID, ok := findAccountIDByName(listPages, accountName); ok {
+		cancel()
+		for range listPages {
+		}
+		return accountID, nil
+	}
+	if err := <-listErrors; err != nil {
+		return "", fmt.Errorf("failed to resolve account [%s]: %w", accountName, err)
+	}
+	if safeName != "" {
+		return "", fmt.Errorf("account with name [%s] not found in safe [%s]", accountName, safeName)
+	}
+	return "", fmt.Errorf("account with name [%s] not found", accountName)
+}
+
 // Get retrieves an IdsecPCloudAccount by its ID.
 // https://docs.cyberark.com/Product-Doc/OnlineHelp/PAS/Latest/en/Content/WebServices/Get%20Account%20Details.htm?
 func (s *IdsecPCloudAccountsService) Get(getAccount *accountsmodels.IdsecPCloudGetAccount) (*accountsmodels.IdsecPCloudAccount, error) {
@@ -719,25 +778,12 @@ func (s *IdsecPCloudAccountsService) Get(getAccount *accountsmodels.IdsecPCloudG
 	if getAccount.AccountID == "" && getAccount.AccountName == "" {
 		return nil, fmt.Errorf("either account ID or account name must be provided")
 	}
-	if getAccount.AccountID == "" && getAccount.AccountName != "" {
-		accountsPages, err := s.ListBy(&accountsmodels.IdsecPCloudAccountsFilter{
-			Search: getAccount.AccountName,
-			Limit:  1,
-		})
+	if getAccount.AccountID == "" {
+		accountID, err := s.accountIDByName(getAccount.AccountName, "")
 		if err != nil {
 			return nil, err
 		}
-		for accountsPage := range accountsPages {
-			for _, account := range accountsPage.Items {
-				if account.Name == getAccount.AccountName {
-					getAccount.AccountID = account.AccountID
-					break
-				}
-			}
-		}
-		if getAccount.AccountID == "" {
-			return nil, fmt.Errorf("account with name [%s] not found", getAccount.AccountName)
-		}
+		getAccount.AccountID = accountID
 	}
 	response, err := s.ISPClient().Get(context.Background(), fmt.Sprintf(accountURL, getAccount.AccountID), nil)
 	if err != nil {
@@ -755,12 +801,15 @@ func (s *IdsecPCloudAccountsService) Get(getAccount *accountsmodels.IdsecPCloudG
 	return s.parseAccountResponse(response.Body)
 }
 
-// GetByName retrieves an account by its name.
-// It is a convenience wrapper around Get that accepts only a name, using the
-// API search to locate the account and then fetching its full details by ID.
+// GetByName retrieves an account by its exact name, optionally restricted to a Safe.
+// Without a Safe the first account with that name in any Safe is returned.
 // Returns an error if no account with the given name exists.
 func (s *IdsecPCloudAccountsService) GetByName(getAccount *accountsmodels.IdsecPCloudGetAccountByName) (*accountsmodels.IdsecPCloudAccount, error) {
-	return s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountName: getAccount.AccountName})
+	accountID, err := s.accountIDByName(getAccount.AccountName, getAccount.SafeName)
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountID: accountID})
 }
 
 // GetCredentials retrieves the credentials of an IdsecPCloudAccount by its ID.
@@ -859,7 +908,7 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 			return s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
 		},
 		func() (*accountsmodels.IdsecPCloudAccount, error) {
-			return s.Get(&accountsmodels.IdsecPCloudGetAccount{AccountName: addAccount.Name})
+			return s.GetByName(&accountsmodels.IdsecPCloudGetAccountByName{AccountName: addAccount.Name, SafeName: addAccount.SafeName})
 		},
 	)
 	if err != nil {
@@ -877,13 +926,14 @@ func (s *IdsecPCloudAccountsService) Create(addAccount *accountsmodels.IdsecPClo
 	}(response.Body)
 	if response.StatusCode == http.StatusConflict {
 		s.Logger.Info("Account [%s] already exists, retrieving existing account", addAccount.Name)
-		account, err := s.Get(&accountsmodels.IdsecPCloudGetAccount{
+		account, err := s.GetByName(&accountsmodels.IdsecPCloudGetAccountByName{
 			AccountName: addAccount.Name,
+			SafeName:    addAccount.SafeName,
 		})
 		if err != nil {
 			// For some reason, the account creation returned conflict but the account is not found when retrieving it
 			// So we try again with a post to create
-			s.Logger.Info("Account [%s] not found after conflict, retrying account creation", addAccount.Name)
+			s.Logger.Warning("Account [%s] not retrievable after conflict (%v), retrying account creation", addAccount.Name, err)
 			response, err = s.ISPClient().Post(context.Background(), accountsURL, addAccountJSON)
 			if err != nil {
 				return nil, err

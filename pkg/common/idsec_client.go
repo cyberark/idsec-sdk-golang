@@ -875,13 +875,20 @@ func splitQualifiedFunction(function string) (string, string) {
 // doRequest is the internal method that handles the actual HTTP request execution.
 //
 // This method constructs and executes HTTP requests with comprehensive functionality
-// including URL construction, JSON serialization, header application, query parameter
+// including URL construction, body encoding, header application, query parameter
 // handling, TLS configuration, request logging, and automatic token refresh on
 // authentication failures.
 //
+// The body is encoded according to its type:
+//   - *IdsecMultipartBody: sent as multipart/form-data, with a Content-Type that carries
+//     the body's own boundary in place of the session's Content-Type header
+//   - map[string]string, when the session Content-Type is application/x-www-form-urlencoded:
+//     sent as a URL-encoded form
+//   - anything else: serialized as JSON
+//
 // The method performs several key operations:
 // - URL construction with proper path escaping
-// - JSON marshaling of request body
+// - Encoding of the request body (see above)
 // - Header and query parameter application
 // - TLS configuration based on certificate verification settings
 // - Request timing and logging
@@ -891,7 +898,7 @@ func splitQualifiedFunction(function string) (string, string) {
 //   - ctx: Context for request cancellation and timeout control
 //   - method: HTTP method (GET, POST, PUT, DELETE, etc.)
 //   - route: API route/path to append to the base URL
-//   - body: Request body to be JSON-serialized (can be nil for methods like GET)
+//   - body: Request body, encoded as described above (can be nil for methods like GET)
 //   - params: Query parameters to include in the request URL (can be nil)
 //   - refreshRetryCount: Number of retry attempts remaining for token refresh
 //
@@ -900,7 +907,7 @@ func splitQualifiedFunction(function string) (string, string) {
 //
 // The method automatically handles:
 // - HTTPS URL construction with proper path segment escaping
-// - JSON serialization of request bodies
+// - Encoding of request bodies as multipart, form or JSON
 // - Application of all configured headers
 // - Query parameter encoding
 // - TLS certificate verification based on global settings
@@ -924,7 +931,15 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 	// set from the same one even if the token is refreshed mid-request.
 	session := ac.currentSession()
 	var bodyReader io.Reader
-	if body != nil {
+	multipartContentType := ""
+	if multipartBody, ok := body.(*IdsecMultipartBody); ok {
+		encoded, contentType, err := multipartBody.encode()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode multipart body: %w", err)
+		}
+		bodyReader = encoded
+		multipartContentType = contentType
+	} else if body != nil {
 		if contentType, ok := session.headers["Content-Type"]; ok && contentType == "application/x-www-form-urlencoded" {
 			if formValues, ok := body.(map[string]string); ok {
 				data := url.Values{}
@@ -962,6 +977,9 @@ func (ac *IdsecClient) doRequest(ctx context.Context, method string, route strin
 			continue
 		}
 		req.Header.Set(key, value)
+	}
+	if multipartContentType != "" {
+		req.Header.Set("Content-Type", multipartContentType)
 	}
 	if telemetryHeader != "" {
 		req.Header.Set("X-Cybr-Telemetry", telemetryHeader)
@@ -1090,13 +1108,15 @@ func (ac *IdsecClient) Get(ctx context.Context, route string, params interface{}
 // Post performs an HTTP POST request to the specified route.
 //
 // This method constructs and executes a POST request with the provided body
-// serialized as JSON. The request includes all configured headers and
-// authentication. Automatic token refresh is handled on 401 responses.
+// serialized as JSON, unless it is an *IdsecMultipartBody, which is sent as
+// multipart/form-data with a Content-Type carrying its own boundary. The request
+// includes all configured headers and authentication. Automatic token refresh is
+// handled on 401 responses.
 //
 // Parameters:
 //   - ctx: Context for request cancellation and timeout control
 //   - route: API route/path to append to the base URL
-//   - body: Request body data to be JSON-serialized
+//   - body: Request body data to be JSON-serialized, or an *IdsecMultipartBody
 //
 // Returns the HTTP response or an error if the request fails.
 //

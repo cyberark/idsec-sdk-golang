@@ -74,7 +74,7 @@ type IdsecLogger struct {
 // NewIdsecLogger creates a new instance of IdsecLogger with the specified configuration.
 //
 // This function initializes a new logger with the provided settings. The logger
-// will output to stdout with timestamp formatting and can be configured for
+// will output to stderr with timestamp formatting and can be configured for
 // different verbosity levels and environment-based configuration.
 //
 // Parameters:
@@ -91,7 +91,7 @@ type IdsecLogger struct {
 //	logger.Info("Application started")
 func NewIdsecLogger(name string, level int, verbose bool, resolveLogLevelFromEnv bool) *IdsecLogger {
 	return &IdsecLogger{
-		Logger:                 log.New(os.Stdout, name, log.LstdFlags),
+		Logger:                 log.New(os.Stderr, name, log.LstdFlags),
 		name:                   name,
 		verbose:                verbose,
 		logLevel:               level,

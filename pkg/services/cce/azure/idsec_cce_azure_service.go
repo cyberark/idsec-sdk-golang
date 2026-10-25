@@ -74,6 +74,30 @@ func (s *IdsecCCEAzureService) TfEntra(input *azuremodels.TfIdsecCCEAzureGetEntr
 	return s.tfEntra(input)
 }
 
+// TfEntraDatasource retrieves Azure Entra tenant details with per-service data by onboarding ID.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: GET /api/azure/manual/entra/{id}
+func (s *IdsecCCEAzureService) TfEntraDatasource(input *azuremodels.TfIdsecCCEAzureGetEntra) (*azuremodels.TfIdsecCCEAzureEntraDatasource, error) {
+	return s.tfEntraDatasource(input)
+}
+
+// TfManagementGroupDatasource retrieves Azure Management Group details with per-service data by onboarding ID.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: GET /api/azure/manual/mgmtgroup/{id}
+func (s *IdsecCCEAzureService) TfManagementGroupDatasource(input *azuremodels.TfIdsecCCEAzureGetManagementGroup) (*azuremodels.TfIdsecCCEAzureManagementGroupDatasource, error) {
+	return s.tfManagementGroupDatasource(input)
+}
+
+// TfSubscriptionDatasource retrieves Azure Subscription details with per-service data by onboarding ID.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: GET /api/azure/manual/subscription/{id}
+func (s *IdsecCCEAzureService) TfSubscriptionDatasource(input *azuremodels.TfIdsecCCEAzureGetSubscription) (*azuremodels.TfIdsecCCEAzureSubscriptionDatasource, error) {
+	return s.tfSubscriptionDatasource(input)
+}
+
 // TfAddEntra adds an Azure Entra tenant manually.
 // After creation, it retrieves the full Entra tenant details with retry logic (3 attempts, 1 second delay).
 // ⚠️  DEPRECATED: This function is deprecated and should not be used.

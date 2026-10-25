@@ -14,9 +14,17 @@ package models
 // explicitly rejected/accepted by the respective service layer, but the
 // actual support differs -- see the field's own description below.
 type IdsecPolicyInfraCommonConditions struct {
-	AccessWindow       IdsecPolicyInfraTimeCondition `json:"access_window" mapstructure:"access_window" flag:"access-window" desc:"The days and times when the user can connect to their target using this policy, using 4-digit HH:MM hours"`
-	MaxSessionDuration int                           `json:"max_session_duration" mapstructure:"max_session_duration" flag:"max-session-duration" desc:"The maximum length of time (in hours) a user can remain connected in a single session. Default: 1" validate:"required,min=1,max=24" default:"1"`
-	IdleTime           int                           `json:"idle_time,omitempty" mapstructure:"idle_time,omitempty" flag:"idle-time" desc:"The maximum idle time before the session ends, in minutes." validate:"gt=0,lte=120" default:"10"`
+	AccessWindow               IdsecPolicyInfraTimeCondition `json:"access_window" mapstructure:"access_window" flag:"access-window" desc:"The days and times when the user can connect to their target using this policy, using 4-digit HH:MM hours"`
+	MaxSessionDuration         int                           `json:"max_session_duration" mapstructure:"max_session_duration" flag:"max-session-duration" desc:"The maximum length of time (in hours) a user can remain connected in a single session. Default: 1" validate:"required,min=1,max=24" default:"1"`
+	IdleTime                   int                           `json:"idle_time,omitempty" mapstructure:"idle_time,omitempty" flag:"idle-time" desc:"The maximum idle time before the session ends, in minutes." validate:"gt=0,lte=120" default:"10"`
+	OverrideIdleTime           *bool                         `json:"override_idle_time,omitempty" mapstructure:"override_idle_time,omitempty" flag:"override-idle-time" desc:"Whether to use the idle time from the policy (true) or the value from the global settings (false). Defaults to true."`
+	OverrideMaxSessionDuration *bool                         `json:"override_max_session_duration,omitempty" mapstructure:"override_max_session_duration,omitempty" flag:"override-max-session-duration" desc:"Whether to use the max session duration from the policy (true) or the value from the global settings (false). Defaults to true."`
+	// OverrideRecording and Recording are VM-specific. For DB policies these fields
+	// must be left nil — the DB backend ignores them. They live here (rather than
+	// in a separate VM-only conditions type) to keep the Go struct hierarchy flat
+	// and avoid a flag-registration diamond in the CLI walker.
+	OverrideRecording *bool `json:"override_recording,omitempty" mapstructure:"override_recording,omitempty" flag:"override-recording" desc:"Whether to use the recording setting from the policy (true) or the value from the global settings (false). Defaults to false. VM policies only — leave nil for DB policies."`
+	Recording         *bool `json:"recording,omitempty" mapstructure:"recording,omitempty" flag:"recording" desc:"Whether to record sessions that use this policy. Only applied when override_recording is true. VM policies only — leave nil for DB policies."`
 	// AccessApproval is a pointer so that callers who never configure dual control never send
 	// the field at all (Go's json.Marshal ignores "omitempty" on non-pointer structs, so a value
 	// type here would always serialize "access_approval":{"required":false}). Leaving this pointer

@@ -5,8 +5,10 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/federations"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
+	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/securezones"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/tenantsuffixes"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps"
@@ -19,8 +21,10 @@ type IdsecIdentityAPI struct {
 	usersService          *users.IdsecIdentityUsersService
 	authProfilesService   *authprofiles.IdsecIdentityAuthProfilesService
 	policiesService       *policies.IdsecIdentityPoliciesService
+	secureZonesService    *securezones.IdsecIdentitySecureZonesService
 	webappsService        *webapps.IdsecIdentityWebappsService
 	tenantSuffixesService *tenantsuffixes.IdsecIdentityTenantSuffixesService
+	federationsService    *federations.IdsecIdentityFederationsService
 }
 
 // NewIdsecIdentityAPI creates a new instance of IdsecIdentityAPI with the provided IdsecISPAuth.
@@ -46,11 +50,19 @@ func NewIdsecIdentityAPI(ispAuth *auth.IdsecISPAuth) (*IdsecIdentityAPI, error) 
 	if err != nil {
 		return nil, err
 	}
+	secureZonesService, err := securezones.NewIdsecIdentitySecureZonesService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
 	webappsService, err := webapps.NewIdsecIdentityWebappsService(baseIspAuth)
 	if err != nil {
 		return nil, err
 	}
 	tenantSuffixesService, err := tenantsuffixes.NewIdsecIdentityTenantSuffixesService(baseIspAuth)
+	if err != nil {
+		return nil, err
+	}
+	federationsService, err := federations.NewIdsecIdentityFederationsService(baseIspAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +72,10 @@ func NewIdsecIdentityAPI(ispAuth *auth.IdsecISPAuth) (*IdsecIdentityAPI, error) 
 		usersService:          usersService,
 		authProfilesService:   authProfilesService,
 		policiesService:       policiesService,
+		secureZonesService:    secureZonesService,
 		webappsService:        webappsService,
 		tenantSuffixesService: tenantSuffixesService,
+		federationsService:    federationsService,
 	}, nil
 }
 
@@ -90,6 +104,11 @@ func (api *IdsecIdentityAPI) Policies() *policies.IdsecIdentityPoliciesService {
 	return api.policiesService
 }
 
+// SecureZones returns the Secure Zones service of the IdsecIdentityAPI instance.
+func (api *IdsecIdentityAPI) SecureZones() *securezones.IdsecIdentitySecureZonesService {
+	return api.secureZonesService
+}
+
 // Webapps returns the Webapps service of the IdsecIdentityAPI instance.
 func (api *IdsecIdentityAPI) Webapps() *webapps.IdsecIdentityWebappsService {
 	return api.webappsService
@@ -103,4 +122,9 @@ func (api *IdsecIdentityAPI) Webapps() *webapps.IdsecIdentityWebappsService {
 // suffixes this service manages. This service is the CRUD surface for an individual suffix.
 func (api *IdsecIdentityAPI) TenantSuffixes() *tenantsuffixes.IdsecIdentityTenantSuffixesService {
 	return api.tenantSuffixesService
+}
+
+// Federations returns the Federations service of the IdsecIdentityAPI instance.
+func (api *IdsecIdentityAPI) Federations() *federations.IdsecIdentityFederationsService {
+	return api.federationsService
 }

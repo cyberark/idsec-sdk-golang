@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -335,8 +334,7 @@ func (s *IdsecCCEAWSService) addOrganizationServices(input *awsmodels.TfIdsecCCE
 	defer cceinternal.CloseResponseBody(response.Body)
 
 	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to add services to organization: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to add services to organization")
 	}
 
 	return nil
@@ -366,8 +364,7 @@ func (s *IdsecCCEAWSService) deleteOrganizationServices(input *awsmodels.TfIdsec
 	defer cceinternal.CloseResponseBody(response.Body)
 
 	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to delete services from organization: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to delete services from organization")
 	}
 
 	return nil
@@ -455,37 +452,15 @@ func (s *IdsecCCEAWSService) findOrganizationAccountOnboardingID(organizationID,
 // isAccountNotFoundError checks if the error indicates a 404 Not Found response.
 // This helper is used by AddOrganizationAccountSync to determine if an account needs to be discovered via scan.
 func isAccountNotFoundError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), fmt.Sprintf("%d", http.StatusNotFound))
+	apiErr, ok := cceinternal.AsAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusNotFound
 }
 
-// isScanInProgressError checks if the error indicates a scan is in progress
-// by parsing the JSON response and checking for app_error_code = "SCAN_IN_PROGRESS".
+// isScanInProgressError checks if the error is a 400 response with app_error_code = "SCAN_IN_PROGRESS".
 // This helper is used by AddOrganizationAccountSync to determine if it should wait for an ongoing scan.
 func isScanInProgressError(err error) bool {
-	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%d", http.StatusBadRequest)) {
-		return false
-	}
-
-	// Parse JSON from error string to extract app_error_code
-	errStr := err.Error()
-	// Find JSON body in error string (after "status code: 400 - ")
-	jsonStart := strings.Index(errStr, "{")
-	if jsonStart == -1 {
-		return false
-	}
-
-	jsonBody := errStr[jsonStart:]
-	var errorResponse map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonBody), &errorResponse); err != nil {
-		return false
-	}
-
-	// Check if app_error_code field exists and equals "SCAN_IN_PROGRESS"
-	if appErrorCode, ok := errorResponse["app_error_code"].(string); ok {
-		return appErrorCode == "SCAN_IN_PROGRESS"
-	}
-
-	return false
+	apiErr, ok := cceinternal.AsAPIError(err)
+	return ok && apiErr.StatusCode == http.StatusBadRequest && apiErr.AppErrorCode == "SCAN_IN_PROGRESS"
 }
 
 // triggerOrganizationScanIfNeeded triggers an organization scan if the account was not found.
@@ -579,6 +554,12 @@ func (s *IdsecCCEAWSService) tfAddOrganizationAccountSync(input *awsmodels.Idsec
 	// Convert to base input struct (without retry options)
 	baseInput := input.ToAddOrganizationAccount()
 
+	// Captured before the attempt below: a scan already running can complete while our call is in
+	// flight, and the response still reports "scan in progress" from a read taken earlier. Stamping the
+	// time afterwards would put it past that completion, and since the in-progress branch starts no new
+	// scan, nothing would stamp a later time and the wait below could only time out.
+	scanStartTime := time.Now()
+
 	// Initial attempt to add the account using the simple function
 	result, err := s.addOrganizationAccount(baseInput)
 
@@ -596,9 +577,6 @@ func (s *IdsecCCEAWSService) tfAddOrganizationAccountSync(input *awsmodels.Idsec
 			} else {
 				s.Logger.Info("Scan is in progress, waiting for scan completion before adding account")
 			}
-
-			// Capture timestamp before triggering scan
-			scanStartTime := time.Now()
 
 			// Trigger scan if needed (only for 404, not if scan already in progress)
 			if err := s.triggerOrganizationScanIfNeeded(isNotFound, input.ParentOrganizationID); err != nil {

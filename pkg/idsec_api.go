@@ -68,8 +68,10 @@ import (
 	pools "github.com/cyberark/idsec-sdk-golang/pkg/services/cmgr/pools"
 	authprofiles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/authprofiles"
 	directories "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/directories"
+	federations "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/federations"
 	policies "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/policies"
 	roles "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/roles"
+	securezones "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/securezones"
 	tenantsuffixes "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/tenantsuffixes"
 	users "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/users"
 	webapps "github.com/cyberark/idsec-sdk-golang/pkg/services/identity/webapps"
@@ -425,6 +427,16 @@ func (api *IdsecAPI) IdentityDirectories() (*directories.IdsecIdentityDirectorie
 	return (*service).(*directories.IdsecIdentityDirectoriesService), nil
 }
 
+func (api *IdsecAPI) IdentityFederations() (*federations.IdsecIdentityFederationsService, error) {
+	service, err := api.services.service(federations.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return federations.ServiceGenerator(api.loadServiceAuthenticators(federations.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*federations.IdsecIdentityFederationsService), nil
+}
+
 func (api *IdsecAPI) IdentityPolicies() (*policies.IdsecIdentityPoliciesService, error) {
 	service, err := api.services.service(policies.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
 		return policies.ServiceGenerator(api.loadServiceAuthenticators(policies.ServiceConfig)...)
@@ -443,6 +455,16 @@ func (api *IdsecAPI) IdentityRoles() (*roles.IdsecIdentityRolesService, error) {
 		return nil, err
 	}
 	return (*service).(*roles.IdsecIdentityRolesService), nil
+}
+
+func (api *IdsecAPI) IdentitySecurezones() (*securezones.IdsecIdentitySecureZonesService, error) {
+	service, err := api.services.service(securezones.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return securezones.ServiceGenerator(api.loadServiceAuthenticators(securezones.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*securezones.IdsecIdentitySecureZonesService), nil
 }
 
 func (api *IdsecAPI) IdentityTenantsuffixes() (*tenantsuffixes.IdsecIdentityTenantSuffixesService, error) {

@@ -50,6 +50,8 @@ type TestContext struct {
 func NewTestContext(t *testing.T) *TestContext {
 	t.Helper()
 
+	LoadSuiteEnv(t)
+
 	// Load configuration (will skip test if missing)
 	config := MustLoadConfig(t)
 	if config == nil {

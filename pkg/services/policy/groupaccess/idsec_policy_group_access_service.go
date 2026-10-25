@@ -51,6 +51,17 @@ func NewIdsecPolicyGroupAccessService(authenticators ...auth.IdsecAuth) (*IdsecP
 	return groupAccessService, nil
 }
 
+func serializeTargets(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, policyJSON map[string]interface{}) error {
+	var err error
+	policyJSON["targets"], err = policy.Targets.SerializeTargets(policy.Metadata.PolicyEntitlement.LocationType)
+	return err
+}
+
+func deserializeTargets(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, policyJSON map[string]interface{}) error {
+	targetsJSON, _ := policyJSON["targets"].(map[string]interface{})
+	return policy.Targets.DeserializeTargets(targetsJSON, policy.Metadata.PolicyEntitlement.LocationType)
+}
+
 // CreatePolicy creates a new policy with the given information.
 func (s *IdsecPolicyGroupAccessService) CreatePolicy(createPolicy *groupaccessmodels.IdsecPolicyGroupAccessPolicy) (*groupaccessmodels.IdsecPolicyGroupAccessPolicy, error) {
 	s.Logger.Info("Creating new group assignment policy [%s]", createPolicy.Metadata.Name)
@@ -60,6 +71,9 @@ func (s *IdsecPolicyGroupAccessService) CreatePolicy(createPolicy *groupaccessmo
 	}
 	policyJSON, err := common.SerializeJSONCamel(createPolicy)
 	if err != nil {
+		return nil, err
+	}
+	if err = serializeTargets(createPolicy, policyJSON); err != nil {
 		return nil, err
 	}
 	respType := reflect.TypeOf(groupaccessmodels.IdsecPolicyGroupAccessPolicy{})
@@ -91,6 +105,9 @@ func (s *IdsecPolicyGroupAccessService) Policy(policyRequest *policycommonmodels
 	if err != nil {
 		return nil, err
 	}
+	if err = deserializeTargets(&groupAccessPolicy, policyJSON); err != nil {
+		return nil, err
+	}
 	return &groupAccessPolicy, nil
 }
 
@@ -99,6 +116,9 @@ func (s *IdsecPolicyGroupAccessService) UpdatePolicy(updatePolicy *groupaccessmo
 	s.Logger.Info("Updating group assignment policy [%s]", updatePolicy.Metadata.PolicyID)
 	policyJSON, err := common.SerializeJSONCamel(updatePolicy)
 	if err != nil {
+		return nil, err
+	}
+	if err = serializeTargets(updatePolicy, policyJSON); err != nil {
 		return nil, err
 	}
 	err = s.baseService.BaseUpdatePolicy(updatePolicy.Metadata.PolicyID, policyJSON)
@@ -135,6 +155,9 @@ func (s *IdsecPolicyGroupAccessService) ListPolicies() (<-chan *IdsecPolicyGroup
 					s.Logger.Error("Failed to decode group assignment policy page: %v", err)
 					continue
 				}
+				if err = deserializeTargets(&groupAccessPolicy, *policy); err != nil {
+					s.Logger.Error("Failed to deserialize group assignment policy targets: %v", err)
+				}
 				groupAccessPolicies.Items[idx] = &groupAccessPolicy
 			}
 			policyPagesWithType <- &groupAccessPolicies
@@ -169,6 +192,9 @@ func (s *IdsecPolicyGroupAccessService) ListPoliciesBy(filters *groupaccessmodel
 				if err != nil {
 					s.Logger.Error("Failed to decode group assignment policy page: %v", err)
 					continue
+				}
+				if err = deserializeTargets(&groupAccessPolicy, *policy); err != nil {
+					s.Logger.Error("Failed to deserialize group assignment policy targets: %v", err)
 				}
 				groupAccessPolicies.Items[idx] = &groupAccessPolicy
 			}

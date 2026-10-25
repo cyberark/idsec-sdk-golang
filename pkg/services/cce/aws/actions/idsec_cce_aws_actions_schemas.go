@@ -16,6 +16,7 @@ var ActionToSchemaMap = map[string]interface{}{
 	"tf-add-account":                   &awsmodels.TfIdsecCCEAWSAddAccount{},
 	"tf-update-account":                &awsmodels.TfIdsecCCEAWSUpdateAccount{},
 	"tf-account":                       &awsmodels.TfIdsecCCEAWSGetAccount{},
+	"tf-account-datasource":            &awsmodels.TfIdsecCCEAWSGetAccount{},
 	"tf-delete-account":                &awsmodels.TfIdsecCCEAWSDeleteAccount{},
 	"tf-add-organization-account-sync": &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{},
 	"tf-update-organization-account":   &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{},

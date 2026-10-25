@@ -215,29 +215,29 @@ func (s *IdsecSIAK8SService) ListClusters(listClusters *k8smodels.IdsecSIAK8SLis
 // returned/saved by ListClusters, with an additional "reason" field filled in per cluster where a
 // reason is required (IsReasonRequired is true). If ReasonToAll is set, it overrides any per-cluster
 // "reason" value in the file and is used for every cluster in the request.
-func (s *IdsecSIAK8SService) GenerateClusterConfig(generateClusterConfig *k8smodels.IdsecSIAK8SGenerateClusterConfig) (string, error) {
+func (s *IdsecSIAK8SService) GenerateClusterConfig(generateClusterConfig *k8smodels.IdsecSIAK8SGenerateClusterConfig) (*k8smodels.IdsecSIAK8SGenerateClusterConfigResult, error) {
 	if generateClusterConfig.ClustersFile == "" {
-		return "", errors.New("clusters_file parameter is required")
+		return nil, errors.New("clusters_file parameter is required")
 	}
 	if strings.ContainsAny(generateClusterConfig.ReasonToAll, "<>") {
-		return "", errors.New("reason_to_all parameter must not contain '<' or '>'")
+		return nil, errors.New("reason_to_all parameter must not contain '<' or '>'")
 	}
 	if _, err := os.Stat(generateClusterConfig.ClustersFile); os.IsNotExist(err) {
-		return "", fmt.Errorf("clusters file [%s] does not exist", generateClusterConfig.ClustersFile)
+		return nil, fmt.Errorf("clusters file [%s] does not exist", generateClusterConfig.ClustersFile)
 	}
 	fileContent, err := os.ReadFile(generateClusterConfig.ClustersFile)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var clustersRaw map[string]interface{}
 	if err := json.Unmarshal(fileContent, &clustersRaw); err != nil {
-		return "", err
+		return nil, err
 	}
 	// The clusters file uses the same camelCase field names as the API/ListClusters output, so
 	// convert it to snake_case before decoding into the (snake_case-tagged) Go model.
 	var clusters k8smodels.IdsecSIAK8SClusters
 	if err := mapstructure.Decode(common.ConvertToSnakeCase(clustersRaw, nil), &clusters); err != nil {
-		return "", err
+		return nil, err
 	}
 	if generateClusterConfig.ReasonToAll != "" {
 		// Ignore whatever reason (if any) is set per-cluster in the file and use the same reason
@@ -249,7 +249,7 @@ func (s *IdsecSIAK8SService) GenerateClusterConfig(generateClusterConfig *k8smod
 	s.Logger.Info("Generating kube config file for the given clusters and reasons")
 	response, err := s.ISPClient().Post(context.Background(), generateClusterConfigURL, clustersToMap(&clusters))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -258,11 +258,11 @@ func (s *IdsecSIAK8SService) GenerateClusterConfig(generateClusterConfig *k8smod
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to generate k8s cluster config - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return nil, fmt.Errorf("failed to generate k8s cluster config - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	resp, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	folderPath := generateClusterConfig.Folder
 	if folderPath == "" {
@@ -270,18 +270,18 @@ func (s *IdsecSIAK8SService) GenerateClusterConfig(generateClusterConfig *k8smod
 	}
 	folderPath = common.ExpandFolder(folderPath)
 	if folderPath == "" {
-		return "", errors.New("folder parameter is required")
+		return nil, errors.New("folder parameter is required")
 	}
 	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	fullPath := filepath.Join(folderPath, "kubeconfig.config")
 	if err := os.WriteFile(fullPath, resp, 0644); err != nil {
-		return "", err
+		return nil, err
 	}
-	return fullPath, nil
+	return &k8smodels.IdsecSIAK8SGenerateClusterConfigResult{KubeconfigPath: fullPath}, nil
 }
 
 // ServiceConfig returns the service configuration for the IdsecSIAK8SService.

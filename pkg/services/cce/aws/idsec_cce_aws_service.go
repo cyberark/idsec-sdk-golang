@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -487,11 +486,10 @@ func (s *IdsecCCEAWSService) TfUpdateAccount(input *awsmodels.TfIdsecCCEAWSUpdat
 
 // accountDetailsForUpdate contains the extracted account information needed for updating organization accounts.
 type accountDetailsForUpdate struct {
-	AccountID                    string                            // AWS account ID (e.g., "575625562187")
-	CurrentServiceNames          []string                          // All service names from "services" field
-	CurrentFullyDeployedServices []string                          // Only services with status "Completely added"
-	ServicesWaitingForDeployment []string                          // Only services with status "Waiting for deployment"
-	CurrentServiceParams         map[string]map[string]interface{} // Currently-deployed parameters, keyed by service name
+	AccountID                    string   // AWS account ID (e.g., "575625562187")
+	CurrentServiceNames          []string // All service names from "services" field
+	CurrentFullyDeployedServices []string // Only services with status "Completely added"
+	ServicesWaitingForDeployment []string // Only services with status "Waiting for deployment"
 }
 
 // extractCurrentServiceVersions builds a map of service name -> currently deployed version from
@@ -687,7 +685,6 @@ func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID stri
 
 		// Parse services from the account response
 		details.CurrentServiceNames, details.CurrentFullyDeployedServices, details.ServicesWaitingForDeployment = parseAccountServices(orgMap)
-		details.CurrentServiceParams = extractCurrentServiceParameters(orgMap)
 	}
 
 	// Validate we got the required information
@@ -696,96 +693,110 @@ func (s *IdsecCCEAWSService) getAccountDetailsForUpdate(accountOnboardingID stri
 	}
 
 	s.Logger.Info("Account ID: [%s]", details.AccountID)
-	s.Logger.Info("Account has %d services: %d fully deployed, %d waiting for deployment",
-		len(details.CurrentServiceNames), len(details.CurrentFullyDeployedServices), len(details.ServicesWaitingForDeployment))
+	s.Logger.Info("Account has %d services %v: %d fully deployed %v, %d waiting for deployment %v",
+		len(details.CurrentServiceNames), details.CurrentServiceNames,
+		len(details.CurrentFullyDeployedServices), details.CurrentFullyDeployedServices,
+		len(details.ServicesWaitingForDeployment), details.ServicesWaitingForDeployment)
 	return details, nil
 }
 
-// determineServicesToAddWithStatus decides which desired services to (re)send to the
-// organization add-account endpoint. It returns:
-//   - every service that is brand-new to the account (not onboarded yet),
-//   - every service in "Waiting for deployment", unconditionally, and
-//   - every already-onboarded service in "Completely added" whose user-controlled parameters
-//     (resources + terraform service_parameters) actually changed, so that an in-place
-//     resources/parameters change is pushed to the API.
+// determineServicesToAddWithStatus returns the desired services to send to the organization
+// add-account endpoint: the ones the account does not have yet, plus the already-onboarded ones
+// whose user-controlled parameters changed since the last apply. An onboarded service that did not
+// change is always dropped, because the endpoint reads it as an update and the API rejects the whole
+// request with 501 FEATURE_NOT_IMPLEMENTED unless the tenant has the update feature flag on - so one
+// unchanged service riding along fails an otherwise legal add.
 //
-// The add-account endpoint is an idempotent resource UPSERT: it diffs the requested resources
-// against what is stored and is a no-op when nothing changed. Sending only genuinely-changed
-// services keeps the request minimal and consistent with the account/organization update paths,
-// while still guaranteeing that a resources change on an already-deployed service reaches the API
-// (the original behavior skipped fully-deployed services entirely and dropped such changes).
+// The change is measured against Terraform's prior state, not against what the API reports. GET
+// account resolves an org member to its parent organization's onboarding and returns the
+// organization's parameters as the account's, while services_data entries carry no resources at all,
+// so the API describes management-account roles while Terraform holds the member account's - a diff
+// against it reports a change on every apply. Prior state is also the more accurate question to ask:
+// it compares against what this module last sent.
 //
-// Services in any other, mid-operation state (e.g. "In progress"/"Failed") are skipped to
-// avoid the API rejecting the request while that service is still being processed.
+// Appearing in the account's service list is not the same as being onboarded. For a programmatic or
+// terraform_provider organization, the periodic scan writes a "Waiting for deployment" row for every
+// one of the organization's products onto each newly discovered member account, before anyone asks
+// for them. The backend does not treat those as existing: it partitions the request against the
+// account's stored resources document, and only that partition goes through the upgrade gate. So a
+// waiting service this module has never sent is new on both sides and must be sent, or it sits in the
+// account's list forever while never deploying.
+//
+// Without prior state for a service that is already deployed (an import, or state predating this
+// field) there is nothing to compare, so it is left alone rather than re-sent on a guess.
+//
 // This is Step 2 of the TfUpdateOrganizationAccount flow.
 func (s *IdsecCCEAWSService) determineServicesToAddWithStatus(
 	currentServiceNames []string,
-	waitingForDeployment []string,
-	fullyDeployed []string,
+	servicesWaitingForDeployment []string,
 	desiredServices []ccemodels.IdsecCCEServiceInput,
-	currentServiceParams map[string]map[string]interface{},
 	desiredServiceParameters map[string]map[string]interface{},
+	previousServices []ccemodels.IdsecCCEServiceInput,
+	previousServiceParameters map[string]map[string]interface{},
 ) []ccemodels.IdsecCCEServiceInput {
-	// Build maps for efficient lookup
-	currentServicesMap := make(map[string]bool)
+	currentServicesMap := make(map[string]bool, len(currentServiceNames))
 	for _, serviceName := range currentServiceNames {
 		currentServicesMap[serviceName] = true
 	}
 
-	waitingMap := make(map[string]bool)
-	for _, serviceName := range waitingForDeployment {
-		waitingMap[serviceName] = true
+	waitingForDeployment := make(map[string]bool, len(servicesWaitingForDeployment))
+	for _, serviceName := range servicesWaitingForDeployment {
+		waitingForDeployment[serviceName] = true
 	}
 
-	fullyDeployedMap := make(map[string]bool)
-	for _, serviceName := range fullyDeployed {
-		fullyDeployedMap[serviceName] = true
+	previousByName := make(map[string]ccemodels.IdsecCCEServiceInput, len(previousServices))
+	for _, service := range previousServices {
+		previousByName[service.ServiceName] = service
 	}
 
-	// Determine services to add or re-send
-	var servicesToAdd []ccemodels.IdsecCCEServiceInput
+	var servicesToSend []ccemodels.IdsecCCEServiceInput
 	for _, service := range desiredServices {
 		serviceName := service.ServiceName
 
-		// Brand-new service (not onboarded on the account yet): add it.
 		if !currentServicesMap[serviceName] {
-			servicesToAdd = append(servicesToAdd, service)
+			servicesToSend = append(servicesToSend, service)
 			s.Logger.Info("Service '%s' is NEW and will be ADDED", serviceName)
 			continue
 		}
 
-		// Service pending deployment: re-send it unconditionally. This is the organization
-		// version-upgrade case — upgrading an organization bumps the parent's product version and
-		// flips every member account to "Waiting for deployment" without changing any resource, so
-		// there is nothing in the payload to diff against. The version cannot be used as the signal
-		// either: the backend bumps the account's version column at org-upgrade time, so the API
-		// already reports the new version while the deployment is still pending. The status is the
-		// only reliable indicator that work is outstanding.
-		if waitingMap[serviceName] {
-			servicesToAdd = append(servicesToAdd, service)
-			s.Logger.Info("Service '%s' is waiting for deployment and will be RE-SENT", serviceName)
-			continue
-		}
-
-		// Already-deployed service: re-send it only when its user-controlled parameters actually
-		// changed, so the endpoint's idempotent resource diff applies the change (and we avoid
-		// re-sending unchanged services).
-		if fullyDeployedMap[serviceName] {
-			desiredParams := mergedDesiredServiceParams(service, desiredServiceParameters)
-			if cceinternal.ServiceParamsChanged(desiredParams, currentServiceParams[serviceName]) {
-				servicesToAdd = append(servicesToAdd, service)
-				s.Logger.Info("Service '%s' parameters changed and will be UPDATED", serviceName)
-			} else {
-				s.Logger.Info("Service '%s' is already onboarded and unchanged, skipping", serviceName)
+		previous, hasPrevious := previousByName[serviceName]
+		if !hasPrevious {
+			// Never sent by this module. If it is only waiting, the scan listed it rather than anyone
+			// onboarding it, and sending it is what starts the deployment.
+			if waitingForDeployment[serviceName] {
+				servicesToSend = append(servicesToSend, service)
+				s.Logger.Info("Service '%s' is listed as waiting for deployment but was never onboarded, and will be ADDED", serviceName)
+				continue
 			}
+			s.Logger.Info("Service '%s' is already onboarded and has no prior state to compare, skipping", serviceName)
 			continue
 		}
 
-		// Skip services in a transient/mid-operation status (In progress, Failed, etc.).
-		s.Logger.Info("Service '%s' has a transient status (not 'Completely added' or 'Waiting for deployment'), skipping", serviceName)
+		if serviceParamsUnchangedSinceLastApply(
+			mergedDesiredServiceParams(service, desiredServiceParameters),
+			mergedDesiredServiceParams(previous, previousServiceParameters),
+		) {
+			s.Logger.Info("Service '%s' is already onboarded and unchanged, skipping", serviceName)
+			continue
+		}
+
+		servicesToSend = append(servicesToSend, service)
+		s.Logger.Info("Service '%s' parameters changed since the last apply and will be UPDATED", serviceName)
 	}
 
-	return servicesToAdd
+	return servicesToSend
+}
+
+// serviceParamsUnchangedSinceLastApply compares a service's parameters against the same service's
+// parameters at the last apply. Both sides come from Terraform, so the comparison is symmetric -
+// unlike cceinternal.ServiceParamsChanged, which only inspects keys the desired side has because it
+// compares against API-shaped values carrying server-managed extras. A removed key is a change here,
+// and an absent map is the same as an empty one.
+func serviceParamsUnchangedSinceLastApply(desired, previous map[string]interface{}) bool {
+	if len(desired) == 0 && len(previous) == 0 {
+		return true
+	}
+	return cceinternal.JSONValuesEqual(desired, previous)
 }
 
 // withoutServiceVersions returns a copy of the services with Version cleared.
@@ -842,7 +853,15 @@ func (s *IdsecCCEAWSService) addServicesToOrganizationAccount(
 	defer cceinternal.CloseResponseBody(addResponse.Body)
 
 	if !cceinternal.IsHTTPSuccess(addResponse.StatusCode) {
-		return cceinternal.HandleNon2xxResponse(s.Logger, addResponse.StatusCode, addResponse.Body, "failed to add services to organization account")
+		// Name the services that were sent: a 501 here means the payload looked like an update, and the
+		// response body says nothing about which service caused that.
+		sentServices := make([]string, 0, len(servicesToAdd))
+		for _, service := range servicesToAdd {
+			sentServices = append(sentServices, service.ServiceName)
+		}
+		return fmt.Errorf("%w (services sent: %s)",
+			cceinternal.HandleNon2xxResponse(s.Logger, addResponse.StatusCode, addResponse.Body, "failed to add services to organization account"),
+			strings.Join(sentServices, ", "))
 	}
 
 	s.Logger.Info("Successfully added %d services", len(servicesToAdd))
@@ -866,18 +885,22 @@ func (s *IdsecCCEAWSService) TfUpdateOrganizationAccount(input *awsmodels.TfIdse
 		return nil, err
 	}
 
-	// Step 2: Determine which services need to be sent. This includes:
-	// - Services completely new to the account (not onboarded yet)
-	// - Already-onboarded services in a settled state ("Completely added"/"Waiting for
-	//   deployment"), re-sent so in-place resources changes are applied by the API's diff
-	// Services in a transient/mid-operation status are skipped.
+	// Step 2: Determine which services need to be sent - those the account does not have yet, those
+	// the scan listed as waiting without anyone onboarding them, and any onboarded service whose
+	// parameters changed since the last apply.
+	var priorServices []ccemodels.IdsecCCEServiceInput
+	var priorServiceParameters map[string]map[string]interface{}
+	if prior := input.PriorState(); prior != nil {
+		priorServices = prior.Services
+		priorServiceParameters = prior.ServiceParameters
+	}
 	servicesToAdd := s.determineServicesToAddWithStatus(
 		accountDetails.CurrentServiceNames,
 		accountDetails.ServicesWaitingForDeployment,
-		accountDetails.CurrentFullyDeployedServices,
 		input.Services,
-		accountDetails.CurrentServiceParams,
 		input.ServiceParameters,
+		priorServices,
+		priorServiceParameters,
 	)
 
 	// Step 3: If nothing to send, skip the API call
@@ -899,7 +922,11 @@ func (s *IdsecCCEAWSService) TfUpdateOrganizationAccount(input *awsmodels.TfIdse
 		input.ServiceParameters,
 	)
 	if err != nil {
-		return nil, err
+		// The payload is chosen from what the account reports it already has, so name that state too:
+		// an add rejected as an update means the API considers a service onboarded that the account did
+		// not report back to us.
+		return nil, fmt.Errorf("%w [account %s reported services %v]",
+			err, accountDetails.AccountID, accountDetails.CurrentServiceNames)
 	}
 
 	// Step 5: Fetch and return updated account details using existing retry logic
@@ -957,7 +984,64 @@ func (s *IdsecCCEAWSService) accountWithRetry(input *awsmodels.TfIdsecCCEAWSGetA
 // API: GET /api/aws/programmatic/account/{id}
 func (s *IdsecCCEAWSService) TfAccount(input *awsmodels.TfIdsecCCEAWSGetAccount) (*awsmodels.TfIdsecCCEAWSAccount, error) {
 	s.Logger.Info("Getting AWS Account details for ID [%s]", input.ID)
-	url := fmt.Sprintf(pathAccountGetOrDeleteURL, input.ID)
+
+	accountJSON, err := s.getAccountJSON(input.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var account awsmodels.TfIdsecCCEAWSAccount
+	err = mapstructure.Decode(accountJSON, &account)
+	if err != nil {
+		return nil, err
+	}
+	account.ServiceNames = extractServiceNames(accountJSON)
+
+	return &account, nil
+}
+
+// TfAccountDatasource retrieves AWS account details including per-service data
+// (name, status, version, available versions) by onboarding ID.
+// ⚠️  DEPRECATED: This function is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// API: GET /api/aws/programmatic/account/{id}
+func (s *IdsecCCEAWSService) TfAccountDatasource(input *awsmodels.TfIdsecCCEAWSGetAccount) (*awsmodels.TfIdsecCCEAWSAccountDatasource, error) {
+	s.Logger.Info("Getting AWS Account datasource details for ID [%s]", input.ID)
+
+	accountJSON, err := s.getAccountJSON(input.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	var account awsmodels.TfIdsecCCEAWSAccountDatasource
+	err = mapstructure.Decode(accountJSON, &account)
+	if err != nil {
+		return nil, err
+	}
+	account.ServiceNames = extractServiceNames(accountJSON)
+
+	// Property values are a bool/string union that mapstructure skips; populate them from the raw JSON.
+	if accountMap, ok := accountJSON.(map[string]interface{}); ok {
+		if rawServices, ok := accountMap["services_data"].([]interface{}); ok {
+			for i := range account.ServicesData {
+				if i >= len(rawServices) {
+					break
+				}
+				if rawService, ok := rawServices[i].(map[string]interface{}); ok {
+					if err = account.ServicesData[i].Deserialize(rawService); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
+
+	return &account, nil
+}
+
+// getAccountJSON performs the account details GET and returns the snake_case-deserialized JSON body.
+func (s *IdsecCCEAWSService) getAccountJSON(id string) (interface{}, error) {
+	url := fmt.Sprintf(pathAccountGetOrDeleteURL, id)
 	response, err := s.ISPClient().Get(context.Background(), url, nil)
 	if err != nil {
 		return nil, err
@@ -969,32 +1053,23 @@ func (s *IdsecCCEAWSService) TfAccount(input *awsmodels.TfIdsecCCEAWSGetAccount)
 		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get account details")
 	}
 
-	accountJSON, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		return nil, err
-	}
+	return common.DeserializeJSONSnake(response.Body)
+}
 
-	var account awsmodels.TfIdsecCCEAWSAccount
-	err = mapstructure.Decode(accountJSON, &account)
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract ServiceNames from raw JSON since it has mapstructure:"-" tag
+// extractServiceNames reads the "services" name list from the raw JSON, since ServiceNames has a mapstructure:"-" tag.
+func extractServiceNames(accountJSON interface{}) []string {
+	var names []string
 	if accountMap, ok := accountJSON.(map[string]interface{}); ok {
-		if servicesRaw, exists := accountMap["services"]; exists {
-			if servicesList, ok := servicesRaw.([]interface{}); ok {
-				account.ServiceNames = make([]string, 0, len(servicesList))
-				for _, svc := range servicesList {
-					if svcStr, ok := svc.(string); ok {
-						account.ServiceNames = append(account.ServiceNames, svcStr)
-					}
+		if servicesList, ok := accountMap["services"].([]interface{}); ok {
+			names = make([]string, 0, len(servicesList))
+			for _, svc := range servicesList {
+				if svcStr, ok := svc.(string); ok {
+					names = append(names, svcStr)
 				}
 			}
 		}
 	}
-
-	return &account, nil
+	return names
 }
 
 // DeleteAccount deletes an AWS account programmatically.
@@ -1014,8 +1089,7 @@ func (s *IdsecCCEAWSService) TfDeleteAccount(input *awsmodels.TfIdsecCCEAWSDelet
 	defer cceinternal.CloseResponseBody(response.Body)
 
 	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to delete account: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to delete account")
 	}
 
 	return nil
@@ -1049,8 +1123,7 @@ func (s *IdsecCCEAWSService) TfAddAccountServices(input *awsmodels.TfIdsecCCEAWS
 	defer cceinternal.CloseResponseBody(response.Body)
 
 	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to add services to account: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to add services to account")
 	}
 
 	return nil
@@ -1082,8 +1155,7 @@ func (s *IdsecCCEAWSService) DeleteAccountServices(input *awsmodels.TfIdsecCCEAW
 	defer cceinternal.CloseResponseBody(response.Body)
 
 	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to delete services from account: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to delete services from account")
 	}
 
 	return nil

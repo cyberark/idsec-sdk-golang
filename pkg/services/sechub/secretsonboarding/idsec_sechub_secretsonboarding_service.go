@@ -11,6 +11,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 	onboardingmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/secretsonboarding/models"
+	"github.com/cyberark/idsec-sdk-golang/pkg/validation"
 )
 
 const onboardingURL = "/api/secrets-onboarding/%s/%s"
@@ -68,6 +69,9 @@ func (s *IdsecSecHubSecretOnboardingService) ServiceConfig() services.IdsecServi
 // Returns the input request as state on success (the API returns 204 No Content with no body),
 // or an error if the request fails or the response is not 204 No Content.
 func (s *IdsecSecHubSecretOnboardingService) Create(req *onboardingmodels.IdsecSecHubOnboardSecret) (*onboardingmodels.IdsecSecHubOnboardSecret, error) {
+	if err := validation.ValidateStruct(req); err != nil {
+		return nil, err
+	}
 	s.Logger.Info("Onboarding secret [%s] to PAM", req.SecretID)
 	bodyJSON, err := common.SerializeJSONCamel(req)
 	if err != nil {

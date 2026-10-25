@@ -21,9 +21,13 @@ const (
 	eligibilityGroupsURLFmt = "/api/access/%s/eligibility/groups"
 	elevateGroupsURL        = "/api/access/elevate/groups"
 	maxGroupIDs             = 5
+	gcpGroupIDPrefix        = "groups/"
 )
 
-// IdsecSCAGroupAccessService provides SCA Entra ID group eligibility and elevate operations (AZURE-only).
+var supportedCSPs = []string{scamodels.CSPAzure, scamodels.CSPGCP}
+
+// IdsecSCAGroupAccessService provides SCA group eligibility and elevate operations
+// for Entra ID (AZURE) and Google Cloud (GCP) groups.
 type IdsecSCAGroupAccessService struct {
 	*services.IdsecBaseService
 	*services.IdsecISPBaseService
@@ -57,18 +61,19 @@ func (s *IdsecSCAGroupAccessService) refreshAuth(client *common.IdsecClient) err
 	return isp.RefreshClient(client, s.ISPAuth())
 }
 
-// ListTargets retrieves eligible Entra ID group targets via
-// GET /api/access/{csp}/eligibility/groups. Only AZURE is supported.
+// ListTargets retrieves eligible group targets via
+// GET /api/access/{csp}/eligibility/groups. AZURE and GCP are supported.
 func (s *IdsecSCAGroupAccessService) ListTargets(req *scamodels.IdsecSCAListTargetsRequest) (*groupaccessmodels.IdsecSCAListGroupTargetsResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("list targets request cannot be nil")
 	}
 	if req.CSP == "" {
-		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAzure)
+		return nil, scacommon.ErrCSPEmpty(supportedCSPs...)
 	}
-	if !scacommon.IsSupportedCSP(req.CSP, scamodels.CSPAzure) {
-		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAzure)
+	if !scacommon.IsSupportedCSP(req.CSP, supportedCSPs...) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, supportedCSPs...)
 	}
+	csp := strings.ToUpper(strings.TrimSpace(req.CSP))
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
 		return nil, fmt.Errorf("sca groupaccess service not initialized")
 	}
@@ -82,8 +87,8 @@ func (s *IdsecSCAGroupAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 	if req.NextToken != "" {
 		params["nextToken"] = req.NextToken
 	}
-	url := fmt.Sprintf(eligibilityGroupsURLFmt, strings.ToUpper(req.CSP))
-	s.Logger.Info("Listing SCA eligible group targets for CSP [AZURE]")
+	url := fmt.Sprintf(eligibilityGroupsURLFmt, csp)
+	s.Logger.Info("Listing SCA eligible group targets for CSP [%s]", csp)
 	resp, err := s.ISPClient().Get(context.Background(), url, params)
 	if err != nil {
 		return nil, err
@@ -107,20 +112,29 @@ func (s *IdsecSCAGroupAccessService) ListTargets(req *scamodels.IdsecSCAListTarg
 	return &response, nil
 }
 
-// Elevate requests just-in-time membership to one or more Entra ID groups
-// via POST /api/access/elevate/groups. The --groups flag accepts comma-separated
-// group IDs (max 50).
+// Elevate requests just-in-time membership to one or more groups via
+// POST /api/access/elevate/groups. AZURE requires --directory-id; GCP requires
+// --organization-id and group IDs in the groups/{id} format. The --groups flag
+// accepts comma-separated group IDs (max 5).
 func (s *IdsecSCAGroupAccessService) Elevate(req *groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest) (*groupaccessmodels.IdsecSCAGroupAccessElevateResponse, error) { //nolint:revive
 	if req == nil {
 		return nil, fmt.Errorf("elevate request cannot be nil")
 	}
 	if strings.TrimSpace(req.CSP) == "" {
-		return nil, scacommon.ErrCSPEmpty(scamodels.CSPAzure)
+		return nil, scacommon.ErrCSPEmpty(supportedCSPs...)
 	}
-	if !scacommon.IsSupportedCSP(req.CSP, scamodels.CSPAzure) {
-		return nil, scacommon.ErrUnsupportedCSP(req.CSP, scamodels.CSPAzure)
+	if !scacommon.IsSupportedCSP(req.CSP, supportedCSPs...) {
+		return nil, scacommon.ErrUnsupportedCSP(req.CSP, supportedCSPs...)
 	}
-	if strings.TrimSpace(req.DirectoryID) == "" {
+	csp := strings.ToUpper(strings.TrimSpace(req.CSP))
+
+	scopeKey, scopeID := "directory_id", strings.TrimSpace(req.DirectoryID)
+	if csp == scamodels.CSPGCP {
+		scopeKey, scopeID = "organization_id", strings.TrimSpace(req.OrganizationID)
+		if scopeID == "" {
+			return nil, fmt.Errorf("organizationId cannot be empty")
+		}
+	} else if scopeID == "" {
 		return nil, fmt.Errorf("directoryId cannot be empty")
 	}
 	if strings.TrimSpace(req.Groups) == "" {
@@ -130,6 +144,13 @@ func (s *IdsecSCAGroupAccessService) Elevate(req *groupaccessmodels.IdsecSCAGrou
 	groupIDs := sca.SplitCommaSeparated(req.Groups)
 	if len(groupIDs) > maxGroupIDs {
 		return nil, fmt.Errorf("maximum %d group IDs allowed, got %d", maxGroupIDs, len(groupIDs))
+	}
+	if csp == scamodels.CSPGCP {
+		for _, gid := range groupIDs {
+			if !strings.HasPrefix(gid, gcpGroupIDPrefix) || len(gid) == len(gcpGroupIDPrefix) {
+				return nil, fmt.Errorf("invalid GCP group ID '%s': expected the format %s{id}", gid, gcpGroupIDPrefix)
+			}
+		}
 	}
 
 	if s == nil || s.IdsecISPBaseService == nil || s.ISPClient() == nil {
@@ -141,18 +162,18 @@ func (s *IdsecSCAGroupAccessService) Elevate(req *groupaccessmodels.IdsecSCAGrou
 		targets[i] = map[string]interface{}{"group_id": gid}
 	}
 	body := map[string]interface{}{
-		"csp":          strings.ToUpper(req.CSP),
-		"directory_id": req.DirectoryID,
-		"targets":      targets,
+		"csp":     csp,
+		scopeKey:  scopeID,
+		"targets": targets,
 	}
-	s.Logger.Info("Elevating into %d Entra group(s) in directory [%s]", len(groupIDs), req.DirectoryID)
+	s.Logger.Info("Elevating into %d %s group(s) in [%s]", len(groupIDs), csp, scopeID)
 	resp, err := s.ISPClient().Post(context.Background(), elevateGroupsURL, body)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to elevate entra group - [%d] - [%s]", resp.StatusCode, common.SerializeResponseToJSON(resp.Body))
+		return nil, fmt.Errorf("failed to elevate group - [%d] - [%s]", resp.StatusCode, common.SerializeResponseToJSON(resp.Body))
 	}
 	decoded, err := common.DeserializeJSONCamel(resp.Body)
 	if err != nil {

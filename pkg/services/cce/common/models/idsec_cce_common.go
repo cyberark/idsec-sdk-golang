@@ -44,6 +44,9 @@ type IdsecCCEOnboardedService struct {
 	Properties *[]IdsecCCEPropertyOutput `json:"properties,omitempty" mapstructure:"properties" desc:"Additional properties for the service"`
 	Suspended  *bool                     `json:"suspended,omitempty" mapstructure:"suspended" desc:"Whether the service is suspended"`
 	Version    string                    `json:"version,omitempty" mapstructure:"version" desc:"Deployed version of the service"`
+	// AvailableVersions lists the versions the service can be upgraded to. It is populated only for
+	// top-level workspaces (organizations, top-level management groups, standalone accounts and subscriptions).
+	AvailableVersions []string `json:"availableVersions,omitempty" mapstructure:"available_versions,omitempty" desc:"Versions available for upgrade. Populated only for top-level workspaces when an upgrade is available."` //nolint:tagliatelle
 }
 
 // Deserialize fixes up union types in already-populated service data.

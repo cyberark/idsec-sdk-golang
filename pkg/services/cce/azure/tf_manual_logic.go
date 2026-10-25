@@ -22,6 +22,51 @@ func (s *IdsecCCEAzureService) manual() *cceinternal.ManualClient {
 	return cceinternal.NewManualClient(s.ISPClient(), s.Logger, pathManualAddURL)
 }
 
+// getManualDetails performs a GET on the given manual-onboarding details URL and decodes the
+// response body into T. errMsg is used as the prefix for non-2xx error responses.
+func getManualDetails[T any](s *IdsecCCEAzureService, url, errMsg string) (*T, error) {
+	response, err := s.ISPClient().Get(context.Background(), url, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer cceinternal.CloseResponseBody(response.Body)
+
+	// Handle non-2xx status codes
+	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
+		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, errMsg)
+	}
+
+	var result T
+	if err = json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// tfEntraDatasource retrieves Azure Entra tenant details, including per-service data
+// (name, status, version, available versions), by onboarding ID.
+// API: GET /api/azure/manual/entra/{id}
+func (s *IdsecCCEAzureService) tfEntraDatasource(input *azuremodels.TfIdsecCCEAzureGetEntra) (*azuremodels.TfIdsecCCEAzureEntraDatasource, error) {
+	s.Logger.Info("Getting Azure Entra tenant datasource details for ID [%s]", input.ID)
+	return getManualDetails[azuremodels.TfIdsecCCEAzureEntraDatasource](s, fmt.Sprintf(pathManualEntraGetURL, input.ID), "failed to get Entra tenant details")
+}
+
+// tfManagementGroupDatasource retrieves Azure Management Group details, including per-service data
+// (name, status, version, available versions), by onboarding ID.
+// API: GET /api/azure/manual/mgmtgroup/{id}
+func (s *IdsecCCEAzureService) tfManagementGroupDatasource(input *azuremodels.TfIdsecCCEAzureGetManagementGroup) (*azuremodels.TfIdsecCCEAzureManagementGroupDatasource, error) {
+	s.Logger.Info("Getting Azure Management Group datasource details for ID [%s]", input.ID)
+	return getManualDetails[azuremodels.TfIdsecCCEAzureManagementGroupDatasource](s, fmt.Sprintf(pathManualMgmtGroupGetURL, input.ID), "failed to get Management Group details")
+}
+
+// tfSubscriptionDatasource retrieves Azure Subscription details, including per-service data
+// (name, status, version, available versions), by onboarding ID.
+// API: GET /api/azure/manual/subscription/{id}
+func (s *IdsecCCEAzureService) tfSubscriptionDatasource(input *azuremodels.TfIdsecCCEAzureGetSubscription) (*azuremodels.TfIdsecCCEAzureSubscriptionDatasource, error) {
+	s.Logger.Info("Getting Azure Subscription datasource details for ID [%s]", input.ID)
+	return getManualDetails[azuremodels.TfIdsecCCEAzureSubscriptionDatasource](s, fmt.Sprintf(pathManualSubscriptionGetURL, input.ID), "failed to get Subscription details")
+}
+
 // tfAddEntra adds an Azure Entra tenant manually.
 // After creation, it retrieves the full Entra tenant details with retry logic (3 attempts, 1 second delay).
 // API: POST /api/azure/manual
@@ -54,26 +99,7 @@ func (s *IdsecCCEAzureService) tfAddEntra(input *azuremodels.TfIdsecCCEAzureAddE
 // API: GET /api/azure/manual/entra/{id}
 func (s *IdsecCCEAzureService) tfEntra(input *azuremodels.TfIdsecCCEAzureGetEntra) (*azuremodels.TfIdsecCCEAzureEntra, error) {
 	s.Logger.Info("Getting Azure Entra tenant details for ID [%s]", input.ID)
-
-	url := fmt.Sprintf(pathManualEntraGetURL, input.ID)
-	response, err := s.ISPClient().Get(context.Background(), url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer cceinternal.CloseResponseBody(response.Body)
-
-	// Handle non-2xx status codes
-	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get Entra tenant details")
-	}
-
-	var entra azuremodels.TfIdsecCCEAzureEntra
-	err = json.NewDecoder(response.Body).Decode(&entra)
-	if err != nil {
-		return nil, err
-	}
-
-	return &entra, nil
+	return getManualDetails[azuremodels.TfIdsecCCEAzureEntra](s, fmt.Sprintf(pathManualEntraGetURL, input.ID), "failed to get Entra tenant details")
 }
 
 // tfUpdateEntra updates an Azure Entra tenant's services.
@@ -152,26 +178,7 @@ func (s *IdsecCCEAzureService) tfAddManagementGroup(input *azuremodels.TfIdsecCC
 // API: GET /api/azure/manual/mgmtgroup/{id}
 func (s *IdsecCCEAzureService) tfManagementGroup(input *azuremodels.TfIdsecCCEAzureGetManagementGroup) (*azuremodels.TfIdsecCCEAzureManagementGroup, error) {
 	s.Logger.Info("Getting Azure Management Group details for ID [%s]", input.ID)
-
-	url := fmt.Sprintf(pathManualMgmtGroupGetURL, input.ID)
-	response, err := s.ISPClient().Get(context.Background(), url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer cceinternal.CloseResponseBody(response.Body)
-
-	// Handle non-2xx status codes
-	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get Management Group details")
-	}
-
-	var mgmtGroup azuremodels.TfIdsecCCEAzureManagementGroup
-	err = json.NewDecoder(response.Body).Decode(&mgmtGroup)
-	if err != nil {
-		return nil, err
-	}
-
-	return &mgmtGroup, nil
+	return getManualDetails[azuremodels.TfIdsecCCEAzureManagementGroup](s, fmt.Sprintf(pathManualMgmtGroupGetURL, input.ID), "failed to get Management Group details")
 }
 
 // tfUpdateManagementGroup updates an Azure Management Group's services.
@@ -250,26 +257,7 @@ func (s *IdsecCCEAzureService) tfAddSubscription(input *azuremodels.TfIdsecCCEAz
 // API: GET /api/azure/manual/subscription/{id}
 func (s *IdsecCCEAzureService) tfSubscription(input *azuremodels.TfIdsecCCEAzureGetSubscription) (*azuremodels.TfIdsecCCEAzureSubscription, error) {
 	s.Logger.Info("Getting Azure Subscription details for ID [%s]", input.ID)
-
-	url := fmt.Sprintf(pathManualSubscriptionGetURL, input.ID)
-	response, err := s.ISPClient().Get(context.Background(), url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer cceinternal.CloseResponseBody(response.Body)
-
-	// Handle non-2xx status codes
-	if !cceinternal.IsHTTPSuccess(response.StatusCode) {
-		return nil, cceinternal.HandleNon2xxResponse(s.Logger, response.StatusCode, response.Body, "failed to get Subscription details")
-	}
-
-	var subscription azuremodels.TfIdsecCCEAzureSubscription
-	err = json.NewDecoder(response.Body).Decode(&subscription)
-	if err != nil {
-		return nil, err
-	}
-
-	return &subscription, nil
+	return getManualDetails[azuremodels.TfIdsecCCEAzureSubscription](s, fmt.Sprintf(pathManualSubscriptionGetURL, input.ID), "failed to get Subscription details")
 }
 
 // tfUpdateSubscription updates an Azure Subscription's services.

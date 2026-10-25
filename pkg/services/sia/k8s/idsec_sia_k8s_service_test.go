@@ -227,14 +227,14 @@ func TestGenerateClusterConfig_Success(t *testing.T) {
 	}`), 0644))
 
 	folder := t.TempDir()
-	fullPath, err := service.GenerateClusterConfig(&k8smodels.IdsecSIAK8SGenerateClusterConfig{
+	result, err := service.GenerateClusterConfig(&k8smodels.IdsecSIAK8SGenerateClusterConfig{
 		ClustersFile: clustersFile,
 		Folder:       folder,
 	})
 	require.NoError(t, err)
-	require.Equal(t, filepath.Join(folder, "kubeconfig.config"), fullPath)
+	require.Equal(t, filepath.Join(folder, "kubeconfig.config"), result.KubeconfigPath)
 
-	written, err := os.ReadFile(fullPath)
+	written, err := os.ReadFile(result.KubeconfigPath)
 	require.NoError(t, err)
 	require.Equal(t, kubeConfigContent, string(written))
 

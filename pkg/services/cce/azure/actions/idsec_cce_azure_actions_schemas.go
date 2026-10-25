@@ -24,6 +24,11 @@ var ActionToSchemaMap = map[string]interface{}{
 	"tf-update-subscription": &azuremodels.TfIdsecCCEAzureUpdateSubscription{},
 	"tf-delete-subscription": &azuremodels.TfIdsecCCEAzureDeleteSubscription{},
 
+	// Data source actions that additionally expose services_data
+	"tf-entra-datasource":            &azuremodels.TfIdsecCCEAzureGetEntra{},
+	"tf-management-group-datasource": &azuremodels.TfIdsecCCEAzureGetManagementGroup{},
+	"tf-subscription-datasource":     &azuremodels.TfIdsecCCEAzureGetSubscription{},
+
 	// Workspaces data source
 	"tf-workspaces": &azuremodels.TfIdsecCCEAzureGetWorkspacesTerraform{},
 

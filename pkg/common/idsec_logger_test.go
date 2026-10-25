@@ -257,6 +257,10 @@ func TestNewIdsecLogger(t *testing.T) {
 				t.Error("Expected embedded Logger to be initialized")
 			}
 
+			if logger.Writer() != os.Stderr {
+				t.Error("Expected logger to write to os.Stderr")
+			}
+
 			if tt.validateFunc != nil {
 				tt.validateFunc(t, logger)
 			}

@@ -109,5 +109,9 @@ type TfIdsecCCEAWSOrganizationDatasource struct {
 	Services []string `json:"services" mapstructure:"services" desc:"List of services (SIA, SCA, SecretsHub, CDS)."`
 	// ServicesData contains detailed information about each onboarded service
 	ServicesData []ccemodels.IdsecCCEOnboardedService `json:"servicesData" mapstructure:"services_data" desc:"Detailed information about each service."`
+	// CCEAvailableVersions lists the base CCE infrastructure versions newer than the current one (currently at most one, the latest).
+	CCEAvailableVersions []string `json:"cceAvailableVersions,omitempty" mapstructure:"cce_available_versions,omitempty" desc:"Base CCE infrastructure versions available for upgrade."`
+	// UpgradeAvailable is populated only for top-level workspaces; nil otherwise.
+	UpgradeAvailable *bool `json:"upgradeAvailable,omitempty" mapstructure:"upgrade_available,omitempty" desc:"Whether an upgrade is available for the base CCE infrastructure or any onboarded service. Populated only for top-level workspaces."`
 	// Note: Parameters field is inherited from TfIdsecCCEAWSOrganization (embedded with squash)
 }

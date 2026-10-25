@@ -162,7 +162,9 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 			}
 		},
 		"display_name": "Test Organization",
-		"status": "Completely added"
+		"status": "Completely added",
+		"cce_available_versions": ["0.2.0"],
+		"upgrade_available": false
 	}`
 
 	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
@@ -213,6 +215,10 @@ func TestOrganizationDatasource_Success(t *testing.T) {
 	// resource something that changes when the organization is upgraded.
 	require.Equal(t, "0.0.2", result.ServicesData[0].Version)
 	require.Equal(t, "0.0.6", result.ServicesData[1].Version)
+
+	require.Equal(t, []string{"0.2.0"}, result.CCEAvailableVersions)
+	require.NotNil(t, result.UpgradeAvailable, "an explicit false must not be lost")
+	require.False(t, *result.UpgradeAvailable)
 
 	// Verify parameters field (keys are snake_case due to DeserializeJSONSnake)
 	require.NotNil(t, result.Parameters, "Parameters should not be nil")

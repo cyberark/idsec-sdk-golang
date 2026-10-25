@@ -45,12 +45,12 @@ func TestListTargets_validation_table(t *testing.T) {
 	}{
 		{name: "nil_request", req: nil},
 		{name: "empty_csp", req: &scamodels.IdsecSCAListTargetsRequest{}},
-		// Non-AZURE CSPs are rejected before any network call.
+		// CSPs other than AZURE and GCP are rejected before any network call.
 		{name: "aws_rejected", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AWS"}},
-		{name: "gcp_rejected", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "GCP"}},
 		{name: "ibm_rejected", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "ibm"}},
-		// AZURE is valid but the service is uninitialized (no HTTP client), so it still errors.
+		// AZURE and GCP are valid but the service is uninitialized (no HTTP client), so it still errors.
 		{name: "uninitialized_azure", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE"}},
+		{name: "uninitialized_gcp", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "GCP"}},
 		{name: "uninitialized_azure_lowercase", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "azure"}},
 		{name: "uninitialized_azure_with_workspace_id", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE", WorkspaceID: "ws-123"}},
 		{name: "uninitialized_azure_with_limit", req: &scamodels.IdsecSCAListTargetsRequest{CSP: "AZURE", Limit: 25}},
@@ -65,17 +65,19 @@ func TestListTargets_validation_table(t *testing.T) {
 	}
 }
 
-// TestListTargets_NonAzureCSP_ErrorMessage verifies the error message names the rejected CSP.
-func TestListTargets_NonAzureCSP_ErrorMessage(t *testing.T) {
+// TestListTargets_UnsupportedCSP_ErrorMessage verifies the error message names the rejected CSP
+// and lists the supported providers.
+func TestListTargets_UnsupportedCSP_ErrorMessage(t *testing.T) {
 	svc := &IdsecSCAGroupAccessService{}
-	nonAzureCSPs := []string{"AWS", "GCP", "ibm", "oracle"}
+	unsupportedCSPs := []string{"AWS", "ibm", "oracle"}
 
-	for _, csp := range nonAzureCSPs {
+	for _, csp := range unsupportedCSPs {
 		csp := csp
 		t.Run("csp_"+csp, func(t *testing.T) {
 			_, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: csp})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), csp)
+			require.Contains(t, err.Error(), "AZURE, GCP")
 		})
 	}
 }
@@ -122,6 +124,44 @@ func TestListTargets_Success(t *testing.T) {
 	require.Equal(t, "grp-abc", resp.Response[0].GroupID)
 	require.Equal(t, "Security Admins", resp.Response[0].GroupName)
 	require.Equal(t, "dir-001", resp.Response[0].DirectoryID)
+}
+
+// TestListTargets_GCP_Success verifies the GCP path and that GCP rows decode organizationId.
+func TestListTargets_GCP_Success(t *testing.T) {
+	responseJSON := `{
+		"response": [
+			{
+				"organizationId": "123456789012",
+				"groupId": "groups/03b2xy",
+				"groupName": "gcp-admins@example.com"
+			}
+		],
+		"total": 1
+	}`
+
+	var capturedPath string
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return true },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+			OnRequest: func(r *http.Request) {
+				capturedPath = r.URL.Path
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupGroupAccessService(client)
+	resp, err := svc.ListTargets(&scamodels.IdsecSCAListTargetsRequest{CSP: "gcp"})
+
+	require.NoError(t, err)
+	require.Equal(t, "/api/access/GCP/eligibility/groups", capturedPath)
+	require.Len(t, resp.Response, 1)
+	require.Equal(t, "123456789012", resp.Response[0].OrganizationID)
+	require.Empty(t, resp.Response[0].DirectoryID)
+	require.Equal(t, "groups/03b2xy", resp.Response[0].GroupID)
+	require.Equal(t, "gcp-admins@example.com", resp.Response[0].GroupName)
 }
 
 // TestListTargets_EmptyResponse verifies an empty group list is handled without error.
@@ -346,10 +386,16 @@ func TestElevate_validation_table(t *testing.T) {
 		{name: "nil_request", req: nil},
 		{name: "empty_csp", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{}},
 		{name: "aws_rejected", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AWS", DirectoryID: "dir", Groups: "g"}},
-		{name: "gcp_rejected", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", DirectoryID: "dir", Groups: "g"}},
 		{name: "missing_directory_id", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", Groups: "g"}},
+		{name: "azure_organization_id_instead_of_directory_id", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", OrganizationID: "org", Groups: "g"}},
 		{name: "missing_groups", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", DirectoryID: "dir"}},
 		{name: "uninitialized_service", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "AZURE", DirectoryID: "dir", Groups: "g"}},
+		{name: "gcp_missing_organization_id", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", Groups: "groups/g"}},
+		{name: "gcp_directory_id_instead_of_organization_id", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", DirectoryID: "dir", Groups: "groups/g"}},
+		{name: "gcp_missing_groups", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", OrganizationID: "org"}},
+		{name: "gcp_group_without_prefix", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", OrganizationID: "org", Groups: "g"}},
+		{name: "gcp_group_prefix_only", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", OrganizationID: "org", Groups: "groups/"}},
+		{name: "gcp_uninitialized_service", req: &groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{CSP: "GCP", OrganizationID: "org", Groups: "groups/g"}},
 	}
 
 	for _, tt := range tests {
@@ -360,10 +406,10 @@ func TestElevate_validation_table(t *testing.T) {
 	}
 }
 
-// TestElevate_NonAzureCSP_ErrorMessage verifies the error message names the rejected CSP.
-func TestElevate_NonAzureCSP_ErrorMessage(t *testing.T) {
+// TestElevate_UnsupportedCSP_ErrorMessage verifies the error message names the rejected CSP.
+func TestElevate_UnsupportedCSP_ErrorMessage(t *testing.T) {
 	svc := &IdsecSCAGroupAccessService{}
-	for _, csp := range []string{"AWS", "GCP", "ibm"} {
+	for _, csp := range []string{"AWS", "ibm"} {
 		csp := csp
 		t.Run("csp_"+csp, func(t *testing.T) {
 			_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
@@ -384,6 +430,68 @@ func TestElevate_ExceedsMaxGroupIDs(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "maximum")
+}
+
+func TestElevate_GCP_InvalidGroupIDNamesTheID(t *testing.T) {
+	svc := &IdsecSCAGroupAccessService{}
+	_, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
+		CSP: "GCP", OrganizationID: "org", Groups: "groups/ok,bad-id",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bad-id")
+	require.Contains(t, err.Error(), "groups/{id}")
+}
+
+func TestElevate_GCP_RequestBodyAndResult(t *testing.T) {
+	responseJSON := `{
+		"response": {
+			"organizationId": "123456789012",
+			"csp": "GCP",
+			"results": [
+				{"sessionId": "s-1", "groupId": "groups/03b2xy", "groupName": "gcp-admins@example.com"},
+				{"sessionId": "s-2", "groupId": "groups/04c3yz", "groupName": "gcp-devs@example.com"}
+			]
+		}
+	}`
+
+	var capturedBody []byte
+	client, cleanup := scainternal.SetupMockSCAService(t, []scainternal.MockEndpointConfig{
+		{
+			Matcher:      func(r *http.Request) bool { return r.Method == http.MethodPost },
+			StatusCode:   http.StatusOK,
+			ResponseBody: responseJSON,
+			OnRequest: func(r *http.Request) {
+				capturedBody = make([]byte, r.ContentLength)
+				_, _ = r.Body.Read(capturedBody)
+			},
+		},
+	})
+	defer cleanup()
+
+	svc := setupGroupAccessService(client)
+	resp, err := svc.Elevate(&groupaccessmodels.IdsecSCAGroupAccessElevateActionRequest{
+		CSP: "gcp", OrganizationID: "123456789012", Groups: "groups/03b2xy,groups/04c3yz",
+	})
+
+	require.NoError(t, err)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "GCP", body["csp"])
+	require.Equal(t, "123456789012", body["organization_id"])
+	require.NotContains(t, body, "directory_id")
+	targets, ok := body["targets"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, targets, 2)
+	for i, expectedGroup := range []string{"groups/03b2xy", "groups/04c3yz"} {
+		require.Equal(t, expectedGroup, targets[i].(map[string]interface{})["group_id"])
+	}
+
+	require.Equal(t, "GCP", resp.Response.CSP)
+	require.Equal(t, "123456789012", resp.Response.OrganizationID)
+	require.Empty(t, resp.Response.DirectoryID)
+	require.Len(t, resp.Response.Results, 2)
+	require.Equal(t, "groups/03b2xy", resp.Response.Results[0].GroupID)
+	require.Equal(t, "s-1", resp.Response.Results[0].SessionID)
 }
 
 // ---------------------------------------------------------------------------

@@ -2,9 +2,14 @@ package keyring
 
 import (
 	"errors"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/99designs/keyring"
+	"github.com/danieljoos/wincred"
 )
 
 // mockKeyringStore implements keyring.Keyring for testing.
@@ -60,6 +65,140 @@ func patchOSKeyringOpen(store keyring.Keyring, err error) func() {
 	return func() {
 		OSKeyringOpen = origOpen
 	}
+}
+
+// fakeWinCred simulates the 99designs/keyring Windows WinCred backend:
+//   - a shared backing map keyed "keyring:<service>:<key>"
+//   - ServiceName=="" maps to "default"
+//   - Keys() returns only keys under the opening service's prefix
+//   - Set returns an error when len(item.Data) > 2560
+//   - Remove returns keyring.ErrKeyNotFound for missing keys
+type fakeWinCred struct {
+	mu    sync.Mutex
+	store map[string][]byte // key = "keyring:<svc>:<itemKey>"
+}
+
+func newFakeWinCred() *fakeWinCred {
+	return &fakeWinCred{store: map[string][]byte{}}
+}
+
+// open returns a view scoped to serviceName.
+func (f *fakeWinCred) open(serviceName string) keyring.Keyring {
+	svc := serviceName
+	if svc == "" {
+		svc = "default"
+	}
+	return &fakeWinCredView{f: f, svc: svc}
+}
+
+// list mimics wincred.FilteredList. filter must end with "*" for prefix matching.
+func (f *fakeWinCred) list(filter string) ([]*wincred.Credential, error) {
+	prefix := strings.TrimSuffix(filter, "*")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var targets []string
+	for k := range f.store {
+		if strings.HasPrefix(k, prefix) {
+			targets = append(targets, k)
+		}
+	}
+	sort.Strings(targets) // deterministic order for error-propagation assertions
+	creds := make([]*wincred.Credential, 0, len(targets))
+	for _, t := range targets {
+		creds = append(creds, &wincred.Credential{TargetName: t})
+	}
+	return creds, nil
+}
+
+// delete mimics (*wincred.GenericCredential).Delete.
+func (f *fakeWinCred) delete(targetName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.store[targetName]; !ok {
+		return wincred.ErrElementNotFound
+	}
+	delete(f.store, targetName)
+	return nil
+}
+
+type fakeWinCredView struct {
+	f   *fakeWinCred
+	svc string
+}
+
+func (v *fakeWinCredView) globalKey(itemKey string) string {
+	return "keyring:" + v.svc + ":" + itemKey
+}
+
+func (v *fakeWinCredView) Set(item keyring.Item) error {
+	if len(item.Data) > 2560 {
+		return errors.New("credential blob exceeds 2560-byte limit")
+	}
+	v.f.mu.Lock()
+	defer v.f.mu.Unlock()
+	v.f.store[v.globalKey(item.Key)] = item.Data
+	return nil
+}
+
+func (v *fakeWinCredView) Get(key string) (keyring.Item, error) {
+	v.f.mu.Lock()
+	defer v.f.mu.Unlock()
+	data, ok := v.f.store[v.globalKey(key)]
+	if !ok {
+		return keyring.Item{}, keyring.ErrKeyNotFound
+	}
+	return keyring.Item{Key: key, Data: data}, nil
+}
+
+func (v *fakeWinCredView) Remove(key string) error {
+	v.f.mu.Lock()
+	defer v.f.mu.Unlock()
+	gk := v.globalKey(key)
+	if _, ok := v.f.store[gk]; !ok {
+		return keyring.ErrKeyNotFound
+	}
+	delete(v.f.store, gk)
+	return nil
+}
+
+func (v *fakeWinCredView) Keys() ([]string, error) {
+	v.f.mu.Lock()
+	defer v.f.mu.Unlock()
+	prefix := "keyring:" + v.svc + ":"
+	var keys []string
+	for k := range v.f.store {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, strings.TrimPrefix(k, prefix))
+		}
+	}
+	return keys, nil
+}
+
+func (v *fakeWinCredView) GetMetadata(key string) (keyring.Metadata, error) {
+	return keyring.Metadata{}, nil
+}
+func (v *fakeWinCredView) Type() keyring.BackendType { return keyring.WinCredBackend }
+
+// withFakeWinCred patches OSKeyringOpen to use a shared fakeWinCred and
+// isolates the file keyring to a temp directory.
+func withFakeWinCred(t *testing.T) *fakeWinCred {
+	t.Helper()
+	f := newFakeWinCred()
+	origOpen, origEnabled, origList, origDelete :=
+		OSKeyringOpen, winCredDiscoveryEnabled, winCredList, winCredDelete
+	t.Cleanup(func() {
+		OSKeyringOpen, winCredDiscoveryEnabled, winCredList, winCredDelete =
+			origOpen, origEnabled, origList, origDelete
+	})
+	OSKeyringOpen = func(cfg keyring.Config) (keyring.Keyring, error) {
+		return f.open(cfg.ServiceName), nil
+	}
+	winCredDiscoveryEnabled = true
+	winCredList = f.list
+	winCredDelete = f.delete
+	t.Setenv(IdsecBasicKeyringFolderEnvVar, t.TempDir())
+	t.Setenv(IdsecBasicKeyringKeyFileEnvVar, filepath.Join(t.TempDir(), "keyring.key"))
+	return f
 }
 
 // mockFallbackKeyring implements IdsecKeyringImpl for fallback logic.
@@ -347,117 +486,158 @@ func TestIdsecOSProvidedKeyring_ConcurrentUsage(t *testing.T) {
 	}
 }
 
-type mockKeyringStoreClear struct {
-	keysErr   error
-	removeErr error
-	keys      []string
-	removed   []string
-}
+// TestClearAllPasswords_ClearsProfileScopedService verifies that entries under any
+// service scope, including the legacy default scope, are removed without
+// registration (Bug A).
+func TestClearAllPasswords_ClearsProfileScopedService(t *testing.T) {
+	f := withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
 
-func (m *mockKeyringStoreClear) Keys() ([]string, error) {
-	return m.keys, m.keysErr
-}
-func (m *mockKeyringStoreClear) Remove(key string) error {
-	m.removed = append(m.removed, key)
-	return m.removeErr
-}
-func (m *mockKeyringStoreClear) Set(item keyring.Item) error          { return nil }
-func (m *mockKeyringStoreClear) Get(key string) (keyring.Item, error) { return keyring.Item{}, nil }
-func (m *mockKeyringStoreClear) GetMetadata(key string) (keyring.Metadata, error) {
-	return keyring.Metadata{}, nil
-}
-func (m *mockKeyringStoreClear) Type() keyring.BackendType { return keyring.KeychainBackend }
-
-func TestIdsecOSProvidedKeyring_ClearAllPasswords(t *testing.T) {
-	tests := []struct {
-		name           string
-		openErr        error
-		keysErr        error
-		keys           []string
-		removeErr      error
-		expectFallback bool
-		expectedError  bool
-		expectedErrMsg string
-	}{
-		{
-			name:           "success_case_os_keyring",
-			openErr:        nil,
-			keysErr:        nil,
-			keys:           []string{"idsec_sdk_golang_user1", "other_key"},
-			removeErr:      nil,
-			expectFallback: false,
-			expectedError:  false,
-		},
-		{
-			name:           "error_case_open_fallback",
-			openErr:        errors.New("open error"),
-			expectFallback: true,
-			expectedError:  false,
-		},
-		{
-			name:           "error_case_keys_fallback",
-			openErr:        nil,
-			keysErr:        errors.New("keys error"),
-			expectFallback: true,
-			expectedError:  false,
-		},
-		{
-			name:           "edge_case_no_keys_to_remove",
-			openErr:        nil,
-			keysErr:        nil,
-			keys:           []string{"other_key"},
-			removeErr:      nil,
-			expectFallback: false,
-			expectedError:  false,
-		},
-		{
-			name:           "error_case_remove_fails",
-			openErr:        nil,
-			keysErr:        nil,
-			keys:           []string{"idsec_sdk_golang_user1"},
-			removeErr:      errors.New("remove error"),
-			expectFallback: false,
-			expectedError:  false, // Current logic ignores remove errors
-		},
+	// write a small token — fits in CM
+	_ = kr.SetPassword("azure-profile", "IdsecISPAuth-access", "token")
+	// verify it landed in the fake CM
+	if _, ok := f.store["keyring:azure-profile:idsec_sdk_golang_IdsecISPAuth-access"]; !ok {
+		t.Fatal("expected entry in fake CM, got none")
+	}
+	_ = kr.SetPassword("", "legacy", "token")
+	if _, ok := f.store["keyring:default:idsec_sdk_golang_legacy"]; !ok {
+		t.Fatal("expected legacy default-scope entry in fake CM")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store := &mockKeyringStoreClear{
-				keysErr:   tt.keysErr,
-				removeErr: tt.removeErr,
-				keys:      tt.keys,
-			}
-			restore := patchOSKeyringOpen(store, tt.openErr)
-			defer restore()
+	if err := kr.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords: %v", err)
+	}
+	for k := range f.store {
+		if strings.Contains(k, "idsec_sdk_golang_") {
+			t.Errorf("unexpected idsec entry still in CM: %s", k)
+		}
+	}
+}
 
-			mockFallback := &mockFallbackKeyring{}
-			keyring := NewIdsecOSProvidedKeyring(mockFallback)
+// TestClearAllPasswords_ClearsK8sServices verifies that the three fixed
+// K8s service scopes are also cleared without registration (Bug A).
+func TestClearAllPasswords_ClearsK8sServices(t *testing.T) {
+	f := withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	k8sSvcs := []string{
+		"idsec-sca-k8s-elevate",
+		"idsec-sca-k8s-execcred",
+		"idsec-sca-k8s-aws-idc-oidc",
+	}
+	for _, svc := range k8sSvcs {
+		_ = kr.SetPassword(svc, "some-key", "value")
+	}
 
-			err := keyring.ClearAllPasswords()
-			if tt.expectedError {
-				if err == nil {
-					t.Errorf("Expected error, got nil")
-				}
-				if tt.expectedErrMsg != "" && err.Error() != tt.expectedErrMsg {
-					t.Errorf("Expected error message '%s', got '%s'", tt.expectedErrMsg, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Expected no error, got %v", err)
-				}
-			}
-			if tt.expectFallback && !mockFallback.deleteCalled {
-				t.Errorf("Expected fallback ClearAllPasswords to be called")
-			}
-			if !tt.expectFallback && mockFallback.deleteCalled {
-				t.Errorf("Fallback should not be called on OS keyring success")
-			}
-			// Validate that only IDSEC keys are removed
-			if tt.name == "success_case_os_keyring" && len(store.removed) != 1 {
-				t.Errorf("Expected 1 IDSEC key removed, got %d", len(store.removed))
-			}
-		})
+	if err := kr.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords: %v", err)
+	}
+	for k := range f.store {
+		if strings.Contains(k, "idsec_sdk_golang_") {
+			t.Errorf("unexpected idsec entry still in CM: %s", k)
+		}
+	}
+}
+
+// TestClearAllPasswords_ClearsOverflowedFileKeyring verifies that a token too
+// large for CM (> 2560 bytes) that went to the file keyring is also removed
+// when ClearAllPasswords is called (Bug A2).
+// The assertion reads the file keyring directly — not through IdsecOSProvidedKeyring —
+// because GetPassword on non-Windows returns "" on ErrKeyNotFound without consulting
+// the fallback, so a read through the OS keyring would pass even if the bug is present.
+func TestClearAllPasswords_ClearsOverflowedFileKeyring(t *testing.T) {
+	_ = withFakeWinCred(t) // also sets IDSEC_KEYRING_FOLDER to a temp dir
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+
+	// 3000 bytes exceeds the 2560-byte CM limit; SetPassword falls back to file keyring.
+	bigToken := strings.Repeat("x", 3000)
+	if err := kr.SetPassword("azure-profile", "IdsecISPAuth-access", bigToken); err != nil {
+		t.Fatalf("SetPassword (overflow): %v", err)
+	}
+
+	if err := kr.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords: %v", err)
+	}
+
+	// Assert directly against the basic keyring, not through IdsecOSProvidedKeyring.
+	basic := NewIdsecBasicKeyring()
+	got, err := basic.GetPassword("azure-profile", "IdsecISPAuth-access")
+	if err != nil {
+		t.Fatalf("basic GetPassword: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected file keyring to be empty after clear, got %q", got)
+	}
+}
+
+// TestClearAllPasswords_LeavesForeignEntries verifies that non-idsec entries
+// anywhere in Credential Manager are not removed.
+func TestClearAllPasswords_LeavesForeignEntries(t *testing.T) {
+	f := withFakeWinCred(t)
+
+	// Put foreign (non-idsec) entries directly into the fake store.
+	foreign := []string{
+		"keyring:my-profile:foreign_key",
+		"keyring:idsec_sdk_golang_tools:foreign",
+		"keyring:svc:idsec_sdk_golangci",
+		"git:https://example.com",
+	}
+	for _, k := range foreign {
+		f.store[k] = []byte("keep me")
+	}
+
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	if err := kr.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords: %v", err)
+	}
+	for _, k := range foreign {
+		if _, ok := f.store[k]; !ok {
+			t.Errorf("expected %q to survive ClearAllPasswords", k)
+		}
+	}
+}
+
+// TestClearAllPasswords_PropagatesDeleteErrors verifies that a Credential Manager
+// delete failure is returned (not silently dropped) and does not stop other
+// entries from being deleted.
+func TestClearAllPasswords_PropagatesDeleteErrors(t *testing.T) {
+	f := withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	_ = kr.SetPassword("bad-profile", "IdsecISPAuth-access", "token")
+	_ = kr.SetPassword("good-profile", "IdsecISPAuth-access", "token")
+
+	bad := "keyring:bad-profile:idsec_sdk_golang_IdsecISPAuth-access"
+	good := "keyring:good-profile:idsec_sdk_golang_IdsecISPAuth-access"
+	real := winCredDelete
+	winCredDelete = func(target string) error {
+		if target == bad {
+			return errors.New("injected delete error")
+		}
+		return real(target)
+	}
+
+	err := kr.ClearAllPasswords()
+
+	if err == nil {
+		t.Fatal("expected error from failed delete, got nil")
+	}
+	if !strings.Contains(err.Error(), bad) {
+		t.Errorf("error should name the target, got: %v", err)
+	}
+	if _, ok := f.store[good]; ok {
+		t.Error("good entry should have been deleted")
+	}
+	if _, ok := f.store[bad]; !ok {
+		t.Error("bad entry should still exist (delete failed)")
+	}
+}
+
+// TestClearAllPasswords_IdempotentOnEmpty verifies that clearing an already-empty
+// keyring returns nil.
+func TestClearAllPasswords_IdempotentOnEmpty(t *testing.T) {
+	withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	if err := kr.ClearAllPasswords(); err != nil {
+		t.Fatalf("ClearAllPasswords on empty: %v", err)
 	}
 }
 
@@ -532,5 +712,89 @@ func TestIdsecOSProvidedKeyring_ListKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClearAllPasswords_DiscoverySkippedOnNonWindows(t *testing.T) {
+	f := withFakeWinCred(t)
+	winCredDiscoveryEnabled = false
+	winCredList = func(filter string) ([]*wincred.Credential, error) {
+		t.Fatal("winCredList must not be called when discovery is disabled")
+		return nil, nil
+	}
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	_ = kr.SetPassword("", "default-key", "token")
+	_ = kr.SetPassword("azure-profile", "IdsecISPAuth-access", "token")
+
+	err := kr.ClearAllPasswords()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if _, ok := f.store["keyring:default:idsec_sdk_golang_default-key"]; ok {
+		t.Error("default-scope entry should have been cleared")
+	}
+	// azure-profile entry survives because discovery was skipped and clearService("") on
+	// Windows only sees keyring:default:* — this is expected non-Windows behaviour.
+	if _, ok := f.store["keyring:azure-profile:idsec_sdk_golang_IdsecISPAuth-access"]; !ok {
+		t.Error("azure-profile entry should survive when discovery is disabled")
+	}
+}
+
+// TestClearAllPasswords_ListErrorStillClearsFileKeyring asserts against the basic
+// keyring directly for the same reason as TestClearAllPasswords_ClearsOverflowedFileKeyring:
+// GetPassword on non-Windows does not consult the fallback on ErrKeyNotFound.
+func TestClearAllPasswords_ListErrorStillClearsFileKeyring(t *testing.T) {
+	withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	// 3000 bytes exceeds the 2560-byte CM limit; SetPassword falls back to file keyring.
+	bigToken := strings.Repeat("x", 3000)
+	if err := kr.SetPassword("azure-profile", "IdsecISPAuth-access", bigToken); err != nil {
+		t.Fatalf("SetPassword (overflow): %v", err)
+	}
+	basic := NewIdsecBasicKeyring()
+	if got, _ := basic.GetPassword("azure-profile", "IdsecISPAuth-access"); got != bigToken {
+		t.Fatal("expected overflowed token in file keyring before clear")
+	}
+
+	winCredList = func(filter string) ([]*wincred.Credential, error) {
+		return nil, errors.New("injected list error")
+	}
+
+	err := kr.ClearAllPasswords()
+
+	if err == nil {
+		t.Fatal("expected an error from list failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "injected list error") {
+		t.Errorf("error should mention list failure, got: %v", err)
+	}
+	got, err := basic.GetPassword("azure-profile", "IdsecISPAuth-access")
+	if err != nil {
+		t.Fatalf("basic GetPassword: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected file keyring to be cleared, still contains token")
+	}
+}
+
+func TestClearAllPasswords_IgnoresVanishedEntry(t *testing.T) {
+	f := withFakeWinCred(t)
+	kr := NewIdsecOSProvidedKeyring(NewIdsecBasicKeyring())
+	_ = kr.SetPassword("my-profile", "IdsecISPAuth-access", "token")
+	realList := winCredList
+	winCredList = func(filter string) ([]*wincred.Credential, error) {
+		creds, err := realList(filter)
+		creds = append(creds, &wincred.Credential{TargetName: "keyring:gone:idsec_sdk_golang_x"})
+		return creds, err
+	}
+
+	err := kr.ClearAllPasswords()
+
+	if err != nil {
+		t.Fatalf("ErrElementNotFound on delete should be ignored, got: %v", err)
+	}
+	if _, ok := f.store["keyring:my-profile:idsec_sdk_golang_IdsecISPAuth-access"]; ok {
+		t.Error("real entry should have been deleted")
 	}
 }

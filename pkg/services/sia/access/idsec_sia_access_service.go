@@ -532,12 +532,21 @@ func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.
 		installConnector.TargetMachine,
 		installConnector.ConnectorOS,
 	)
-	installationScript, err := s.ConnectorSetupScript(&accessmodels.IdsecSIAGetConnectorSetupScript{
+	getConnectorSetupScript := &accessmodels.IdsecSIAGetConnectorSetupScript{
 		ConnectorOS:     installConnector.ConnectorOS,
 		ConnectorPoolID: installConnector.ConnectorPoolID,
 		ConnectorType:   installConnector.ConnectorType,
-		K8SDetails:      installConnector.K8SDetails,
-	})
+	}
+	if installConnector.K8SDetails != nil {
+		getConnectorSetupScript.Upgrade = installConnector.K8SDetails.Upgrade
+		getConnectorSetupScript.K8SNamespace = installConnector.K8SDetails.K8SNamespace
+		getConnectorSetupScript.K8SImageURI = installConnector.K8SDetails.K8SImageURI
+		getConnectorSetupScript.K8SUsername = installConnector.K8SDetails.K8SUsername
+		getConnectorSetupScript.K8SPassword = installConnector.K8SDetails.K8SPassword
+		getConnectorSetupScript.K8SReplicas = installConnector.K8SDetails.K8SReplicas
+		getConnectorSetupScript.K8SImagePullSecret = installConnector.K8SDetails.K8SImagePullSecret
+	}
+	installationScript, err := s.ConnectorSetupScript(getConnectorSetupScript)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve connector setup script: %w", err)
 	}
@@ -546,7 +555,19 @@ func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.
 		if err := s.installK8SEphemeralConnector(installationScript.BashCmd); err != nil {
 			return nil, err
 		}
-		return nil, nil
+		// There is no single platform-assigned connector ID for a k8s-ephemeral install (a helm
+		// release can back multiple replica connectors that self-register independently), but the
+		// caller/engine still expects a non-nil result with a populated, required ConnectorID. Use
+		// a deterministic identifier derived from the namespace and the fixed helm release name;
+		// UninstallConnector for this OS already keys off K8SDetails.K8SNamespace rather than
+		// ConnectorID, so nothing downstream depends on this value being a real platform connector ID.
+		namespace := ""
+		if installConnector.K8SDetails != nil {
+			namespace = installConnector.K8SDetails.K8SNamespace
+		}
+		return &accessmodels.IdsecSIAAccessConnectorID{
+			ConnectorID: fmt.Sprintf("k8s-ephemeral/%s/%s", namespace, k8sEphemeralHelmReleaseName),
+		}, nil
 	}
 
 	return s.installConnectorOnMachine(
@@ -572,11 +593,12 @@ func (s *IdsecSIAAccessService) InstallConnector(installConnector *accessmodels.
 // ephemeral connectors self-expire once they stop checking in, so no DeleteConnector call is made.
 func (s *IdsecSIAAccessService) UninstallConnector(uninstallConnector *accessmodels.IdsecSIAUninstallConnector) error {
 	if uninstallConnector.ConnectorOS == commonmodels.OSTypeK8SEphemeral {
-		if uninstallConnector.K8SNamespace == "" {
-			return fmt.Errorf("k8s_namespace is required when connector_os is %q", uninstallConnector.ConnectorOS)
+		if uninstallConnector.K8SDetails == nil || uninstallConnector.K8SDetails.K8SNamespace == "" {
+			return fmt.Errorf("k8s_details.k8s_namespace is required when connector_os is %q", uninstallConnector.ConnectorOS)
 		}
-		s.Logger.Info("Uninstalling K8s ephemeral connector(s) of type [%s] from namespace [%s]", uninstallConnector.ConnectorOS, uninstallConnector.K8SNamespace)
-		return s.uninstallK8SEphemeralConnector(uninstallConnector.K8SNamespace)
+		namespace := uninstallConnector.K8SDetails.K8SNamespace
+		s.Logger.Info("Uninstalling K8s ephemeral connector(s) of type [%s] from namespace [%s]", uninstallConnector.ConnectorOS, namespace)
+		return s.uninstallK8SEphemeralConnector(namespace)
 	}
 	s.Logger.Info(
 		"Uninstalling connector [%s] from machine",
@@ -880,7 +902,7 @@ func (s *IdsecSIAAccessService) UpgradeRelay(upgradeRelay *accessmodels.IdsecSIA
 		}
 	}(response.Body)
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to upgrade HTTPS relay - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
+		return fmt.Errorf("failed to upgrade HTTPS relay  - [%d] - [%s]", response.StatusCode, common.SerializeResponseToJSON(response.Body))
 	}
 	return nil
 }

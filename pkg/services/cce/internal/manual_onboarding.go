@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"reflect"
+	"strconv"
 
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common/isp"
@@ -219,7 +219,7 @@ func ServiceParamsChanged(desired, current map[string]interface{}) bool {
 			}
 			return true
 		}
-		if !JSONValuesEqual(desiredVal, currentVal) {
+		if !paramValuesEqual(desiredVal, currentVal) {
 			return true
 		}
 	}
@@ -242,6 +242,37 @@ func IsEmptyParamValue(v interface{}) bool {
 		return len(val) == 0
 	}
 	return false
+}
+
+// paramValuesEqual compares one desired parameter value against the stored one, tolerating a
+// difference in scalar type. Terraform unifies a list of objects with differing attribute sets (one
+// element per service) to map(string), so a boolean parameter such as sca's `ssoEnable` arrives as
+// "false" while the API, whose schema declares it a boolean, returns false. Comparing the JSON
+// encodings calls that a change on every apply, re-sending an unchanged service and tripping the
+// 501 update gate. Values that differ in anything but their encoding still compare as changed.
+func paramValuesEqual(desired, current interface{}) bool {
+	if JSONValuesEqual(desired, current) {
+		return true
+	}
+	desiredScalar, desiredIsScalar := scalarAsString(desired)
+	currentScalar, currentIsScalar := scalarAsString(current)
+	return desiredIsScalar && currentIsScalar && desiredScalar == currentScalar
+}
+
+// scalarAsString renders a JSON scalar in the form Terraform's tostring would produce, so the two
+// sides of a comparison can be matched without caring which one kept its type.
+func scalarAsString(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case bool:
+		return strconv.FormatBool(typed), true
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), true
+	case json.Number:
+		return typed.String(), true
+	}
+	return "", false
 }
 
 // JSONValuesEqual compares two decoded-JSON values for equality by marshaling them back to JSON.
@@ -469,8 +500,7 @@ func (c *ManualClient) DeleteServices(id string, serviceNames []string) error {
 	defer CloseResponseBody(response.Body)
 
 	if !IsHTTPSuccess(response.StatusCode) {
-		bodyBytes, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("failed to delete services from manual onboarding: status code %d, body: %s", response.StatusCode, string(bodyBytes))
+		return HandleNon2xxResponse(c.logger, response.StatusCode, response.Body, "failed to delete services from manual onboarding")
 	}
 
 	return nil

@@ -148,6 +148,48 @@ func TestIdsecSecHubSecretOnboardingService_Create(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			// The catch-all mock returns 204 (success). If SDK validation is bypassed and
+			// an HTTP call reaches the server, Create() would return nil — failing the
+			// require.Error assertion below. This proves the SDK-level guard is what
+			// rejects the request, not an HTTP error response.
+			name: "error_invalid_source_store_type",
+			req: &onboardingmodels.IdsecSecHubOnboardSecret{
+				SourceStoreType: "../../admin",
+				TargetStoreType: "PAM_PCLOUD",
+				SecretID:        "secret-123",
+				SecretValueType: "PLAINTEXT",
+				SafeName:        "my-safe",
+				PamAccount: onboardingmodels.IdsecSecHubOnboardingPamAccount{
+					Name:       "accountName",
+					PlatformID: "WinServerLocal",
+				},
+			},
+			configs: []sechubinternal.MockEndpointConfig{
+				{Matcher: func(r *http.Request) bool { return true }, StatusCode: http.StatusNoContent},
+			},
+			expectError: true,
+		},
+		{
+			// Same catch-all 204 approach — proves the invalid target type is rejected
+			// by the SDK before any HTTP call is made.
+			name: "error_invalid_target_store_type",
+			req: &onboardingmodels.IdsecSecHubOnboardSecret{
+				SourceStoreType: "AWS_ASM",
+				TargetStoreType: "UNKNOWN_TARGET",
+				SecretID:        "secret-123",
+				SecretValueType: "PLAINTEXT",
+				SafeName:        "my-safe",
+				PamAccount: onboardingmodels.IdsecSecHubOnboardingPamAccount{
+					Name:       "accountName",
+					PlatformID: "WinServerLocal",
+				},
+			},
+			configs: []sechubinternal.MockEndpointConfig{
+				{Matcher: func(r *http.Request) bool { return true }, StatusCode: http.StatusNoContent},
+			},
+			expectError: true,
+		},
 	}
 
 	for _, tc := range tests {

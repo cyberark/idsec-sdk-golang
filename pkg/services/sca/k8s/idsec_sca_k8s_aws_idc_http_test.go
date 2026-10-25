@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cyberark/idsec-sdk-golang/pkg/config"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -29,10 +30,14 @@ func newAWSIDCTestElevateResult() *k8smodels.IdsecSCAK8sElevateResult {
 	}
 }
 
-// pointAWSIDCEndpointsAt overrides the package-level endpoint builders and HTTP
-// client to target a single test server, restoring originals on cleanup.
+// pointAWSIDCEndpointsAt redirects the package-level endpoint builders and HTTP
+// client to target a single httptest server, restoring originals on cleanup.
+// Ambient IDSEC_* proxy and CA env vars are cleared so they cannot divert test traffic.
 func pointAWSIDCEndpointsAt(t *testing.T, serverURL string) {
 	t.Helper()
+	t.Setenv(config.IdsecProxyAddressEnvVar, "")
+	t.Setenv(config.IdsecDisableCertificateVerificationEnvVar, "")
+	t.Setenv(config.IdsecExtraTrustedCACertsBundlePathEnvVar, "")
 	origOIDC := awsIDCOIDCEndpoint
 	origPortal := awsIDCPortalEndpoint
 	origClient := awsIDCHTTPClient

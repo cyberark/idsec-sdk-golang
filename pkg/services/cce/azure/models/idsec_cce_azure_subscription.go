@@ -41,6 +41,20 @@ type TfIdsecCCEAzureSubscription struct {
 	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
 }
 
+// TfIdsecCCEAzureSubscriptionDatasource represents the details of an Azure Subscription with per-service information.
+// ⚠️  DEPRECATED: This struct is deprecated and should not be used.
+// ⚠️  It exists only for compatibility with Terraform provider.
+// OPENAPI-CORRELATION: AzureGetSubscriptionDetailsOutput
+type TfIdsecCCEAzureSubscriptionDatasource struct {
+	TfIdsecCCEAzureSubscription `mapstructure:",squash"`
+	// ServicesData contains detailed information about each onboarded service (name, status, version, available versions).
+	ServicesData []ccemodels.IdsecCCEOnboardedService `json:"servicesData,omitempty" mapstructure:"services_data" desc:"Detailed information about each onboarded service."`
+	// CCEAvailableVersions lists the base CCE infrastructure versions newer than the current one (currently at most one, the latest).
+	CCEAvailableVersions []string `json:"cceAvailableVersions,omitempty" mapstructure:"cce_available_versions,omitempty" desc:"Base CCE infrastructure versions available for upgrade."`
+	// UpgradeAvailable is populated only for top-level workspaces; nil otherwise.
+	UpgradeAvailable *bool `json:"upgradeAvailable,omitempty" mapstructure:"upgrade_available,omitempty" desc:"Whether an upgrade is available for the base CCE infrastructure or any onboarded service. Populated only for top-level workspaces."`
+}
+
 // TfIdsecCCEAzureGetSubscription is the input for getting Azure Subscription details.
 // OPENAPI-CORRELATION: Input for GET /api/azure/manual/subscription/{id}
 type TfIdsecCCEAzureGetSubscription struct {

@@ -93,4 +93,31 @@ type TfIdsecCCEAWSUpdateOrganizationAccount struct {
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services for the account (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	// ServiceParameters contains service-specific parameters, keyed by service name.
 	ServiceParameters map[string]map[string]interface{} `json:"serviceParameters,omitempty" mapstructure:"service_parameters,omitempty" desc:"A key-value map of service-specific configuration parameters, keyed by service name."`
+
+	// prior holds the request as it stood at the last apply, set by the provider from the prior
+	// Terraform state. It is the only record of what this module last sent for an already-onboarded
+	// service: GET account resolves an org member to its parent organization's onboarding, so the
+	// API reports management-account values rather than the account's own.
+	//
+	// The field is unexported so that mapstructure, encoding/json, and the schema generator all skip
+	// it automatically - it cannot leak into the practitioner-visible schema or the request body
+	// without any tag discipline.
+	prior *TfIdsecCCEAWSUpdateOrganizationAccount
+}
+
+// SetPriorState stores the full prior request for use during determineServicesToAddWithStatus. It is
+// called by the provider after decoding the prior Terraform state into a request model of the same
+// type. The prior any signature keeps the provider's priorStateSetter interface generic so the same
+// interface works for any model, while the internal type assertion ensures only the correct type is
+// stored (a mismatch is a silent no-op, and the tests in prior_state_test.go would catch a rename).
+func (m *TfIdsecCCEAWSUpdateOrganizationAccount) SetPriorState(prior any) {
+	if p, ok := prior.(*TfIdsecCCEAWSUpdateOrganizationAccount); ok {
+		m.prior = p
+	}
+}
+
+// PriorState returns the request as it stood at the last apply, or nil when there is no prior
+// record (first apply, import, or state predating this mechanism).
+func (m *TfIdsecCCEAWSUpdateOrganizationAccount) PriorState() *TfIdsecCCEAWSUpdateOrganizationAccount {
+	return m.prior
 }

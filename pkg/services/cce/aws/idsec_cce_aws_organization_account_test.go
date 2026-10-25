@@ -502,6 +502,125 @@ func TestAddOrganizationAccountSync_With400ScanInProgress(t *testing.T) {
 	require.Equal(t, 2, addAccountCallCount, "Expected 2 calls to add account (first 400, second success)")
 }
 
+// TestAddOrganizationAccountSync_ScanCompletesWhileAddRequestInFlight pins the boundary the
+// scan-in-progress wait is measured from. The API decides "scan in progress" from a read taken early
+// in its own request, so the scan can record completion while that response is still travelling back
+// (~150ms apart in integration). Measured from after the add returns, that completion is already in
+// the past, and since this branch starts no new scan, no later timestamp could arrive and the poll
+// could only time out.
+func TestAddOrganizationAccountSync_ScanCompletesWhileAddRequestInFlight(t *testing.T) {
+	testStart := time.Now()
+
+	// Scan completes a moment after the call begins, but well before the add request below returns.
+	completedScanTime := testStart.Add(10 * time.Millisecond).Format(time.RFC3339Nano)
+
+	// Comfortably longer than the offset above, so the first add response cannot come back before the
+	// scan's recorded completion time.
+	const addRequestLatency = 250 * time.Millisecond
+
+	addAccountCallCount := 0
+	scanCallCount := 0
+	orgCallCount := 0
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/organizations/scan")
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: `{}`,
+			OnRequest: func(r *http.Request) {
+				scanCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID) &&
+					!strings.Contains(r.URL.Path, "/account")
+			},
+			StatusCode: http.StatusOK,
+			ResponseBody: `{
+				"id": "org-123",
+				"managementAccountId": "` + mockAWSAccountID + `",
+				"organizationId": "o-123",
+				"onboardingType": "` + mockOnboardingType + `",
+				"lastSuccessfulScan": "` + completedScanTime + `"
+			}`,
+			OnRequest: func(r *http.Request) {
+				orgCallCount++
+			},
+		},
+		{
+			// First add attempt: held in flight past the scan's completion, then rejected as
+			// "scan in progress" - the race the integration run hit.
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/") && strings.Contains(r.URL.Path, "/account") {
+					addAccountCallCount++
+					return addAccountCallCount == 1
+				}
+				return false
+			},
+			StatusCode: http.StatusBadRequest,
+			ResponseBody: `{
+				"app_error_code": "SCAN_IN_PROGRESS",
+				"attributes": null,
+				"code": "400",
+				"description": "scan is in progress, wait for it to finish before onboarding an account resources to organization",
+				"message": "Bad Request"
+			}`,
+			OnRequest: func(r *http.Request) {
+				time.Sleep(addRequestLatency)
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/") &&
+					strings.Contains(r.URL.Path, "/account") && addAccountCallCount >= 2
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: mockAddAccountResponseJSON,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID)
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	maxRetries := 3
+	retryIntervalSeconds := 0
+
+	input := &awsmodels.IdsecCCEAWSAddOrganizationAccountSync{
+		IdsecCCEAWSAddOrganizationAccount: awsmodels.IdsecCCEAWSAddOrganizationAccount{
+			ParentOrganizationID: mockOrganizationOnboardingID,
+			AccountID:            mockAWSAccountID,
+			Services: []ccemodels.IdsecCCEServiceInput{
+				{
+					ServiceName: ccemodels.DPA,
+					Resources: map[string]interface{}{
+						"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+					},
+				},
+			},
+		},
+		ScanProbeMaxRetries:      &maxRetries,
+		ScanProbeIntervalSeconds: &retryIntervalSeconds,
+	}
+
+	account, err := service.TfAddOrganizationAccountSync(input)
+
+	require.NoError(t, err, "a scan that completed while the add request was in flight must satisfy the wait")
+	require.NotNil(t, account)
+	require.Equal(t, mockAccountOnboardingID, account.ID)
+	require.Equal(t, 0, scanCallCount, "Expected NO scan calls (scan already in progress)")
+	require.Equal(t, 2, addAccountCallCount, "Expected 2 calls to add account (first 400, second success)")
+}
+
 // Mock account details JSON with organization ID and services
 const mockAccountDetailsWithOrgJSON = `{
 	"id": "` + mockAccountOnboardingID + `",
@@ -964,10 +1083,10 @@ func TestTfUpdateOrganizationAccount_WithServiceParameters(t *testing.T) {
 }
 
 func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
-	// Settled services are (re)sent so in-place resource changes reach the API's idempotent
-	// resource diff: "Completely added" and "Waiting for deployment" services are both
-	// included. Only services in a transient/mid-operation status (like "In progress") are
-	// skipped, to avoid the API rejecting the request while the service is still processing.
+	// Status does not decide anything: a service the account already reports is dropped whether it
+	// is "Completely added", "Waiting for deployment" or "In progress". Sending any of them would
+	// make the request an update, which the API rejects with 501 unless the tenant has the update
+	// feature flag on. With all three services onboarded there is nothing new, so no request is made.
 	accountWithMixedServiceStatusesJSON := `{
 		"id": "` + mockAccountOnboardingID + `",
 		"account_id": "` + mockAWSAccountID + `",
@@ -1088,6 +1207,10 @@ func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
 			},
 		},
 	}
+	// This module onboarded all three, so their statuses describe deployments already under way.
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: input.Services,
+	})
 
 	// Call TfUpdateOrganizationAccount
 	account, err := service.TfUpdateOrganizationAccount(input)
@@ -1098,21 +1221,14 @@ func TestTfUpdateOrganizationAccount_ServiceStatusHandling(t *testing.T) {
 	require.Equal(t, mockAccountOnboardingID, account.ID)
 	require.Equal(t, mockAWSAccountID, account.AccountID)
 
-	// Verify POST was called (settled services need to be (re)sent)
-	require.Equal(t, 1, postCallCount, "Expected POST to be called once")
-
-	// Verify the POST body contains DPA and SCA but NOT secrets_hub:
-	// - DPA ("Completely added") is re-sent so any resources change reaches the API's diff
-	// - SCA ("Waiting for deployment") is re-sent
-	// - SecretsHub ("In progress") is skipped to avoid interfering with its in-flight deployment
-	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should be in POST body (re-sent so resource changes apply)")
-	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body (status: 'Waiting for deployment')")
-	require.NotContains(t, capturedPostBody, `"serviceName":"secrets_hub"`, "SecretsHub should NOT be in POST body (status: 'In progress')")
+	require.Equal(t, 0, postCallCount,
+		"no service is new, so nothing may be sent regardless of the onboarded services' statuses")
+	require.Empty(t, capturedPostBody)
 }
 
 func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.T) {
-	// Test case where all services exist but none are "Completely added"
-	// All services should be re-added via POST
+	// Every service exists already, all of them still deploying. The backend has them queued, so
+	// there is nothing to ask for and re-sending them would only turn the request into an update.
 	accountWithAllServicesWaitingJSON := `{
 		"id": "` + mockAccountOnboardingID + `",
 		"account_id": "` + mockAWSAccountID + `",
@@ -1193,6 +1309,10 @@ func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.
 			},
 		},
 	}
+	// This module sent both, so they are queued rather than merely listed by the organization scan.
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: input.Services,
+	})
 
 	// Call TfUpdateOrganizationAccount
 	account, err := service.TfUpdateOrganizationAccount(input)
@@ -1200,20 +1320,16 @@ func TestTfUpdateOrganizationAccount_AllServicesWaitingForDeployment(t *testing.
 	// Assertions
 	require.NoError(t, err)
 	require.NotNil(t, account)
-	require.Equal(t, 1, postCallCount, "Expected POST to be called (all services waiting for deployment)")
-
-	// Verify both services are in the POST body (both need re-addition)
-	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "DPA should be in POST body")
-	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "SCA should be in POST body")
+	require.Equal(t, 0, postCallCount, "services already queued for deployment must not be re-sent")
+	require.Empty(t, capturedPostBody)
 }
 
-// TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange is a regression
-// guard for the "silent no-op on resource change" bug on organization member accounts. The SDK
-// used to skip fully-deployed services entirely, so changing an already-deployed service's
-// resources produced a green apply with no API call. The update must now re-send fully-deployed
-// services (carrying their new resources) to the organization add-account endpoint, which diffs
-// resources server-side and applies the change.
-func TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange(t *testing.T) {
+// TestTfUpdateOrganizationAccount_SkipsOnboardedServiceWithoutPriorState covers an onboarded service
+// whose resources differ from what Terraform is sending, but with no prior state to compare against -
+// an import, or state predating the PriorState mechanism. The change cannot be told apart from a
+// value the API simply reports differently, so the service is left alone instead of being re-sent
+// on a guess and risking the 501 update gate.
+func TestTfUpdateOrganizationAccount_SkipsOnboardedServiceWithoutPriorState(t *testing.T) {
 	getAccountCallCount := 0
 	var capturedPostBody string
 	var postCallCount int
@@ -1274,16 +1390,229 @@ func TestTfUpdateOrganizationAccount_ResendsFullyDeployedServiceOnResourceChange
 
 	require.NoError(t, err)
 	require.NotNil(t, account)
-	require.Equal(t, 1, postCallCount, "a resources change on a fully-deployed service must trigger the add-account call")
-	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the fully-deployed service must be re-sent")
+	require.Equal(t, 0, postCallCount,
+		"without prior state there is nothing to compare, so the service must be left alone")
+	require.Empty(t, capturedPostBody)
+}
+
+// TestTfUpdateOrganizationAccount_ResendsOnboardedServiceWhenParamsChangedSinceLastApply is the
+// counterpart: the same changed resources, but with prior state showing what the last apply sent. The
+// change is now provable, so the service goes out as an update.
+func TestTfUpdateOrganizationAccount_ResendsOnboardedServiceWhenParamsChangedSinceLastApply(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRoleUPDATED",
+				},
+			},
+		},
+	}
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	})
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "a parameter change proven against prior state must be sent")
 	require.Contains(t, capturedPostBody, "DpaRoleUPDATED", "the re-sent service must carry the new resources")
 }
 
+// TestTfUpdateOrganizationAccount_SkipsOnboardedServiceUnchangedSinceLastApply pins the other half:
+// prior state matching what Terraform is sending means there is nothing to apply, and the request
+// must not go out - it would be read as an update and rejected with 501 on a tenant without the
+// update feature flag. This is the common re-apply, so it has to stay a no-op.
+func TestTfUpdateOrganizationAccount_SkipsOnboardedServiceUnchangedSinceLastApply(t *testing.T) {
+	getAccountCallCount := 0
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusNotImplemented,
+			ResponseBody: `{"app_error_code":"FEATURE_NOT_IMPLEMENTED","message":"Not Implemented"}`,
+			OnRequest: func(r *http.Request) {
+				postCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	unchanged := []ccemodels.IdsecCCEServiceInput{
+		{
+			ServiceName: ccemodels.DPA,
+			Resources: map[string]interface{}{
+				"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+			},
+		},
+	}
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services:             unchanged,
+	}
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{Services: unchanged})
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 0, postCallCount, "an onboarded service unchanged since the last apply must not be re-sent")
+}
+
+// TestTfUpdateOrganizationAccount_ResendsOnboardedServiceWhenServiceParametersChanged pins that the
+// comparison covers terraform service_parameters too, not just a service's resources.
+func TestTfUpdateOrganizationAccount_ResendsOnboardedServiceWhenServiceParametersChanged(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	services := []ccemodels.IdsecCCEServiceInput{
+		{
+			ServiceName: ccemodels.DPA,
+			Resources: map[string]interface{}{
+				"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+			},
+		},
+	}
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services:             services,
+		ServiceParameters: map[string]map[string]interface{}{
+			"dpa": {"someParameter": "new"},
+		},
+	}
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: services,
+		ServiceParameters: map[string]map[string]interface{}{
+			"dpa": {"someParameter": "old"},
+		},
+	})
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "a service_parameters change must be detected as well")
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`)
+}
+
 // mockAccountWaitingAfterOrgUpgradeJSON is an account as it looks immediately after its parent
-// organization was upgraded: the service is pending deployment, but its stored parameters are
-// byte-identical to what Terraform is about to send, because an org version bump changes no
-// resources. Note the version already reads as the NEW version - the backend bumps the account's
-// version column at org-upgrade time - which is why the status, not the version, is the signal.
+// organization was upgraded: the service is pending deployment, but nothing about it changed. The
+// version already reads as the NEW version because the backend bumps the account's version column
+// at org-upgrade time.
 const mockAccountWaitingAfterOrgUpgradeJSON = `{
 	"id": "` + mockAccountOnboardingID + `",
 	"account_id": "` + mockAWSAccountID + `",
@@ -1306,13 +1635,439 @@ const mockAccountWaitingAfterOrgUpgradeJSON = `{
 	"status": "Waiting for deployment"
 }`
 
-// TestTfUpdateOrganizationAccount_ResendsWaitingServiceWithNoResourceChange is the EV-143045
-// regression guard. Upgrading an organization bumps the parent's product version and flips every
-// member account to "Waiting for deployment" without changing a single resource. The SDK used to
-// re-send an already-onboarded service only when its parameters changed, so this produced an empty
-// service list, no API call, and a green apply while the account stayed stuck. A service in
-// "Waiting for deployment" must now be re-sent unconditionally.
-func TestTfUpdateOrganizationAccount_ResendsWaitingServiceWithNoResourceChange(t *testing.T) {
+// TestTfUpdateOrganizationAccount_AddingNewServiceOmitsUnchangedPendingService pins that adding a
+// service new to the account sends ONLY that service. The account here still has DPA pending
+// deployment from the apply that created it, with resources identical to what Terraform re-sends.
+// Carrying DPA along would make the add look like an update to the API, which rejects it when the
+// update/upgrade feature is not activated for the tenant - failing an add that is not an update.
+func TestTfUpdateOrganizationAccount_AddingNewServiceOmitsUnchangedPendingService(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountWaitingAfterOrgUpgradeJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				// already onboarded and pending, re-sent with the resources it already has
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				// new to the account - the only thing this request actually adds
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+	// DPA is pending because the apply that created it sent it, so prior state holds it. That is
+	// what separates it from a service the organization scan merely listed as waiting.
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	})
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "the new service must still be sent")
+	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "the service being added must be in the POST body")
+	require.NotContains(t, capturedPostBody, `"serviceName":"dpa"`,
+		"an unchanged service pending deployment must NOT ride along with an add")
+}
+
+// TestTfUpdateOrganizationAccount_SendsWaitingServiceThisModuleNeverOnboarded pins that a service
+// listed as waiting for deployment is still sent when this module never onboarded it.
+//
+// For a programmatic or terraform_provider organization, the periodic scan writes a "Waiting for
+// deployment" row for every one of the organization's products onto each newly discovered member
+// account, before anyone asks for them. Those names come back in the account's service list, but the
+// backend does not consider them onboarded: it partitions an add request against the account's
+// stored resources document, and only that partition goes through the upgrade gate. Treating the
+// list as proof of onboarding leaves such a service skipped on every apply and never deployed, with
+// no error to show for it.
+//
+// The absence of prior state is what separates this from a deployment already under way, which this
+// module started and must not re-send.
+func TestTfUpdateOrganizationAccount_SendsWaitingServiceThisModuleNeverOnboarded(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountWaitingAfterOrgUpgradeJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+		// No prior state: this module has never sent DPA for this account, so the waiting row can
+		// only have come from the organization scan.
+	}
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount,
+		"a waiting service this module never onboarded must be sent, or it never deploys")
+	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`)
+}
+
+// TestTfUpdateOrganizationAccount_SkipsDeployedServiceThisModuleNeverOnboarded is the counterpart:
+// absent prior state is not on its own a reason to send. A service the account reports as completely
+// added is onboarded whatever this module's state says, so re-sending it is an update, and the API
+// rejects the whole request with 501 when the tenant's update feature flag is off.
+func TestTfUpdateOrganizationAccount_SkipsDeployedServiceThisModuleNeverOnboarded(t *testing.T) {
+	getAccountCallCount := 0
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+		},
+	}
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 0, postCallCount,
+		"a fully deployed service must not be re-sent just because prior state does not mention it")
+}
+
+// mockAccountDeployedServiceJSON mirrors how the API reports an onboarded member account: the
+// per-service entries carry a name, status and version, and no deployed resources at all.
+const mockAccountDeployedServiceJSON = `{
+	"id": "` + mockAccountOnboardingID + `",
+	"account_id": "` + mockAWSAccountID + `",
+	"organization_id": "` + mockOrganizationOnboardingID + `",
+	"onboarding_type": "` + mockOnboardingType + `",
+	"services": ["dpa"],
+	"services_data": [
+		{
+			"name": "dpa",
+			"status": "Completely added",
+			"version": "0.0.2",
+			"errors": []
+		}
+	],
+	"status": "Completely added"
+}`
+
+// TestTfUpdateOrganizationAccount_AddingNewServiceOmitsOnboardedServiceEvenWhenChanged pins that an
+// add drops already-onboarded services unconditionally, rather than relying on a parameter diff.
+// Here dpa's deployed DpaRoleArn differs from the one terraform sends, so a diff-based rule would
+// include it and the API would reject the whole add as an update.
+func TestTfUpdateOrganizationAccount_AddingNewServiceOmitsOnboardedServiceEvenWhenChanged(t *testing.T) {
+	getAccountCallCount := 0
+	var capturedPostBody string
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDeployedServiceJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				if r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account") {
+					bodyBytes, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+					capturedPostBody = string(bodyBytes)
+					postCallCount++
+					return true
+				}
+				return false
+			},
+			StatusCode:   http.StatusCreated,
+			ResponseBody: `{}`,
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountDetailsWithOrgJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				// already onboarded, and genuinely changed - still not part of an add
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRoleRenamed",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 1, postCallCount, "the new service must still be sent")
+	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "the service being added must be in the POST body")
+	require.NotContains(t, capturedPostBody, `"serviceName":"dpa"`,
+		"an add must drop already-onboarded services even when their resources changed")
+}
+
+const mockAccountAddedServiceStillDeployingJSON = `{
+	"id": "` + mockAccountOnboardingID + `",
+	"account_id": "` + mockAWSAccountID + `",
+	"organization_id": "` + mockOrganizationOnboardingID + `",
+	"onboarding_type": "` + mockOnboardingType + `",
+	"services": ["dpa", "sca"],
+	"services_data": [
+		{
+			"name": "dpa",
+			"status": "Completely added",
+			"version": "0.0.2",
+			"errors": []
+		},
+		{
+			"name": "sca",
+			"status": "Waiting for deployment",
+			"version": "0.0.2",
+			"errors": []
+		}
+	],
+	"status": "In progress"
+}`
+
+// TestTfUpdateOrganizationAccount_ReapplyWhileAddedServiceIsDeployingSendsNothing covers the apply
+// that is retried after the add already landed: sca is on the account and still deploying, dpa is
+// deployed, and terraform asks for both again with the same resources. Nothing is new and nothing
+// changed, so the correct request is no request - sending either service would be an update, and
+// the tenant's update feature flag turns that into a 501 that no retry can get past.
+func TestTfUpdateOrganizationAccount_ReapplyWhileAddedServiceIsDeployingSendsNothing(t *testing.T) {
+	getAccountCallCount := 0
+	var postCallCount int
+
+	client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountAddedServiceStillDeployingJSON,
+			OnRequest: func(r *http.Request) {
+				getAccountCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "POST" && strings.Contains(r.URL.Path, "/api/aws/programmatic/organization/"+mockOrganizationOnboardingID+"/account")
+			},
+			StatusCode:   http.StatusNotImplemented,
+			ResponseBody: `{"app_error_code":"FEATURE_NOT_IMPLEMENTED","message":"Not Implemented"}`,
+			OnRequest: func(r *http.Request) {
+				postCallCount++
+			},
+		},
+		{
+			Matcher: func(r *http.Request) bool {
+				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 1
+			},
+			StatusCode:   http.StatusOK,
+			ResponseBody: mockAccountAddedServiceStillDeployingJSON,
+		},
+	})
+	defer cleanup()
+
+	service := setupAWSService(client)
+
+	input := &awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		ID:                   mockAccountOnboardingID,
+		ParentOrganizationID: mockOrganizationOnboardingID,
+		Services: []ccemodels.IdsecCCEServiceInput{
+			{
+				ServiceName: ccemodels.DPA,
+				Resources: map[string]interface{}{
+					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+				},
+			},
+			{
+				ServiceName: ccemodels.SCA,
+				Resources: map[string]interface{}{
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
+				},
+			},
+		},
+	}
+	// The apply being repeated is the one that sent both, so prior state holds them: SCA is
+	// mid-deployment rather than a name the organization scan put on the account.
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: input.Services,
+	})
+
+	account, err := service.TfUpdateOrganizationAccount(input)
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, 0, postCallCount,
+		"a re-apply over an in-flight deployment must send nothing: both services are already onboarded and unchanged")
+}
+
+// TestTfUpdateOrganizationAccount_SkipsWaitingServiceWithNoResourceChange pins that a service the
+// backend has already queued is left alone, so a re-apply over an in-flight deployment stays a
+// no-op instead of becoming a 501-rejected update.
+//
+// This deliberately gives up the EV-143045 behaviour, where a waiting service was re-sent
+// unconditionally to nudge member accounts flipped to "Waiting for deployment" by an organization
+// upgrade. That nudge was itself an update, so it only ever worked on tenants with upgrades
+// enabled, while the unconditional re-send broke re-applies everywhere else.
+func TestTfUpdateOrganizationAccount_SkipsWaitingServiceWithNoResourceChange(t *testing.T) {
 	getAccountCallCount := 0
 	var capturedPostBody string
 	var postCallCount int
@@ -1369,19 +2124,28 @@ func TestTfUpdateOrganizationAccount_ResendsWaitingServiceWithNoResourceChange(t
 			},
 		},
 	}
+	// This module onboarded DPA, so prior state holds it and the waiting status is a deployment
+	// already under way rather than a row the organization scan created.
+	input.SetPriorState(&awsmodels.TfIdsecCCEAWSUpdateOrganizationAccount{
+		Services: input.Services,
+	})
 
 	account, err := service.TfUpdateOrganizationAccount(input)
 
 	require.NoError(t, err)
 	require.NotNil(t, account)
-	require.Equal(t, 1, postCallCount, "a service waiting for deployment must be re-sent even with identical resources")
-	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the waiting service must be in the POST body")
+	require.Equal(t, 0, postCallCount,
+		"a service waiting for deployment with unchanged resources must not be re-sent: it is already queued, and the re-send would be rejected as an update")
+	require.Empty(t, capturedPostBody)
 }
 
 // TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload pins the contract that a member
 // account's service version is Terraform-state-only. It exists solely to make an organization
 // upgrade visible to Terraform's plan; the API derives the real version from the parent
 // organization and its ServiceInput schema has no version field, so it must never be sent.
+//
+// sca is new to the account here, which is what gets it into the payload at all - the version alone
+// never would.
 func TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload(t *testing.T) {
 	getAccountCallCount := 0
 	var capturedPostBody string
@@ -1392,7 +2156,7 @@ func TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload(t *testing.
 				return r.Method == "GET" && strings.Contains(r.URL.Path, "/api/aws/programmatic/account/"+mockAccountOnboardingID) && getAccountCallCount == 0
 			},
 			StatusCode:   http.StatusOK,
-			ResponseBody: mockAccountWaitingAfterOrgUpgradeJSON,
+			ResponseBody: mockAccountDeployedServiceJSON,
 			OnRequest: func(r *http.Request) {
 				getAccountCallCount++
 			},
@@ -1427,10 +2191,10 @@ func TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload(t *testing.
 		ParentOrganizationID: mockOrganizationOnboardingID,
 		Services: []ccemodels.IdsecCCEServiceInput{
 			{
-				ServiceName: ccemodels.DPA,
+				ServiceName: ccemodels.SCA,
 				Version:     "0.0.7",
 				Resources: map[string]interface{}{
-					"DpaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/DpaRole",
+					"ScaRoleArn": "arn:aws:iam::" + mockAWSAccountID + ":role/ScaRole",
 				},
 			},
 		},
@@ -1439,7 +2203,7 @@ func TestTfUpdateOrganizationAccount_StripsServiceVersionFromPayload(t *testing.
 	_, err := service.TfUpdateOrganizationAccount(input)
 
 	require.NoError(t, err)
-	require.Contains(t, capturedPostBody, `"serviceName":"dpa"`, "the service itself must still be sent")
+	require.Contains(t, capturedPostBody, `"serviceName":"sca"`, "the service itself must still be sent")
 	require.NotContains(t, capturedPostBody, `"version"`, "the Terraform-state-only version must not reach the API")
 	require.NotContains(t, capturedPostBody, "0.0.7", "the Terraform-state-only version must not reach the API")
 	require.Contains(t, capturedPostBody, `"onboardingType":"terraform_provider"`,

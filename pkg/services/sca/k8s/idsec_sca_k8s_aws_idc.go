@@ -22,6 +22,7 @@ import (
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/toqueteos/webbrowser"
 
+	k8scommon "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/common"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -41,9 +42,14 @@ const (
 	awsIDCErrSlowDown             = "slow_down"
 )
 
-// awsIDCHTTPClient performs the AWS IDC OIDC / SSO portal REST calls. It is a
-// package-level var so tests can substitute a client wired to httptest servers.
-var awsIDCHTTPClient = &http.Client{Timeout: 30 * time.Second}
+// awsIDCHTTPTimeout bounds each AWS IDC OIDC / SSO portal REST call.
+const awsIDCHTTPTimeout = 30 * time.Second
+
+// awsIDCHTTPClient performs AWS IDC OIDC / SSO portal REST calls.
+// It is built at startup so it picks up env-var-based SDK settings
+// (IDSEC_PROXY_ADDRESS, IDSEC_EXTRA_TRUSTED_CA_CERTS_BUNDLE_PATH) that are
+// present when the process starts. Tests override it to target httptest servers.
+var awsIDCHTTPClient = k8scommon.K8sHTTPClient(awsIDCHTTPTimeout) //nolint:gochecknoglobals
 
 // awsIDCOIDCEndpoint and awsIDCPortalEndpoint build the AWS IAM Identity Center
 // OIDC and SSO portal base URLs for a region. They are vars so tests can point

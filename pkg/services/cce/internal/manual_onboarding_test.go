@@ -678,6 +678,36 @@ func TestServiceParamsChanged_NonEmptyKeyMissingIsChange(t *testing.T) {
 		"a non-empty desired key missing from current must be treated as a change")
 }
 
+// TestServiceParamsChanged_TerraformStringifiedScalarsMatchTypedStoredValues covers sca's
+// `ssoEnable`: Terraform unifies the per-service resources objects to map(string), so the module
+// sends "false" where the API's schema declares a boolean and returns false. Comparing those as
+// different made every apply re-send sca, which the 501 update gate then rejected.
+func TestServiceParamsChanged_TerraformStringifiedScalarsMatchTypedStoredValues(t *testing.T) {
+	desired := map[string]interface{}{
+		"ssoEnable":                     "false",
+		"addPermissionsToManageCluster": "true",
+		"someCount":                     "3",
+	}
+	current := map[string]interface{}{
+		"sso_enable":                        false,
+		"add_permissions_to_manage_cluster": true,
+		"some_count":                        float64(3),
+	}
+
+	require.False(t, ServiceParamsChanged(desired, current),
+		"a scalar that only differs in encoding must not count as a change")
+}
+
+// TestServiceParamsChanged_StringifiedScalarWithDifferentValueIsChange guards the other half: the
+// type tolerance above must not swallow a genuine flip.
+func TestServiceParamsChanged_StringifiedScalarWithDifferentValueIsChange(t *testing.T) {
+	desired := map[string]interface{}{"ssoEnable": "true"}
+	current := map[string]interface{}{"sso_enable": false}
+
+	require.True(t, ServiceParamsChanged(desired, current),
+		"a genuinely different value must still be detected across scalar types")
+}
+
 func TestIsEmptyParamValue(t *testing.T) {
 	empty := []interface{}{
 		nil,

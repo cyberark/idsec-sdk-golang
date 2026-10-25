@@ -229,7 +229,7 @@ func (s *IdsecSecHubSecretsService) fetchSecretCandidates(name, storeID string) 
 //   - items[0] exact match, items[1] is a lexicographic neighbour → unique match, success
 func (s *IdsecSecHubSecretsService) resolveUniqueSecret(items []interface{}, name, storeID string) (*secretsmodels.IdsecSecHubSecret, error) {
 	if len(items) == 0 {
-		return nil, fmt.Errorf("secret %q not found in store %q", name, storeID)
+		return nil, fmt.Errorf("secret %q not found in store %q — if the secret was recently created, it may not have been discovered by a Secrets Hub scan yet. Wait for the scan to complete and run terraform apply again", name, storeID)
 	}
 	var first secretsmodels.IdsecSecHubSecret
 	if err := mapstructure.Decode(items[0], &first); err != nil {

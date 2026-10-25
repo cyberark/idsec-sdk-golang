@@ -12,15 +12,32 @@ import (
 	"strings"
 
 	"github.com/99designs/keyring"
+	"github.com/danieljoos/wincred"
 	"github.com/cyberark/idsec-sdk-golang/pkg/common"
 )
 
 const (
-	keyringPrefix = "idsec_sdk_golang"
+	keyringPrefix     = "idsec_sdk_golang"
+	keyringItemPrefix = keyringPrefix + "_" // exact format written by SetPassword
 )
 
 // OSKeyringOpen is a variable that points to the keyring.Open function from the go-keyring package.
 var OSKeyringOpen = keyring.Open
+
+// winCredDiscoveryEnabled selects Credential Manager enumeration in ClearAllPasswords.
+// It is a package-level var, not an inline runtime.GOOS check, so that tests on
+// any platform can exercise the Windows path by flipping it to true.
+var winCredDiscoveryEnabled = runtime.GOOS == "windows"
+
+// winCredList enumerates Credential Manager entries whose TargetName has the given
+// prefix. Swapped to a fake in tests.
+var winCredList = wincred.FilteredList
+
+// winCredDelete removes the Credential Manager generic credential with the given
+// target name. Swapped to a fake in tests.
+var winCredDelete = func(targetName string) error {
+	return wincred.NewGenericCredential(targetName).Delete()
+}
 
 // IdsecOSProvidedKeyring provides an OS-based keyring implementation for secure password storage.
 //
@@ -207,37 +224,97 @@ func (b *IdsecOSProvidedKeyring) DeletePassword(serviceName string, username str
 	return nil
 }
 
-// ClearAllPasswords removes all stored passwords from the OS keyring and the fallback keyring.
+// isIdsecWinCredTarget reports whether a Credential Manager target name was written
+// by SetPassword through the 99designs/keyring WinCred backend.
+// Targets have the form "keyring:<service>:idsec_sdk_golang_<username>".
 //
-// ClearAllPasswords attempts to remove all password entries from the OS keyring that match the IDSEC SDK prefix.
-// If the OS keyring cannot be opened or keys cannot be listed, it logs a warning and falls back to the basic keyring's
-// ClearAllPasswords method. The function is idempotent and will not return an error if no entries exist.
-//
-// Returns an error if removal fails for either the OS keyring or the fallback keyring.
-//
-// Example:
-//
-//	err := keyring.ClearAllPasswords()
-//	if err != nil {
-//	    // Handle error
-//	}
-func (b *IdsecOSProvidedKeyring) ClearAllPasswords() error {
-	keyringStore, err := b.keyringForService("")
-	if err != nil {
-		b.logger.Warning("Failed to open OS keyring: %v. Falling back to basic keyring.", err)
-		return b.fallbackKeyring.ClearAllPasswords()
+// The leading ":" anchors the match to the item-key segment, so a service whose
+// name contains the prefix (e.g. "keyring:idsec_sdk_golang_tools:foreign") does
+// not match. The trailing "_" rejects non-idsec keys that share only a prefix
+// (e.g. "keyring:svc:idsec_sdk_golangci").
+func isIdsecWinCredTarget(target string) bool {
+	rest, ok := strings.CutPrefix(target, "keyring:")
+	if !ok {
+		return false
 	}
-	items, err := keyringStore.Keys()
+	return strings.Contains(rest, ":"+keyringItemPrefix)
+}
+
+// clearWindowsCredentials deletes every idsec entry from Windows Credential Manager,
+// across all keyring services, without needing to know the service names in advance.
+// An entry that disappears between listing and deletion (concurrent clear, logout)
+// is treated as already cleared.
+func clearWindowsCredentials() error {
+	creds, err := winCredList("keyring:*")
 	if err != nil {
-		b.logger.Warning("Failed to list keys from OS keyring: %v. Falling back to basic keyring.", err)
-		return b.fallbackKeyring.ClearAllPasswords()
+		return fmt.Errorf("list credential manager: %w", err)
 	}
-	for _, key := range items {
-		if strings.HasPrefix(key, keyringPrefix) {
-			_ = keyringStore.Remove(key)
+	var errs []error
+	for _, c := range creds {
+		if c == nil || !isIdsecWinCredTarget(c.TargetName) {
+			continue
+		}
+		if err := winCredDelete(c.TargetName); err != nil && !errors.Is(err, wincred.ErrElementNotFound) {
+			errs = append(errs, fmt.Errorf("delete %q: %w", c.TargetName, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// ClearAllPasswords removes every idsec credential from the OS keyring and from the
+// file-backed fallback keyring.
+//
+// On Windows, it enumerates Credential Manager and deletes every entry written by
+// this SDK, across every service, so callers do not need to know which services
+// were used and orphan entries from deleted profiles are also cleared.
+//
+// On macOS and Linux the idsec entries are already reachable from a single
+// service query: macOS Keychain returns all services when the service filter is
+// absent, and Linux stores all idsec tokens in the "default" Secret Service
+// collection regardless of service name. clearService("") therefore covers all
+// entries on those platforms with no additional work.
+//
+// The fallback (file) keyring is always cleared, even if the OS keyring fails,
+// because tokens too large for the OS store are written to it instead.
+// All errors are joined and returned together. Clearing an already-empty keyring
+// returns nil.
+func (b *IdsecOSProvidedKeyring) ClearAllPasswords() error {
+	var osErr error
+	if winCredDiscoveryEnabled {
+		osErr = clearWindowsCredentials()
+	} else {
+		osErr = b.clearService("")
+	}
+	if osErr != nil {
+		b.logger.Warning("Failed to clear OS keyring: %v. Clearing file keyring anyway.", osErr)
+		osErr = fmt.Errorf("os keyring: %w", osErr)
+	}
+	var fileErr error
+	if err := b.fallbackKeyring.ClearAllPasswords(); err != nil {
+		fileErr = fmt.Errorf("file keyring: %w", err)
+	}
+	return errors.Join(osErr, fileErr)
+}
+
+func (b *IdsecOSProvidedKeyring) clearService(svc string) error {
+	store, err := b.keyringForService(svc)
+	if err != nil {
+		return err
+	}
+	keys, err := store.Keys()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, k := range keys {
+		if !strings.HasPrefix(k, keyringItemPrefix) {
+			continue
+		}
+		if err := store.Remove(k); err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
+			errs = append(errs, fmt.Errorf("remove %q: %w", k, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ListKeys returns the usernames stored under the given serviceName in the
@@ -254,10 +331,9 @@ func (b *IdsecOSProvidedKeyring) ListKeys(serviceName string) ([]string, error) 
 		b.logger.Warning("Failed to list keys from OS keyring: %v. Falling back to basic keyring.", err)
 		return b.fallbackKeyring.ListKeys(serviceName)
 	}
-	prefix := keyringPrefix + "_"
 	keys := make([]string, 0, len(rawKeys))
 	for _, k := range rawKeys {
-		if trimmed, ok := strings.CutPrefix(k, prefix); ok {
+		if trimmed, ok := strings.CutPrefix(k, keyringItemPrefix); ok {
 			keys = append(keys, trimmed)
 		}
 	}

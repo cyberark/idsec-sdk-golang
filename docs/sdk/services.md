@@ -101,6 +101,7 @@ The Identity (identity) service requires the IdsecISPAuth authenticator, and exp
 - **IdsecIdentityAuthProfilesService** - Identity auth profiles service
 - **IdsecIdentityPoliciesService** - Identity policies service
 - **IdsecIdentityWebappsService** - Identity webapps service
+- **IdsecIdentityFederationsService** - Identity federations service
 
 
 ## Privilege Cloud service

@@ -1,13 +1,15 @@
-// Package models provides data structures for SCA Entra ID group operations.
+// Package models provides data structures for SCA group operations (Entra ID and Google Cloud groups).
 package models
 
 import scamodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/models"
 
-// IdsecSCAGroupsEligibleTarget represents a single eligible Entra ID group.
+// IdsecSCAGroupsEligibleTarget represents a single eligible group. Azure rows carry
+// DirectoryID; GCP rows carry OrganizationID.
 type IdsecSCAGroupsEligibleTarget struct {
-	DirectoryID string `json:"directoryId" mapstructure:"directoryId" flag:"directory-id" desc:"The ID of the directory that contains the group"`
-	GroupID     string `json:"groupId" mapstructure:"groupId" flag:"group-id" desc:"The ID of the group"`
-	GroupName   string `json:"groupName" mapstructure:"groupName" flag:"group-name" desc:"The name of the group"`
+	DirectoryID    string `json:"directoryId,omitempty" mapstructure:"directoryId" flag:"directory-id" desc:"The ID of the Entra directory that contains the group (AZURE)"`
+	OrganizationID string `json:"organizationId,omitempty" mapstructure:"organizationId" flag:"organization-id" desc:"The ID of the Google Cloud organization that contains the group (GCP)"`
+	GroupID        string `json:"groupId" mapstructure:"groupId" flag:"group-id" desc:"The ID of the group (GCP: groups/{id})"`
+	GroupName      string `json:"groupName" mapstructure:"groupName" flag:"group-name" desc:"The name of the group"`
 }
 
 // IdsecSCAGroupAccessElevateTarget is a single group target in an elevate request.
@@ -17,7 +19,7 @@ type IdsecSCAGroupAccessElevateTarget struct {
 
 // IdsecSCAGroupAccessElevateRequest is the API request body for POST /api/access/elevate/groups.
 type IdsecSCAGroupAccessElevateRequest struct {
-	CSP         string                             `json:"csp" mapstructure:"csp" desc:"The cloud provider (must be AZURE)"`
+	CSP         string                             `json:"csp" mapstructure:"csp" desc:"The cloud provider (AZURE or GCP)"`
 	DirectoryID string                             `json:"directoryId" mapstructure:"directory_id" desc:"The Entra directory (tenant) ID that contains the groups"`
 	Targets     []IdsecSCAGroupAccessElevateTarget `json:"targets" mapstructure:"targets" desc:"One or more group targets to elevate into"`
 }
@@ -32,9 +34,10 @@ type IdsecSCAGroupAccessElevateResult struct {
 
 // IdsecSCAGroupAccessElevateResponseData is the inner response payload.
 type IdsecSCAGroupAccessElevateResponseData struct {
-	DirectoryID string                             `json:"directoryId" mapstructure:"directoryId" desc:"The directory (tenant) ID"`
-	CSP         string                             `json:"csp" mapstructure:"csp" desc:"The cloud provider"`
-	Results     []IdsecSCAGroupAccessElevateResult `json:"results" mapstructure:"results" desc:"The list of elevate results"`
+	DirectoryID    string                             `json:"directoryId,omitempty" mapstructure:"directoryId" desc:"The directory (tenant) ID (AZURE)"`
+	OrganizationID string                             `json:"organizationId,omitempty" mapstructure:"organizationId" desc:"The Google Cloud organization ID (GCP)"`
+	CSP            string                             `json:"csp" mapstructure:"csp" desc:"The cloud provider"`
+	Results        []IdsecSCAGroupAccessElevateResult `json:"results" mapstructure:"results" desc:"The list of elevate results"`
 }
 
 // IdsecSCAGroupAccessElevateResponse is the top-level elevate response.
@@ -45,9 +48,10 @@ type IdsecSCAGroupAccessElevateResponse struct {
 // IdsecSCAGroupAccessElevateActionRequest is the flat CLI schema for
 // `idsec exec sca groupaccess elevate`.
 type IdsecSCAGroupAccessElevateActionRequest struct {
-	CSP         string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (must be AZURE)"`
-	DirectoryID string `json:"directory_id" mapstructure:"directory_id" validate:"required" flag:"directory-id" desc:"The Entra directory (tenant) ID"`
-	Groups      string `json:"groups" mapstructure:"groups" validate:"required" flag:"groups" desc:"Comma-separated group IDs to elevate into (max 5)"`
+	CSP            string `json:"csp" mapstructure:"csp" validate:"required" flag:"csp" desc:"Cloud provider (AZURE or GCP)"`
+	DirectoryID    string `json:"directory_id,omitempty" mapstructure:"directory_id" flag:"directory-id" desc:"The Entra directory (tenant) ID (required for AZURE)"`
+	OrganizationID string `json:"organization_id,omitempty" mapstructure:"organization_id" flag:"organization-id" desc:"The Google Cloud organization ID (required for GCP)"`
+	Groups         string `json:"groups" mapstructure:"groups" validate:"required" flag:"groups" desc:"Comma-separated group IDs to elevate access to (max 5; Google group IDs use the groups/{id} format)"`
 }
 
 // IdsecSCAListGroupTargetsResponse is the response from GET /access/{csp}/eligibility/groups.

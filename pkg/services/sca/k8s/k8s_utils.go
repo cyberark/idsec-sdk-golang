@@ -3,6 +3,7 @@ package k8s
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -11,6 +12,14 @@ import (
 )
 
 const awsIDCPermissionSetARNMarker = "arn:aws:sso:::permissionSet/"
+
+// ssoRegion is interpolated into AWS IDC hostnames, so it must be a plain region name.
+var awsIDCRegionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}$`)
+
+// IsValidAWSIDCRegion reports whether region is an AWS region served by amazonaws.com (cn-* excluded).
+func IsValidAWSIDCRegion(region string) bool {
+	return awsIDCRegionPattern.MatchString(region) && !strings.HasPrefix(region, "cn-")
+}
 
 // IsAWSIDCPermissionSetRole reports whether roleID is an AWS IAM Identity Center permission set ARN.
 func IsAWSIDCPermissionSetRole(roleID string) bool {
@@ -79,6 +88,9 @@ func ValidateAWSIDCDeviceRegistration(result *k8smodels.IdsecSCAK8sElevateResult
 			"AWS IDC permission-set flow requires complete elevate fields; missing: %s",
 			strings.Join(missing, ", "),
 		)
+	}
+	if region := awsIDCRegion(result.ClientDetails); !IsValidAWSIDCRegion(region) {
+		return fmt.Errorf("AWS IDC permission-set flow rejected elevate field clientDetails.ssoRegion %q: not a valid AWS region", region)
 	}
 	return nil
 }

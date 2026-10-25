@@ -227,6 +227,21 @@ The framework uses a provider registry pattern. To add a new auth type (e.g., `o
 
 No changes needed in `config.go`, `context.go`, or any test files.
 
+## Suite Environment Files
+
+A suite can keep its own non-secret configuration (tenant-specific IDs, store IDs, and so on) in a `.env` file next to its tests, for example `tests/e2e/sechub/.env`:
+
+```bash
+# Secret store ID of the PCloud source store in the test tenant
+IDSEC_E2E_SECHUB_PCLOUD_SOURCE_STORE_ID=store-1234
+```
+
+The framework loads it automatically when a test creates its context (`framework.Run` / `framework.NewTestContext`). Variables already set in the environment take precedence, so shell exports and CI values always override the file.
+
+- Suite `.env` files are committed to git, but excluded from the public repository sync (`.rsync-filter`).
+- **Never put credentials in a suite `.env` file.** Pass secrets through the environment (CI injects them in `Jenkinsfile_e2e`).
+- `tests/e2e/.env` (the root file copied from `.env.example`) is not loaded automatically.
+
 ## Framework Documentation
 
 The E2E framework provides:
