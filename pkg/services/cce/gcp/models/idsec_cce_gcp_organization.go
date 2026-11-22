@@ -43,6 +43,8 @@ type TfIdsecCCEGCPAddOrganization struct {
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
 	// CCEResources contains the Workload Identity Federation resources required for organization onboarding.
 	CCEResources TfIdsecCCEGCPResources `json:"cceResources" mapstructure:"cce_resources" validate:"required" desc:"CCE WIF resources: workload_identity_pool_id, workload_identity_provider_id, target_service_account_email."`
+	// OnboardingType is not sent on create, which always onboards as terraform_provider.
+	OnboardingType string `json:"-" mapstructure:"onboarding_type" validate:"omitempty,oneof=terraform_provider" choices:"terraform_provider" desc:"Set to terraform_provider to take ownership of an organization onboarded through the programmatic API. The next apply converts the onboarding, after which it can be managed only through Terraform."`
 }
 
 // TfIdsecCCEGCPGetOrganization is the input for getting GCP organization details.
@@ -93,6 +95,8 @@ type TfIdsecCCEGCPUpdateOrganization struct {
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE organization onboarding ID."`
 	// Services is the desired list of services with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to onboard (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// OnboardingType set to terraform_provider converts a programmatic onboarding before the services are updated.
+	OnboardingType string `json:"onboardingType,omitempty" mapstructure:"onboarding_type" validate:"omitempty,oneof=terraform_provider" desc:"Set to terraform_provider to take ownership of an organization onboarded through the programmatic API."`
 }
 
 // TfIdsecCCEGCPDeleteOrganization is the input for deleting a GCP organization.

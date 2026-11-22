@@ -261,8 +261,10 @@ func TestSerializeGroupAccessPolicyTargets(t *testing.T) {
 				},
 			},
 		},
-		Conditions: policycommonmodels.IdsecPolicyConditions{
-			MaxSessionDuration: 1,
+		Conditions: IdsecPolicyGroupAccessConditions{
+			IdsecPolicyConditions: policycommonmodels.IdsecPolicyConditions{
+				MaxSessionDuration: 1,
+			},
 		},
 		Targets: IdsecPolicyGroupAccessTarget{
 			Targets: []IdsecPolicyGroupAccessTargetItem{

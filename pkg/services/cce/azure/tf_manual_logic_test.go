@@ -76,6 +76,172 @@ var azureUpdateEntities = []azureUpdateEntity{
 	},
 }
 
+// TestTfGetAzureEntities_CCEResourcesDecoded verifies that when the GET response contains
+// cceResources, the field is correctly decoded in each entity's response struct.
+func TestTfGetAzureEntities_CCEResourcesDecoded(t *testing.T) {
+	const onboardingID = "azure-entity-123"
+	const appID = "app-uuid-abc"
+	responseJSON := `{
+		"id": "` + onboardingID + `",
+		"onboardingType": "terraform_provider",
+		"services": ["dpa"],
+		"status": "Completely added",
+		"cceResources": {"appId": "` + appID + `"}
+	}`
+
+	type entityCase struct {
+		name    string
+		getPath string
+		get     func(*IdsecCCEAzureService) (map[string]interface{}, error)
+	}
+	entities := []entityCase{
+		{
+			name:    "entra",
+			getPath: pathManualEntraGetURL,
+			get: func(s *IdsecCCEAzureService) (map[string]interface{}, error) {
+				result, err := s.TfEntra(&azuremodels.TfIdsecCCEAzureGetEntra{ID: onboardingID})
+				if result == nil {
+					return nil, err
+				}
+				return result.CCEResources, err
+			},
+		},
+		{
+			name:    "management_group",
+			getPath: pathManualMgmtGroupGetURL,
+			get: func(s *IdsecCCEAzureService) (map[string]interface{}, error) {
+				result, err := s.TfManagementGroup(&azuremodels.TfIdsecCCEAzureGetManagementGroup{ID: onboardingID})
+				if result == nil {
+					return nil, err
+				}
+				return result.CCEResources, err
+			},
+		},
+		{
+			name:    "subscription",
+			getPath: pathManualSubscriptionGetURL,
+			get: func(s *IdsecCCEAzureService) (map[string]interface{}, error) {
+				result, err := s.TfSubscription(&azuremodels.TfIdsecCCEAzureGetSubscription{ID: onboardingID})
+				if result == nil {
+					return nil, err
+				}
+				return result.CCEResources, err
+			},
+		},
+	}
+
+	for _, entity := range entities {
+		t.Run(entity.name, func(t *testing.T) {
+			client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf(entity.getPath, onboardingID)
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: responseJSON,
+				},
+			})
+			defer cleanup()
+
+			resources, err := entity.get(setupAzureService(client))
+			require.NoError(t, err)
+			require.Equal(t, appID, resources["appId"], "cceResources.appId must be decoded from the GET response")
+		})
+	}
+}
+
+// TestTfUpdateAzureEntities_CCEResourcesReachesRequest verifies that a non-nil CCEResources on the
+// Update input is forwarded to the add-services POST body for each entity type.
+func TestTfUpdateAzureEntities_CCEResourcesReachesRequest(t *testing.T) {
+	const onboardingID = "azure-onboarding-123"
+	appID := "app-uuid-123"
+	cceResources := &map[string]interface{}{"appId": appID}
+
+	// Entity has no services currently deployed, so any service in desired is treated as new.
+	currentJSON := `{
+		"id": "` + onboardingID + `",
+		"onboardingType": "terraform_provider",
+		"services": [],
+		"servicesData": [],
+		"status": "Completely added"
+	}`
+
+	type entityCase struct {
+		name    string
+		getPath string
+		update  func(*IdsecCCEAzureService) error
+	}
+	entities := []entityCase{
+		{
+			name:    "entra",
+			getPath: pathManualEntraGetURL,
+			update: func(s *IdsecCCEAzureService) error {
+				_, err := s.TfUpdateEntra(&azuremodels.TfIdsecCCEAzureUpdateEntra{
+					ID:           onboardingID,
+					CCEResources: cceResources,
+				})
+				return err
+			},
+		},
+		{
+			name:    "management_group",
+			getPath: pathManualMgmtGroupGetURL,
+			update: func(s *IdsecCCEAzureService) error {
+				_, err := s.TfUpdateManagementGroup(&azuremodels.TfIdsecCCEAzureUpdateManagementGroup{
+					ID:           onboardingID,
+					CCEResources: cceResources,
+				})
+				return err
+			},
+		},
+		{
+			name:    "subscription",
+			getPath: pathManualSubscriptionGetURL,
+			update: func(s *IdsecCCEAzureService) error {
+				_, err := s.TfUpdateSubscription(&azuremodels.TfIdsecCCEAzureUpdateSubscription{
+					ID:           onboardingID,
+					CCEResources: cceResources,
+				})
+				return err
+			},
+		},
+	}
+
+	for _, entity := range entities {
+		t.Run(entity.name, func(t *testing.T) {
+			var postBody map[string]interface{}
+
+			client, cleanup := internal.SetupMockCCEService(t, []internal.MockEndpointConfig{
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf(entity.getPath, onboardingID)
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: currentJSON,
+				},
+				{
+					Matcher: func(r *http.Request) bool {
+						return r.Method == http.MethodPost && r.URL.Path == "/api/azure/manual/"+onboardingID+"/services"
+					},
+					StatusCode:   http.StatusOK,
+					ResponseBody: currentJSON,
+					OnRequest: func(r *http.Request) {
+						body, _ := io.ReadAll(r.Body)
+						_ = json.Unmarshal(body, &postBody)
+					},
+				},
+			})
+			defer cleanup()
+
+			err := entity.update(setupAzureService(client))
+			require.NoError(t, err)
+			require.Contains(t, postBody, "cceResources", "cceResources must be forwarded to the add-services POST body")
+			gotResources, _ := postBody["cceResources"].(map[string]interface{})
+			require.Equal(t, appID, gotResources["appId"])
+		})
+	}
+}
+
 // TestTfUpdateAzureEntities_CCEVersionSentOnlyWhenChanged is a regression guard for sending an
 // unchanged cceVersion along with a service upgrade on Entra, Management Group and Subscription.
 //

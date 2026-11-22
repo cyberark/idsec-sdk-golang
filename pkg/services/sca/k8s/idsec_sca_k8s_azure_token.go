@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	scak8sazurecommonhelper "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/azure/common"
+	scak8sazurehelper "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/azure/helper"
 	k8smodels "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/models"
 )
 
@@ -84,7 +85,7 @@ func EnsureAzureCLISession(
 		if diagnostics {
 			KubectlLoginLog(KubectlLoginLogLevelInfo, "No usable az login session found. Running 'az login'...")
 		}
-		if loginErr := runAzLogin(); loginErr != nil {
+		if loginErr := runAzLogin(cloudUserName); loginErr != nil {
 			return "", fmt.Errorf("az login failed: %w", loginErr)
 		}
 		if subscriptionID != "" {
@@ -174,9 +175,14 @@ func acquireAKSToken(organizationID string) (string, error) {
 }
 
 // runAzLogin: stdout discarded so parent stdout stays clean for kubectl ExecCredential JSON.
-func runAzLogin() error {
+// cloudUserName is pre-selected on the sign-in page when the browser hint is enabled (see azure/helper).
+func runAzLogin(cloudUserName string) error {
 	cmd := exec.Command("az", "login")
 	cmd.Env = os.Environ()
+	if exe, exeErr := os.Executable(); exeErr == nil && scak8sazurehelper.IsBrowserHintEnabled() {
+		_, userBrowserSet := os.LookupEnv("BROWSER")
+		cmd.Env = append(cmd.Env, scak8sazurehelper.AzureBrowserHelperEnvVars(exe, cloudUserName, userBrowserSet)...)
+	}
 	// Azure CLI 2.61+ signs in through the WAM broker on Windows, which shows a native
 	// account picker seeded with the machine's own identity instead of the elevated user.
 	// Scoped to this process, so ~/.azure/config is untouched and an explicit user value wins.
@@ -212,16 +218,16 @@ func runAzAccountSet(subscriptionID string) error {
 	return nil
 }
 
-// announceExpectedAzureCloudUser tells the user which account the az session must
-// belong to, whether one already exists or 'az login' is about to run. Written to
-// stderr because stdout carries the kubectl ExecCredential JSON, and emitted
-// unfiltered so a restrictive log level cannot hide it.
+// announceExpectedAzureCloudUser prints the elevated user the az session must
+// belong to, whether one already exists or 'az login' is about to run. Written
+// to stderr (stdout carries the ExecCredential JSON) and bypasses the log-level
+// filter so a restrictive level cannot hide it.
 func announceExpectedAzureCloudUser(cloudUserName string) {
 	if cloudUserName == "" {
 		return
 	}
-	KubectlLoginLogLine(os.Stderr, KubectlLoginLogLevelWarning,
-		"az login must use the elevated user %s; any other account will be rejected.",
+	KubectlLoginLogLine(os.Stderr, KubectlLoginLogLevelInfo,
+		"Azure authentication az login requires the elevated user (%s).",
 		cloudUserName,
 	)
 }
@@ -247,9 +253,9 @@ func validateAzureCLIIdentity(cloudUserName, azureAccessToken string) error {
 	}
 
 	return fmt.Errorf( //nolint:staticcheck // ST1005: surfaced verbatim to the user as a sentence.
-		"az is logged in as %s, which is not the elevated user; "+
-			"run 'az logout'; az login must use %s user.",
-		azureID.Name(), cloudUserName,
+		"Signed in as %s, but authentication requires the elevated user (%s). "+
+			"To fix: run 'az logout', then az login again, using the elevated user (%s).",
+		azureID.Name(), cloudUserName, cloudUserName,
 	)
 }
 

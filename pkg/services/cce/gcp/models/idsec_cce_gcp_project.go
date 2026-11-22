@@ -68,6 +68,8 @@ type TfIdsecCCEGCPAddProject struct {
 	ProjectNumber string `json:"projectNumber" mapstructure:"project_number" validate:"required,number" desc:"GCP project number."`
 	// Services is the list of services to add and their associated resources.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// OnboardingType is not sent on create, which always onboards as terraform_provider.
+	OnboardingType string `json:"-" mapstructure:"onboarding_type" validate:"omitempty,oneof=terraform_provider" choices:"terraform_provider" desc:"Set to terraform_provider to take ownership of a project onboarded through the programmatic API. The next apply converts the onboarding, after which it can be managed only through Terraform."`
 }
 
 // TfIdsecCCEGCPUpdateProject is the input for updating a GCP Project's services.
@@ -79,6 +81,8 @@ type TfIdsecCCEGCPUpdateProject struct {
 	ID string `json:"id" mapstructure:"id" validate:"required" desc:"CCE project onboarding ID."`
 	// Services is the list of services to onboard (e.g., DPA, SCA, SecretsHub, CDS) with their resource configurations.
 	Services []ccemodels.IdsecCCEServiceInput `json:"services" mapstructure:"services" validate:"required,min=1,dive" desc:"List of services to add (SIA, SCA, SecretsHub, CDS) and their associated resources."`
+	// OnboardingType set to terraform_provider converts a programmatic onboarding before the services are updated.
+	OnboardingType string `json:"onboardingType,omitempty" mapstructure:"onboarding_type" validate:"omitempty,oneof=terraform_provider" desc:"Set to terraform_provider to take ownership of a project onboarded through the programmatic API."`
 }
 
 // TfIdsecCCEGCPDeleteProject is the input for deleting a GCP Project.

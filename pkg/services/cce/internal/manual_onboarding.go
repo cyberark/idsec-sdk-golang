@@ -23,6 +23,9 @@ const (
 	DeploymentTypeStandalone           = "standalone"
 )
 
+// pathManualImportURL is shared by all platforms, so it is not derived from the ManualClient base path.
+const pathManualImportURL = "/api/manual/%s/import"
+
 // manualAddOutput is the common shape returned by POST /api/{platform}/manual across platforms.
 type manualAddOutput struct {
 	ID string `json:"id"`
@@ -63,28 +66,6 @@ func (c *ManualClient) Create(body map[string]interface{}, deploymentType string
 	}
 
 	return addOutput.ID, nil
-}
-
-// CurrentServiceNames GETs the given URL and extracts the "services" string list
-// from the response, for use as the "current" side of a simple name-based service reconcile.
-// For version/resources-aware reconciliation, use GetCurrentServiceState instead.
-func (c *ManualClient) CurrentServiceNames(getURL string) ([]string, error) {
-	response, err := c.client.Get(context.Background(), getURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current onboarding details: %w", err)
-	}
-	defer CloseResponseBody(response.Body)
-
-	if !IsHTTPSuccess(response.StatusCode) {
-		return nil, HandleNon2xxResponse(c.logger, response.StatusCode, response.Body, "failed to get onboarding details")
-	}
-
-	entityJSON, err := common.DeserializeJSONSnake(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize onboarding response: %w", err)
-	}
-
-	return ExtractServiceNames(entityJSON), nil
 }
 
 // CurrentServiceState holds the currently deployed service names, per-service versions, and
@@ -341,6 +322,7 @@ func (c *ManualClient) UpdateServicesWithReconcile(
 	desiredServices []ccemodels.IdsecCCEServiceInput,
 	resourceType string,
 	cceVersion *string,
+	cceResources map[string]interface{},
 ) error {
 	c.logger.Info("Updating services for %s [%s]", resourceType, id)
 	c.logger.Info("Current %s services: %v", resourceType, current.Names)
@@ -367,9 +349,9 @@ func (c *ManualClient) UpdateServicesWithReconcile(
 
 	c.logger.Info("Services to add/upgrade/update: %d, Services to remove: %d, CCE version to send: %q\n", len(servicesToSend), len(servicesToRemove), cceVersionToSend)
 
-	if len(servicesToSend) > 0 || cceVersionToSend != "" {
-		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %q)", len(servicesToSend), resourceType, id, cceVersionToSend)
-		if err := c.AddServices(id, servicesToSend, cceVersionToSend); err != nil {
+	if len(servicesToSend) > 0 || cceVersionToSend != "" || len(cceResources) > 0 {
+		c.logger.Info("Sending %d service(s) to %s [%s] (CCE version: %q, CCE resources: %v)", len(servicesToSend), resourceType, id, cceVersionToSend, cceResources)
+		if err := c.AddServices(id, servicesToSend, cceVersionToSend, cceResources); err != nil {
 			return fmt.Errorf("failed to add/update services: %w", err)
 		}
 	}
@@ -430,7 +412,7 @@ func (c *ManualClient) UpdateServices(id string, currentServiceNames []string, d
 
 	if len(servicesToAdd) > 0 {
 		c.logger.Info("Adding %d services to %s [%s]", len(servicesToAdd), resourceType, id)
-		if err := c.AddServices(id, servicesToAdd, ""); err != nil {
+		if err := c.AddServices(id, servicesToAdd, "", nil); err != nil {
 			return fmt.Errorf("failed to add services: %w", err)
 		}
 	}
@@ -447,8 +429,9 @@ func (c *ManualClient) UpdateServices(id string, currentServiceNames []string, d
 
 // AddServices adds services to a manual onboarding.
 // cceVersion is optional; if non-empty, it will be included in the request.
+// cceResources is optional; if non-empty, it will be included in the request.
 // API: POST /api/{platform}/manual/{id}/services
-func (c *ManualClient) AddServices(id string, services []ccemodels.IdsecCCEServiceInput, cceVersion string) error {
+func (c *ManualClient) AddServices(id string, services []ccemodels.IdsecCCEServiceInput, cceVersion string, cceResources map[string]interface{}) error {
 	c.logger.Info("Adding services to manual onboarding [%s]", id)
 
 	url := fmt.Sprintf("%s/%s/services", c.basePath, id)
@@ -461,6 +444,12 @@ func (c *ManualClient) AddServices(id string, services []ccemodels.IdsecCCEServi
 	// Add cceVersion if provided
 	if cceVersion != "" {
 		requestBody["cceVersion"] = cceVersion
+	}
+
+	// Add cceResources if non-empty. An empty map is rejected by the backend (appId is required),
+	// so treat it the same as nil: do not send it.
+	if len(cceResources) > 0 {
+		requestBody["cceResources"] = cceResources
 	}
 
 	response, err := c.client.Post(context.Background(), url, requestBody)
@@ -522,6 +511,25 @@ func (c *ManualClient) Delete(id string) error {
 
 	if !IsHTTPSuccess(response.StatusCode) {
 		return HandleNon2xxResponse(c.logger, response.StatusCode, response.Body, "failed to delete manual onboarding")
+	}
+
+	return nil
+}
+
+// Import converts an existing programmatic onboarding to the terraform_provider onboarding type.
+// An onboarding that is already terraform_provider is left unchanged by the API.
+// API: POST /api/manual/{id}/import
+func (c *ManualClient) Import(id string) error {
+	c.logger.Info("Importing manual onboarding [%s]", id)
+
+	response, err := c.client.Post(context.Background(), fmt.Sprintf(pathManualImportURL, id), nil)
+	if err != nil {
+		return err
+	}
+	defer CloseResponseBody(response.Body)
+
+	if !IsHTTPSuccess(response.StatusCode) {
+		return HandleNon2xxResponse(c.logger, response.StatusCode, response.Body, "failed to import manual onboarding")
 	}
 
 	return nil

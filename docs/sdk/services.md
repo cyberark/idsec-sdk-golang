@@ -143,6 +143,11 @@ The Access (access) service requires the IdsecISPAuth authenticator, and exposes
 
 - **IdsecAccessAssetsService** (assets) - Access assets listing and secret retrieval
 
+## Access Request Service
+The Access Request Service (ars) requires the IdsecISPAuth authenticator, and exposes those service classes:
+
+- **IdsecARSRequestsService** (requests) - Access requests submission, cancellation, finalization, listing, stats and request forms
+
 ## Policy
 The Access Control Policies (policy) service requires the IdsecISPAuth authenticator, and exposes those service classes:
 - **IdsecPolicyService** - Access Control Policies service

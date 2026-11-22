@@ -122,7 +122,11 @@ func (s *IdsecCCEAzureService) tfUpdateEntra(input *azuremodels.TfIdsecCCEAzureU
 	}
 
 	// Step 2: Use shared update logic to reconcile services
-	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "entra", input.CCEVersion)
+	var cceResources map[string]interface{}
+	if input.CCEResources != nil {
+		cceResources = *input.CCEResources
+	}
+	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "entra", input.CCEVersion, cceResources)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +205,11 @@ func (s *IdsecCCEAzureService) tfUpdateManagementGroup(input *azuremodels.TfIdse
 	}
 
 	// Step 2: Use shared update logic to reconcile services
-	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "management_group", input.CCEVersion)
+	var cceResources map[string]interface{}
+	if input.CCEResources != nil {
+		cceResources = *input.CCEResources
+	}
+	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "management_group", input.CCEVersion, cceResources)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +288,11 @@ func (s *IdsecCCEAzureService) tfUpdateSubscription(input *azuremodels.TfIdsecCC
 	}
 
 	// Step 2: Use shared update logic to reconcile services
-	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "subscription", input.CCEVersion)
+	var cceResources map[string]interface{}
+	if input.CCEResources != nil {
+		cceResources = *input.CCEResources
+	}
+	err = s.manual().UpdateServicesWithReconcile(input.ID, current, input.Services, "subscription", input.CCEVersion, cceResources)
 	if err != nil {
 		return nil, err
 	}

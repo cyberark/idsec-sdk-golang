@@ -1,7 +1,9 @@
 package groupaccess
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mitchellh/mapstructure"
@@ -206,5 +208,188 @@ func TestDeserializeTargets(t *testing.T) {
 	}
 	if !reflect.DeepEqual(policy.Targets.GCPTargets, gcpTargets.GCPTargets) {
 		t.Fatalf("unexpected gcp targets: %+v", policy.Targets.GCPTargets)
+	}
+}
+
+// newGroupAccessPolicyWithApproval builds a policy with the given location type, targets and access approval.
+func newGroupAccessPolicyWithApproval(locationType string, targets groupaccessmodels.IdsecPolicyGroupAccessTarget, accessApproval *policycommonmodels.IdsecPolicyAccessApprovalCondition) *groupaccessmodels.IdsecPolicyGroupAccessPolicy {
+	policy := newGroupAccessPolicy(locationType, targets)
+	policy.Conditions.MaxSessionDuration = 1
+	policy.Conditions.AccessApproval = accessApproval
+	return policy
+}
+
+var approver = policycommonmodels.IdsecPolicyPrincipal{
+	ID:                  "approver-id",
+	Name:                "approver@cyberark.cloud.12345",
+	Type:                policycommonmodels.PrincipalTypeUser,
+	SourceDirectoryName: "CyberArk",
+	SourceDirectoryID:   "12345",
+}
+
+// TestOmitEmptyAccessWindow covers dropping an unset access window from dual control payloads.
+func TestOmitEmptyAccessWindow(t *testing.T) {
+	required := &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: true, Approvers: []policycommonmodels.IdsecPolicyPrincipal{approver}}
+	withWindow := func(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy) *groupaccessmodels.IdsecPolicyGroupAccessPolicy {
+		policy.Conditions.AccessWindow = policycommonmodels.IdsecPolicyTimeCondition{DaysOfTheWeek: []int{1, 2, 3}, FromHour: "09:00:00", ToHour: "17:00:00"}
+		return policy
+	}
+	tests := []struct {
+		name           string
+		policy         *groupaccessmodels.IdsecPolicyGroupAccessPolicy
+		expectWindow   bool
+		expectApproval bool
+	}{
+		{"success_gcp_required_empty_window_dropped", newGroupAccessPolicyWithApproval("GCP", gcpTargets, required), false, true},
+		{"success_gcp_required_set_window_kept", withWindow(newGroupAccessPolicyWithApproval("GCP", gcpTargets, required)), true, true},
+		{"success_gcp_without_approval_window_kept", newGroupAccessPolicyWithApproval("GCP", gcpTargets, nil), true, false},
+		{"success_gcp_not_required_window_kept", newGroupAccessPolicyWithApproval("GCP", gcpTargets, &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: false}), true, true},
+		{"success_azure_without_approval_unchanged", newGroupAccessPolicyWithApproval("Azure", azureTargets, nil), true, false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			policyJSON, err := common.SerializeJSONCamel(tc.policy)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			omitEmptyAccessWindow(tc.policy, policyJSON)
+			conditions, ok := policyJSON["conditions"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected conditions map, got %T", policyJSON["conditions"])
+			}
+			if _, exists := conditions["accessWindow"]; exists != tc.expectWindow {
+				t.Fatalf("expected accessWindow present=%v, got %#v", tc.expectWindow, conditions)
+			}
+			rawApproval, exists := conditions["accessApproval"]
+			if exists != tc.expectApproval {
+				t.Fatalf("expected accessApproval present=%v, got %#v", tc.expectApproval, conditions)
+			}
+			if !exists || !tc.policy.Conditions.AccessApproval.Required {
+				return
+			}
+			approval, ok := rawApproval.(map[string]interface{})
+			if !ok || approval["required"] != true {
+				t.Fatalf("expected required=true accessApproval, got %#v", rawApproval)
+			}
+			approvers, ok := approval["approvers"].([]interface{})
+			if !ok || len(approvers) != 1 {
+				t.Fatalf("expected one approver, got %#v", approval["approvers"])
+			}
+			first, _ := approvers[0].(map[string]interface{})
+			if first["id"] != approver.ID || first["sourceDirectoryId"] != approver.SourceDirectoryID {
+				t.Fatalf("unexpected approver payload: %#v", first)
+			}
+		})
+	}
+}
+
+// TestCheckAccessApprovalSupported covers blocking dual control on Entra ID (Azure) group policies.
+func TestCheckAccessApprovalSupported(t *testing.T) {
+	required := &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: true, Approvers: []policycommonmodels.IdsecPolicyPrincipal{approver}}
+	notRequired := &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: false}
+	tests := []struct {
+		name           string
+		policy         *groupaccessmodels.IdsecPolicyGroupAccessPolicy
+		expectErr      bool
+		expectApproval bool
+	}{
+		{"error_azure_required", newGroupAccessPolicyWithApproval("Azure", azureTargets, required), true, false},
+		{"error_azure_required_case_insensitive", newGroupAccessPolicyWithApproval("AZURE", azureTargets, required), true, false},
+		{"success_azure_not_required_dropped", newGroupAccessPolicyWithApproval("Azure", azureTargets, notRequired), false, false},
+		{"success_azure_without_approval", newGroupAccessPolicyWithApproval("Azure", azureTargets, nil), false, false},
+		{"success_gcp_required_kept", newGroupAccessPolicyWithApproval("GCP", gcpTargets, required), false, true},
+		{"success_gcp_not_required_kept", newGroupAccessPolicyWithApproval("GCP", gcpTargets, notRequired), false, true},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			policyJSON, err := common.SerializeJSONCamel(tc.policy)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			assertErrorMatch(t, checkAccessApprovalSupported(tc.policy, policyJSON), tc.expectErr,
+				"dual control (access_approval.required=true) is not supported for Entra ID (Azure) group access policies; "+
+					"it is supported for Google (GCP) groups only. Remove access_approval from the policy to create or update it")
+			if tc.expectErr {
+				return
+			}
+			conditions, ok := policyJSON["conditions"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected conditions map, got %T", policyJSON["conditions"])
+			}
+			if _, exists := conditions["accessApproval"]; exists != tc.expectApproval {
+				t.Fatalf("expected accessApproval present=%v, got %#v", tc.expectApproval, conditions)
+			}
+		})
+	}
+}
+
+// TestWrapAccessApprovalNotSupportedErr covers explaining backend dual control rejections.
+func TestWrapAccessApprovalNotSupportedErr(t *testing.T) {
+	backendErr := errors.New("failed to create policy - [400] - [Access approval is not supported]")
+	otherErr := errors.New("failed to create policy - [400] - [invalid target]")
+	required := &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: true}
+	tests := []struct {
+		name           string
+		err            error
+		accessApproval *policycommonmodels.IdsecPolicyAccessApprovalCondition
+		expectWrapped  bool
+	}{
+		{"wrapped_required_not_supported", backendErr, required, true},
+		{"unchanged_other_error", otherErr, required, false},
+		{"unchanged_without_approval", backendErr, nil, false},
+		{"unchanged_not_required", backendErr, &policycommonmodels.IdsecPolicyAccessApprovalCondition{Required: false}, false},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			err := wrapAccessApprovalNotSupportedErr(tc.err, tc.accessApproval)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected wrapped error to retain %v, got %v", tc.err, err)
+			}
+			if wrapped := err != tc.err; wrapped != tc.expectWrapped {
+				t.Fatalf("expected wrapped=%v, got %v", tc.expectWrapped, err)
+			}
+			if tc.expectWrapped && !strings.Contains(err.Error(), "is not enabled for this tenant") {
+				t.Fatalf("expected tenant guidance in error, got %v", err)
+			}
+		})
+	}
+	if wrapAccessApprovalNotSupportedErr(nil, required) != nil {
+		t.Fatalf("expected nil error to stay nil")
+	}
+}
+
+// TestDecodeAccessApproval verifies access_approval returned by the API decodes into the conditions.
+func TestDecodeAccessApproval(t *testing.T) {
+	policyJSON := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":               "example-policy",
+			"policy_entitlement": map[string]interface{}{"target_category": "Groups", "location_type": "GCP", "policy_type": "Recurring"},
+		},
+		"conditions": map[string]interface{}{
+			"max_session_duration": 1,
+			"access_approval": map[string]interface{}{
+				"required": true,
+				"approvers": []interface{}{
+					map[string]interface{}{"id": "approver-id", "name": "approver@cyberark.cloud.12345", "type": "USER"},
+				},
+			},
+		},
+	}
+	var policy groupaccessmodels.IdsecPolicyGroupAccessPolicy
+	if err := mapstructure.Decode(policyJSON, &policy); err != nil {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	if policy.Conditions.MaxSessionDuration != 1 {
+		t.Fatalf("expected max_session_duration 1, got %d", policy.Conditions.MaxSessionDuration)
+	}
+	accessApproval := policy.Conditions.AccessApproval
+	if accessApproval == nil || !accessApproval.Required {
+		t.Fatalf("expected required access approval, got %+v", accessApproval)
+	}
+	if len(accessApproval.Approvers) != 1 || accessApproval.Approvers[0].ID != "approver-id" {
+		t.Fatalf("unexpected approvers: %+v", accessApproval.Approvers)
 	}
 }

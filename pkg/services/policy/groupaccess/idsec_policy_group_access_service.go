@@ -3,6 +3,7 @@ package groupaccess
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/cyberark/idsec-sdk-golang/pkg/auth"
@@ -18,6 +19,8 @@ const (
 	policyStatusActiveRetryCount = 100
 	delayTimeInSeconds           = 3
 )
+
+const accessApprovalNotSupportedMsg = "Access approval is not supported"
 
 // IdsecPolicyGroupAccessPolicyPage represents a page of Group assignment policies.
 type IdsecPolicyGroupAccessPolicyPage = common.IdsecPage[groupaccessmodels.IdsecPolicyGroupAccessPolicy]
@@ -57,6 +60,57 @@ func serializeTargets(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, po
 	return err
 }
 
+// checkAccessApprovalSupported blocks dual control on Entra ID (Azure) group policies.
+// The policy API stores access_approval on Entra group policies but access evaluation ignores it,
+// so such a policy would look like dual control while granting access without approval. A
+// non-required access_approval is dropped from the payload so Azure requests stay identical to
+// policies created before dual control existed.
+func checkAccessApprovalSupported(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, policyJSON map[string]interface{}) error {
+	accessApproval := policy.Conditions.AccessApproval
+	if accessApproval == nil || !strings.EqualFold(policy.Metadata.PolicyEntitlement.LocationType, commonmodels.WorkspaceTypeAzure) {
+		return nil
+	}
+	if accessApproval.Required {
+		return fmt.Errorf("dual control (access_approval.required=true) is not supported for Entra ID (Azure) group access policies; " +
+			"it is supported for Google (GCP) groups only. Remove access_approval from the policy to create or update it")
+	}
+	if conditionsJSON, ok := policyJSON["conditions"].(map[string]interface{}); ok {
+		delete(conditionsJSON, "accessApproval")
+	}
+	return nil
+}
+
+// omitEmptyAccessWindow drops an unset access window from the payload of a dual control policy.
+// The policy API requires accessWindow to be omitted entirely when accessApproval.required is true,
+// but the window is a value type and always serializes, so an unset window is removed here. A window
+// the caller did set is sent unchanged and left for the backend to validate.
+func omitEmptyAccessWindow(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, policyJSON map[string]interface{}) {
+	accessApproval := policy.Conditions.AccessApproval
+	if accessApproval == nil || !accessApproval.Required {
+		return
+	}
+	accessWindow := policy.Conditions.AccessWindow
+	if len(accessWindow.DaysOfTheWeek) > 0 || accessWindow.FromHour != "" || accessWindow.ToHour != "" {
+		return
+	}
+	if conditionsJSON, ok := policyJSON["conditions"].(map[string]interface{}); ok {
+		delete(conditionsJSON, "accessWindow")
+	}
+}
+
+// wrapAccessApprovalNotSupportedErr explains a backend rejection of dual control on a tenant where it isn't enabled.
+func wrapAccessApprovalNotSupportedErr(err error, accessApproval *policycommonmodels.IdsecPolicyAccessApprovalCondition) error {
+	if err == nil || accessApproval == nil || !accessApproval.Required {
+		return err
+	}
+	if !strings.Contains(err.Error(), accessApprovalNotSupportedMsg) {
+		return err
+	}
+	return fmt.Errorf("dual control (access_approval.required=true) is not enabled for this tenant or group type; "+
+		"contact Idira support to enable it, or remove access_approval from the policy to create "+
+		"it without dual control: %w", err)
+}
+
 func deserializeTargets(policy *groupaccessmodels.IdsecPolicyGroupAccessPolicy, policyJSON map[string]interface{}) error {
 	targetsJSON, _ := policyJSON["targets"].(map[string]interface{})
 	return policy.Targets.DeserializeTargets(targetsJSON, policy.Metadata.PolicyEntitlement.LocationType)
@@ -76,9 +130,14 @@ func (s *IdsecPolicyGroupAccessService) CreatePolicy(createPolicy *groupaccessmo
 	if err = serializeTargets(createPolicy, policyJSON); err != nil {
 		return nil, err
 	}
+	if err = checkAccessApprovalSupported(createPolicy, policyJSON); err != nil {
+		return nil, err
+	}
+	omitEmptyAccessWindow(createPolicy, policyJSON)
 	respType := reflect.TypeOf(groupaccessmodels.IdsecPolicyGroupAccessPolicy{})
 	policyResp, err := s.baseService.BaseCreatePolicyAndWait(policyJSON, &respType, policyStatusActiveRetryCount, delayTimeInSeconds)
 	if err != nil {
+		err = wrapAccessApprovalNotSupportedErr(err, createPolicy.Conditions.AccessApproval)
 		if policyResp != nil && policyResp.PolicyID != "" {
 			s.Logger.Warning("Policy [%s] failed activation, fetching full policy for state persistence", policyResp.PolicyID)
 			if partialPolicy, fetchErr := s.Policy(&policycommonmodels.IdsecPolicyGetPolicyRequest{PolicyID: policyResp.PolicyID}); fetchErr == nil {
@@ -121,9 +180,13 @@ func (s *IdsecPolicyGroupAccessService) UpdatePolicy(updatePolicy *groupaccessmo
 	if err = serializeTargets(updatePolicy, policyJSON); err != nil {
 		return nil, err
 	}
+	if err = checkAccessApprovalSupported(updatePolicy, policyJSON); err != nil {
+		return nil, err
+	}
+	omitEmptyAccessWindow(updatePolicy, policyJSON)
 	err = s.baseService.BaseUpdatePolicy(updatePolicy.Metadata.PolicyID, policyJSON)
 	if err != nil {
-		return nil, err
+		return nil, wrapAccessApprovalNotSupportedErr(err, updatePolicy.Conditions.AccessApproval)
 	}
 	respType := reflect.TypeOf(groupaccessmodels.IdsecPolicyGroupAccessPolicy{})
 	if err = s.baseService.BaseWaitPolicyActive(updatePolicy.Metadata.PolicyID, &respType, policyStatusActiveRetryCount, delayTimeInSeconds, true, 10); err != nil {

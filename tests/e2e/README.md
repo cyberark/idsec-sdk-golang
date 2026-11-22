@@ -263,6 +263,7 @@ tests/e2e/
 │   ├── cleanup.go           # LIFO cleanup stack
 │   ├── config.go            # Environment configuration
 │   └── utils.go             # Test utilities
+├── cce/                     # CCE service tests (GCP onboardings on fixed GCP resources, see cce/.env)
 ├── pcloud/                  # PCloud service tests
 ├── sia/                     # SIA service tests
 ├── identity/                # Identity service tests

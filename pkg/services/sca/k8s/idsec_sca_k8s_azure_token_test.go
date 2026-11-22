@@ -3,6 +3,8 @@ package k8s
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,9 +41,30 @@ func TestValidateAzureCLIIdentity_MismatchNamesBothAccounts(t *testing.T) {
 	azure := testUnsignedJWT(map[string]string{"upn": "bob@tenant.com"})
 	err := validateAzureCLIIdentity("alex.morgan.int2@contoso.onmicrosoft.com", azure)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not the elevated user")
-	require.Contains(t, err.Error(), "alex.morgan.int2@contoso.onmicrosoft.com")
-	require.Contains(t, err.Error(), "bob@tenant.com")
+	require.Equal(t,
+		"Signed in as bob@tenant.com, but authentication requires the elevated user (alex.morgan.int2@contoso.onmicrosoft.com). "+
+			"To fix: run 'az logout', then az login again, using the elevated user (alex.morgan.int2@contoso.onmicrosoft.com).",
+		err.Error())
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+	fn()
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
+func TestAnnounceExpectedAzureCloudUser(t *testing.T) {
+	out := captureStderr(t, func() { announceExpectedAzureCloudUser("eva@contoso.com") })
+	require.Contains(t, out, "| INFO |")
+	require.Contains(t, out, "Azure authentication az login requires the elevated user (eva@contoso.com).")
 }
 
 // Falls back to the email claim when the token carries no UPN.

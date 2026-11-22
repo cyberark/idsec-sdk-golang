@@ -7,6 +7,8 @@ package api
 import (
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/access"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/access/assets"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/ars"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/ars/requests"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
@@ -54,6 +56,7 @@ import (
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/groupaccess"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/azure/common"
+	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/azure/helper"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sca/k8s/common"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub"
 	_ "github.com/cyberark/idsec-sdk-golang/pkg/services/sechub/configurations"

@@ -31,6 +31,9 @@ type TfIdsecCCEAzureEntra struct {
 	EntraID        string                            `json:"entraId" mapstructure:"entra_id" desc:"Microsoft Entra tenant ID."`
 	// CCEVersion is the current version of the base CCE infrastructure.
 	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
+	// CCEResources contains the CCE app ID used by the CCE infrastructure in the customer's tenant.
+	// Populated from consent_data by the backend GET endpoint; absent when no CCE app is associated.
+	CCEResources map[string]interface{} `json:"cceResources,omitempty" mapstructure:"cce_resources,omitempty" desc:"CCE resources. Contains 'appId' (string, UUID) — the Azure application ID used by the CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureEntraDatasource represents the details of an Azure Entra tenant with per-service information.
@@ -65,6 +68,11 @@ type TfIdsecCCEAzureUpdateEntra struct {
 	// CCEVersion is the optional target version for the base CCE infrastructure. nil means "not supplied":
 	// the current version is retained and no cceVersion is sent.
 	CCEVersion *string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
+	// CCEResources contains the CCE app ID used by the CCE infrastructure in the customer's tenant.
+	// nil means "not supplied": the stored app ID is retained and no cceResources is sent.
+	// A pointer is required so UpdateOnlyModified (isAbsentable) can distinguish "not supplied"
+	// from "supplied with value", matching the same pattern as CCEVersion *string.
+	CCEResources *map[string]interface{} `json:"cceResources,omitempty" mapstructure:"cce_resources,omitempty" desc:"CCE resources. Contains 'appId' (string, UUID) — the Azure application ID used by the CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureDeleteEntra is the input for deleting an Azure Entra tenant.

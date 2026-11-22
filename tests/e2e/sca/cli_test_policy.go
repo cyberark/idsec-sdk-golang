@@ -467,13 +467,15 @@ func buildAzureGroupAccessPolicyFromBodyTemplate(
 			},
 			DelegationClassification: policycommonmodels.DelegationClassificationUnrestricted,
 		},
-		Conditions: policycommonmodels.IdsecPolicyConditions{
-			AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
-				DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
-				FromHour:      "",
-				ToHour:        "",
+		Conditions: groupaccessmodels.IdsecPolicyGroupAccessConditions{
+			IdsecPolicyConditions: policycommonmodels.IdsecPolicyConditions{
+				AccessWindow: policycommonmodels.IdsecPolicyTimeCondition{
+					DaysOfTheWeek: []int{0, 1, 2, 3, 4, 5, 6},
+					FromHour:      "",
+					ToHour:        "",
+				},
+				MaxSessionDuration: 1,
 			},
-			MaxSessionDuration: 1,
 		},
 		Targets: groupaccessmodels.IdsecPolicyGroupAccessTarget{
 			Targets: []groupaccessmodels.IdsecPolicyGroupAccessTargetItem{

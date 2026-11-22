@@ -3,6 +3,7 @@ package gcp
 import (
 	"fmt"
 
+	ccemodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/common/models"
 	gcpmodels "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/gcp/models"
 	cceinternal "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/internal"
 )
@@ -45,21 +46,43 @@ func (s *IdsecCCEGCPService) tfAddProject(input *gcpmodels.TfIdsecCCEGCPAddProje
 	return project, nil
 }
 
+// takeOwnership converts a programmatic onboarding to terraform_provider when the update requests it.
+// The backend accepts service changes only when the onboarding's type is exactly the one the caller declares,
+// and Terraform always declares terraform_provider, so the conversion must happen before any service change.
+// Other onboarding types are left to the backend, which rejects them with its own error.
+// API: POST /api/manual/{id}/import
+func (s *IdsecCCEGCPService) takeOwnership(id, resourceType, currentType, requestedType string) error {
+	if currentType != ccemodels.Programmatic {
+		return nil
+	}
+	if requestedType != ccemodels.TerraformProvider {
+		return fmt.Errorf("the GCP %s [%s] was onboarded through the programmatic API; "+
+			"set onboarding_type = \"%s\" to manage it with Terraform", resourceType, id, ccemodels.TerraformProvider)
+	}
+	s.Logger.Info("Converting GCP %s [%s] from %s to %s", resourceType, id, currentType, ccemodels.TerraformProvider)
+	return s.manual().Import(id)
+}
+
 // tfUpdateProject updates a GCP Project's services.
 // Compares the desired services in the input with the current services on the Project,
 // then adds new services and removes services that are no longer desired.
-// API: POST/DELETE /api/gcp/manual/{id}/services
+// A programmatic Project is first converted to terraform_provider if input.OnboardingType requests it.
+// API: GET /api/gcp/manual/project/{id}, POST /api/manual/{id}/import, POST/DELETE /api/gcp/manual/{id}/services
 func (s *IdsecCCEGCPService) tfUpdateProject(input *gcpmodels.TfIdsecCCEGCPUpdateProject) (*gcpmodels.TfIdsecCCEGCPProject, error) {
 	s.Logger.Info("Updating GCP Project [%s]", input.ID)
 
-	// Step 1: Get current Project services (GCP doesn't support CCE version, ignore it)
-	currentServiceNames, err := s.manual().CurrentServiceNames(fmt.Sprintf(pathProjectGetURL, input.ID))
+	// Step 1: Get the current Project (GCP doesn't support CCE version, ignore it)
+	current, err := s.TfProject(&gcpmodels.TfIdsecCCEGCPGetProject{ID: input.ID})
 	if err != nil {
 		return nil, err
 	}
 
+	if err := s.takeOwnership(input.ID, "project", current.OnboardingType, input.OnboardingType); err != nil {
+		return nil, err
+	}
+
 	// Step 2: Use shared update logic to reconcile services
-	err = s.manual().UpdateServices(input.ID, currentServiceNames, input.Services, "project")
+	err = s.manual().UpdateServices(input.ID, current.Services, input.Services, "project")
 	if err != nil {
 		return nil, err
 	}
@@ -113,18 +136,23 @@ func (s *IdsecCCEGCPService) tfAddOrganization(input *gcpmodels.TfIdsecCCEGCPAdd
 // tfUpdateOrganization updates a GCP organization's services.
 // Compares the desired services in the input with the current services on the organization,
 // then adds new services and removes services that are no longer desired.
-// API: POST/DELETE /api/gcp/manual/{id}/services
+// A programmatic organization is first converted to terraform_provider if input.OnboardingType requests it.
+// API: GET /api/gcp/manual/organization/{id}, POST /api/manual/{id}/import, POST/DELETE /api/gcp/manual/{id}/services
 func (s *IdsecCCEGCPService) tfUpdateOrganization(input *gcpmodels.TfIdsecCCEGCPUpdateOrganization) (*gcpmodels.TfIdsecCCEGCPOrganization, error) {
 	s.Logger.Info("Updating GCP organization [%s]", input.ID)
 
-	// Step 1: Get current Organization services
-	currentServiceNames, err := s.manual().CurrentServiceNames(fmt.Sprintf(pathOrganizationGetURL, input.ID))
+	// Step 1: Get the current organization
+	current, err := s.TfOrganization(&gcpmodels.TfIdsecCCEGCPGetOrganization{ID: input.ID})
 	if err != nil {
 		return nil, err
 	}
 
+	if err := s.takeOwnership(input.ID, "organization", current.OnboardingType, input.OnboardingType); err != nil {
+		return nil, err
+	}
+
 	// Step 2: Use shared update logic to reconcile services
-	err = s.manual().UpdateServices(input.ID, currentServiceNames, input.Services, "organization")
+	err = s.manual().UpdateServices(input.ID, current.Services, input.Services, "organization")
 	if err != nil {
 		return nil, err
 	}

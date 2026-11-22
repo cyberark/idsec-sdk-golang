@@ -39,6 +39,9 @@ type TfIdsecCCEAzureSubscription struct {
 	ManagementGroupName string                            `json:"managementGroupName,omitempty" mapstructure:"management_group_name,omitempty" desc:"Azure management group name."`
 	// CCEVersion is the current version of the base CCE infrastructure.
 	CCEVersion string `json:"cceVersion,omitempty" mapstructure:"cce_version,omitempty" desc:"Current version of the base CCE infrastructure."`
+	// CCEResources contains the CCE app ID used by the CCE infrastructure in the customer's tenant.
+	// Populated from consent_data by the backend GET endpoint; absent when no CCE app is associated.
+	CCEResources map[string]interface{} `json:"cceResources,omitempty" mapstructure:"cce_resources,omitempty" desc:"CCE resources. Contains 'appId' (string, UUID) — the Azure application ID used by the CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureSubscriptionDatasource represents the details of an Azure Subscription with per-service information.
@@ -73,6 +76,11 @@ type TfIdsecCCEAzureUpdateSubscription struct {
 	// CCEVersion is the optional target version for the base CCE infrastructure. nil means "not supplied":
 	// the current version is retained and no cceVersion is sent.
 	CCEVersion *string `json:"cceVersion,omitempty" mapstructure:"cce_version" desc:"Target version for the base CCE infrastructure. If not specified, the current version is retained."`
+	// CCEResources contains the CCE app ID used by the CCE infrastructure in the customer's tenant.
+	// nil means "not supplied": the stored app ID is retained and no cceResources is sent.
+	// A pointer is required so UpdateOnlyModified (isAbsentable) can distinguish "not supplied"
+	// from "supplied with value", matching the same pattern as CCEVersion *string.
+	CCEResources *map[string]interface{} `json:"cceResources,omitempty" mapstructure:"cce_resources,omitempty" desc:"CCE resources. Contains 'appId' (string, UUID) — the Azure application ID used by the CCE infrastructure."`
 }
 
 // TfIdsecCCEAzureDeleteSubscription is the input for deleting an Azure Subscription.

@@ -58,6 +58,7 @@ import (
 	"github.com/cyberark/idsec-sdk-golang/pkg/services"
 
 	assets "github.com/cyberark/idsec-sdk-golang/pkg/services/access/assets"
+	requests "github.com/cyberark/idsec-sdk-golang/pkg/services/ars/requests"
 	aws "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/aws"
 	azure "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/azure"
 	gcp "github.com/cyberark/idsec-sdk-golang/pkg/services/cce/gcp"
@@ -325,6 +326,16 @@ func (api *IdsecAPI) AccessAssets() (*assets.IdsecAccessAssetsService, error) {
 		return nil, err
 	}
 	return (*service).(*assets.IdsecAccessAssetsService), nil
+}
+
+func (api *IdsecAPI) ArsRequests() (*requests.IdsecARSRequestsService, error) {
+	service, err := api.services.service(requests.ServiceConfig.ServiceName, func() (services.IdsecService, error) {
+		return requests.ServiceGenerator(api.loadServiceAuthenticators(requests.ServiceConfig)...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return (*service).(*requests.IdsecARSRequestsService), nil
 }
 
 func (api *IdsecAPI) CceAws() (*aws.IdsecCCEAWSService, error) {
